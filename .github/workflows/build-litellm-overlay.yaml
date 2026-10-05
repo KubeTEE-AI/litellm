@@ -21,13 +21,17 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kubetee-ai/litellm-database
-  # 1.103.3-kubetee.1: first kubetee overlay build. Base 1.103.3 (ecae261b10)
-  # = 1.103.2 + migration-check hardening, wolfi glibc bump, pyjwt/pypdf/
-  # tornado/urllib3/gitpython advisory bumps, streamed-chunk pricing fix.
-  # Overlay contents: kubetee_route_guard.py (block GET /v1/videos list —
-  # global store, no per-key scoping), kubetee_attestation.py (client-facing
-  # TDX attestation), sitecustomize.py (east-west client cert loading).
-  DEFAULT_TAG: 1.103.3-kubetee.1
+  # 1.103.3-kubetee.2 (2026-10-05): route guard async_pre_call_hook fixed to
+  # `async def` — kubetee.1 shipped a SYNC def; the proxy dispatch does
+  # `await callback.async_pre_call_hook(...)` -> None -> TypeError on EVERY
+  # request (gateway 500s). CI now asserts coroutine-function hooks.
+  # Base 1.103.3 (ecae261b10) = 1.103.2 + migration-check hardening, wolfi
+  # glibc bump, pyjwt/pypdf/tornado/urllib3/gitpython advisory bumps,
+  # streamed-chunk pricing fix. Overlay contents: kubetee_route_guard.py
+  # (block GET /v1/videos list — global store, no per-key scoping),
+  # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
+  # (east-west client cert loading).
+  DEFAULT_TAG: 1.103.3-kubetee.2
   DEFAULT_BASE_TAG: 1.103.3
 
 jobs:
@@ -65,6 +69,25 @@ jobs:
           grep -q 'avideo_list' kubetee_route_guard.py
           grep -q 'KubeTEERouteGuard' kubetee_route_guard.py
           grep -q 'HTTP_404_NOT_FOUND' kubetee_route_guard.py
+          # The dispatch path does `await callback.async_pre_call_hook(...)` —
+          # a SYNC def returns None and every request 500s (kubetee.1 incident
+          # 2026-10-05). Both hooks MUST be coroutine functions.
+          docker run --rm \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/overlay" \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database:${BASE_TAG} \
+            -c "
+          import sys, inspect
+          sys.path.insert(0, '/overlay')
+          from kubetee_route_guard import KubeTEERouteGuard
+          from kubetee_attestation import KubeTEEAttestationLogger
+          assert inspect.iscoroutinefunction(KubeTEERouteGuard.async_pre_call_hook), \
+              'async_pre_call_hook must be async def (awaited by proxy dispatch)'
+          assert inspect.iscoroutinefunction(KubeTEEAttestationLogger.async_post_call_response_headers_hook), \
+              'async_post_call_response_headers_hook must be async def'
+          print('hook coroutine-function check OK')
+          "
           # Attestation module must mount /v1/attestation via CustomLogger.
           grep -q 'KubeTEEAttestationLogger' kubetee_attestation.py
           grep -q '/v1/attestation' kubetee_attestation.py

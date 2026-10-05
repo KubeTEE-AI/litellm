@@ -52,7 +52,7 @@ def _is_blocked(call_type: Any) -> bool:
 class KubeTEERouteGuard(CustomLogger):
     """Rejects blocked call_types before routing. No other behavior."""
 
-    def async_pre_call_hook(
+    async def async_pre_call_hook(
         self,
         user_api_key_dict: Any,
         cache: Any,
