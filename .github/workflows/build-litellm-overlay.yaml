@@ -1,0 +1,117 @@
+name: Build and Publish LiteLLM Gateway Overlay
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag (e.g. 1.103.3-kubetee.1)"
+        required: true
+        type: string
+      base_tag:
+        description: "Upstream litellm-database tag to build on (e.g. 1.103.3)"
+        required: true
+        type: string
+  push:
+    branches:
+      - kubetee-1.103.3
+    paths:
+      - "tools/kubetee-litellm-overlay/**"
+      - ".github/workflows/build-litellm-overlay.yaml"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: kubetee-ai/litellm-database
+  # 1.103.3-kubetee.1: first kubetee overlay build. Base 1.103.3 (ecae261b10)
+  # = 1.103.2 + migration-check hardening, wolfi glibc bump, pyjwt/pypdf/
+  # tornado/urllib3/gitpython advisory bumps, streamed-chunk pricing fix.
+  # Overlay contents: kubetee_route_guard.py (block GET /v1/videos list —
+  # global store, no per-key scoping), kubetee_attestation.py (client-facing
+  # TDX attestation), sitecustomize.py (east-west client cert loading).
+  DEFAULT_TAG: 1.103.3-kubetee.1
+  DEFAULT_BASE_TAG: 1.103.3
+
+jobs:
+  build-and-push:
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout litellm fork
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "TAG=${{ inputs.tag }}" >> "$GITHUB_ENV"
+            echo "BASE_TAG=${{ inputs.base_tag }}" >> "$GITHUB_ENV"
+          else
+            echo "TAG=${DEFAULT_TAG}" >> "$GITHUB_ENV"
+            echo "BASE_TAG=${DEFAULT_BASE_TAG}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Verify overlay modules are present and non-trivial
+        run: |
+          cd tools/kubetee-litellm-overlay
+          for f in kubetee_route_guard.py kubetee_attestation.py sitecustomize.py Dockerfile; do
+            test -s "$f" || { echo "MISSING $f"; exit 1; }
+          done
+          # Route guard must block the video list call type.
+          grep -q 'avideo_list' kubetee_route_guard.py
+          grep -q 'KubeTEERouteGuard' kubetee_route_guard.py
+          grep -q 'HTTP_404_NOT_FOUND' kubetee_route_guard.py
+          # Attestation module must mount /v1/attestation via CustomLogger.
+          grep -q 'KubeTEEAttestationLogger' kubetee_attestation.py
+          grep -q '/v1/attestation' kubetee_attestation.py
+          echo "overlay modules verified"
+          sha256sum kubetee_route_guard.py kubetee_attestation.py sitecustomize.py
+
+      - name: Smoke test modules against the base image
+        run: |
+          cd tools/kubetee-litellm-overlay
+          docker pull ghcr.io/berriai/litellm-database:${BASE_TAG}
+          docker run --rm \
+            -v "$PWD:/overlay" \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database:${BASE_TAG} \
+            -c "
+          import sys
+          sys.path.insert(0, '/overlay')
+          import kubetee_route_guard
+          import kubetee_attestation
+          import sitecustomize  # noqa - runs import-time ssl patch
+          assert hasattr(kubetee_route_guard, 'kubetee_route_guard_logger')
+          assert hasattr(kubetee_attestation, 'kubetee_attestation_logger')
+          print('overlay modules import OK against base', '${BASE_TAG}')
+          "
+
+      - name: Build and push overlay image
+        run: |
+          cd tools/kubetee-litellm-overlay
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u pamanseau --password-stdin
+          docker buildx build --platform linux/amd64 \
+            --build-arg BASE_TAG=${BASE_TAG} \
+            -f Dockerfile \
+            -t ${REGISTRY}/${IMAGE_NAME}:${TAG} \
+            --push \
+            .
+          echo "Pushed ${REGISTRY}/${IMAGE_NAME}:${TAG}"
+
+      - name: Verify pushed image
+        run: |
+          docker pull ${REGISTRY}/${IMAGE_NAME}:${TAG}
+          # Modules land in the venv site-packages the proxy runs with.
+          docker run --rm --entrypoint /app/.venv/bin/python \
+            ${REGISTRY}/${IMAGE_NAME}:${TAG} \
+            -c "import kubetee_route_guard, kubetee_attestation, sitecustomize; print('verify: import OK')"
+          docker run --rm --entrypoint /app/.venv/bin/python \
+            ${REGISTRY}/${IMAGE_NAME}:${TAG} \
+            -c "
+          from pathlib import Path
+          p = Path('/app/.venv/lib/python3.13/site-packages')
+          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'sitecustomize.py'):
+              f = p / m
+              assert f.is_file(), f'MISSING {m}'
+              print(m, f.stat().st_size, 'bytes')
+          "
+          echo "image ${REGISTRY}/${IMAGE_NAME}:${TAG} verified"
