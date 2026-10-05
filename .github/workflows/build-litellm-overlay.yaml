@@ -88,7 +88,7 @@ jobs:
       - name: Build and push overlay image
         run: |
           cd tools/kubetee-litellm-overlay
-          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u pamanseau --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u KubeTEE-AI --password-stdin
           docker buildx build --platform linux/amd64 \
             --build-arg BASE_TAG=${BASE_TAG} \
             -f Dockerfile \
