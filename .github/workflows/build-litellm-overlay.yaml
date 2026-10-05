@@ -59,6 +59,10 @@ jobs:
             echo "BASE_TAG=${DEFAULT_BASE_TAG}" >> "$GITHUB_ENV"
           fi
 
+      - name: Login to ghcr (authenticated pulls — anonymous is IP-rate-limited)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u KubeTEE-AI --password-stdin
+
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
@@ -117,7 +121,6 @@ jobs:
       - name: Build and push overlay image
         run: |
           cd tools/kubetee-litellm-overlay
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u KubeTEE-AI --password-stdin
           docker buildx build --platform linux/amd64 \
             --build-arg BASE_TAG=${BASE_TAG} \
             -f Dockerfile \
