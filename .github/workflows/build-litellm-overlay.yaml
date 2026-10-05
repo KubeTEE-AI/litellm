@@ -21,6 +21,13 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kubetee-ai/litellm-database
+  # 1.103.3-kubetee.3 (2026-10-05): adds kubetee_pricing.py — static
+  # cost-map entries (litellm.register_model, persist_across_reloads) so
+  # image-generation spend tracks $0.05/image under the honest FLUX.2-klein
+  # model name on 1.103.x (deployment input_cost_per_image is ignored for
+  # images pre-#39311/1.104.0). DB row c4eb8424 migrated off the dall-e-2
+  # masquerade the same day; drop this module one release after the base
+  # moves to >= 1.104.
   # 1.103.3-kubetee.2 (2026-10-05): route guard async_pre_call_hook fixed to
   # `async def` — kubetee.1 shipped a SYNC def; the proxy dispatch does
   # `await callback.async_pre_call_hook(...)` -> None -> TypeError on EVERY
@@ -31,7 +38,7 @@ env:
   # (block GET /v1/videos list — global store, no per-key scoping),
   # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
   # (east-west client cert loading).
-  DEFAULT_TAG: 1.103.3-kubetee.2
+  DEFAULT_TAG: 1.103.3-kubetee.3
   DEFAULT_BASE_TAG: 1.103.3
 
 jobs:
@@ -66,9 +73,14 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py sitecustomize.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
+          # Pricing module must register the static FLUX cost-map entries.
+          grep -q 'STATIC_MODEL_COST' kubetee_pricing.py
+          grep -q 'register_model' kubetee_pricing.py
+          grep -q 'persist_across_reloads' kubetee_pricing.py
+          grep -q 'input_cost_per_image' kubetee_pricing.py
           # Route guard must block the video list call type.
           grep -q 'avideo_list' kubetee_route_guard.py
           grep -q 'KubeTEERouteGuard' kubetee_route_guard.py
@@ -96,7 +108,7 @@ jobs:
           grep -q 'KubeTEEAttestationLogger' kubetee_attestation.py
           grep -q '/v1/attestation' kubetee_attestation.py
           echo "overlay modules verified"
-          sha256sum kubetee_route_guard.py kubetee_attestation.py sitecustomize.py
+          sha256sum kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py
 
       - name: Smoke test modules against the base image
         run: |
@@ -113,8 +125,10 @@ jobs:
           import kubetee_route_guard
           import kubetee_attestation
           import sitecustomize  # noqa - runs import-time ssl patch
+          import kubetee_pricing  # noqa - runs import-time register_model
           assert hasattr(kubetee_route_guard, 'kubetee_route_guard_logger')
           assert hasattr(kubetee_attestation, 'kubetee_attestation_logger')
+          assert hasattr(kubetee_pricing, 'kubetee_pricing_logger')
           print('overlay modules import OK against base', '${BASE_TAG}')
           "
 
@@ -135,13 +149,13 @@ jobs:
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            -c "import kubetee_route_guard, kubetee_attestation, sitecustomize; print('verify: import OK')"
+            -c "import kubetee_route_guard, kubetee_attestation, sitecustomize, kubetee_pricing; print('verify: import OK')"
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
             -c "
           from pathlib import Path
           p = Path('/app/.venv/lib/python3.13/site-packages')
-          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'sitecustomize.py'):
+          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'sitecustomize.py', 'kubetee_pricing.py'):
               f = p / m
               assert f.is_file(), f'MISSING {m}'
               print(m, f.stat().st_size, 'bytes')

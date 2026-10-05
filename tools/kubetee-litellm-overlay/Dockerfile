@@ -25,4 +25,7 @@ FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 # kubetee_attestation.py: GET /v1/attestation + inline X-KubeTEE-Nonce evidence.
 # sitecustomize.py: east-west client-cert chain for httpx 0.28 (ssl_verify CA
 #   path + load_cert_chain into the shared SSLContext).
-COPY kubetee_route_guard.py kubetee_attestation.py sitecustomize.py /app/.venv/lib/python3.13/site-packages/
+# kubetee_pricing.py: static cost-map entries so image-generation spend
+#   tracks under honest model names on 1.103.x (upstream fix #39311 is
+#   1.104+ only; keep one release after the base bump, then drop).
+COPY kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py /app/.venv/lib/python3.13/site-packages/

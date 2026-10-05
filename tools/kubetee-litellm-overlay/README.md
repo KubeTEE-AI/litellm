@@ -36,6 +36,7 @@ into an image built from this repo closes that gap.
 | `kubetee_route_guard.py` | Blocks `GET /v1/videos` (list) for every key incl. admin. The backend (`vllm-omni`) serves the list from a global in-memory store with no per-key scoping — any authenticated key could enumerate every tenant's video jobs. `CustomLogger.async_pre_call_hook` fires on `call_type="avideo_list"` before routing; raising `HTTPException(404)` there converts to a clean client-facing `ProxyException`. Create/status/content by unguessable ID remain open. |
 | `kubetee_attestation.py` | Client-facing TDX attestation (`GET /v1/attestation?nonce=`, inline `X-KubeTEE-Nonce` on chat, TLS-possession proof). Identical bytes to the root repo's `nim/eastwest/kubetee_attestation.py` at the time of the first build. |
 | `sitecustomize.py` | Loads the east-west client chain into the shared SSLContext when `ssl.create_default_context` is called with the east-west CA. |
+| `kubetee_pricing.py` | Static `litellm.model_cost` entries (import-time `litellm.register_model`, `persist_across_reloads=True`) so image-generation spend tracks under honest model names on 1.103.x. Stock 1.103.x ignores the deployment's `input_cost_per_image` for image calls (`default_image_cost_calculator` reads static keys only); upstream fixed in #39311 (first in 1.104.0). Currently carries `black-forest-labs/FLUX.2-klein-4B` @ $0.05/image (DB row `c4eb8424`, migrated off the `dall-e-2` masquerade 2026-10-05). **Drop this module one release after the base bumps to >= 1.104** — the DB row's `input_cost_per_image` then takes over. |
 
 ## Registration
 
@@ -47,11 +48,15 @@ proxy_config:
   litellm_settings:
     callbacks: ["dynamic_rate_limiter_v3", "prometheus",
                 "kubetee_attestation.kubetee_attestation_logger",
-                "kubetee_route_guard.kubetee_route_guard_logger"]
+                "kubetee_route_guard.kubetee_route_guard_logger",
+                "kubetee_pricing.kubetee_pricing_logger"]
 ```
 
 Registration is import-time; the entry point instance names are
-`kubetee_attestation_logger` and `kubetee_route_guard_logger`.
+`kubetee_attestation_logger`, `kubetee_route_guard_logger`, and
+`kubetee_pricing_logger`. (For `kubetee_pricing` the callback
+registration is what triggers the import — the `register_model` call in
+module scope is the actual feature.)
 
 ## Tags
 
