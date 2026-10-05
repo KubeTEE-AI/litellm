@@ -37,6 +37,11 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Clean root-owned leftovers from prior runs
+        run: |
+          sudo rm -rf tools/kubetee-litellm-overlay/__pycache__ || true
+          sudo chown -R $(id -u):$(id -g) . 2>/dev/null || true
+
       - name: Checkout litellm fork
         uses: actions/checkout@v4
 
@@ -71,6 +76,7 @@ jobs:
           cd tools/kubetee-litellm-overlay
           docker pull ghcr.io/berriai/litellm-database:${BASE_TAG}
           docker run --rm \
+            -e PYTHONDONTWRITEBYTECODE=1 \
             -v "$PWD:/overlay" \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database:${BASE_TAG} \
