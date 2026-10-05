@@ -21,6 +21,13 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kubetee-ai/litellm-database
+  # 1.103.3-kubetee.4 (2026-10-06): kubetee_pricing adds the MiniMax-H3
+  # video entry (output_cost_per_video_per_second 0.08) — video spend was $0
+  # on the litellm_params-only row shape (a1a6a889): get_litellm_params()
+  # drops the key, use_custom_pricing_for_model never opens, and the
+  # get_model_info() fallback raised ModelNotMappedError (proxy swallows
+  # cost exceptions -> $0). Static entry makes both row shapes bill
+  # 0.08/s * duration.
   # 1.103.3-kubetee.3 (2026-10-05): adds kubetee_pricing.py — static
   # cost-map entries (litellm.register_model, persist_across_reloads) so
   # image-generation spend tracks $0.05/image under the honest FLUX.2-klein
@@ -38,7 +45,7 @@ env:
   # (block GET /v1/videos list — global store, no per-key scoping),
   # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
   # (east-west client cert loading).
-  DEFAULT_TAG: 1.103.3-kubetee.3
+  DEFAULT_TAG: 1.103.3-kubetee.4
   DEFAULT_BASE_TAG: 1.103.3
 
 jobs:
@@ -76,11 +83,14 @@ jobs:
           for f in kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
-          # Pricing module must register the static FLUX cost-map entries.
+          # Pricing module must register the static FLUX + MiniMax-H3 cost-map
+          # entries.
           grep -q 'STATIC_MODEL_COST' kubetee_pricing.py
           grep -q 'register_model' kubetee_pricing.py
           grep -q 'persist_across_reloads' kubetee_pricing.py
           grep -q 'input_cost_per_image' kubetee_pricing.py
+          grep -q 'output_cost_per_video_per_second' kubetee_pricing.py
+          grep -q 'MiniMax-H3' kubetee_pricing.py
           # Route guard must block the video list call type.
           grep -q 'avideo_list' kubetee_route_guard.py
           grep -q 'KubeTEERouteGuard' kubetee_route_guard.py

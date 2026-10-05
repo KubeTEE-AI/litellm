@@ -10,9 +10,9 @@
 #
 # What it does
 # ------------
-# Registers per-image prices under the exact `litellm.model_cost` keys that
-# `default_image_cost_calculator` probes, so image-generation spend tracks
-# correctly under honest (non-masqueraded) model names.
+# Registers per-image/per-video prices under the exact `litellm.model_cost`
+# keys that the stock calculators probe, so image- and video-generation
+# spend tracks correctly under honest (non-masqueraded) model names.
 #
 # Why (Belarel audit #11 + 2026-10-05 migration)
 # ----------------------------------------------
@@ -65,10 +65,33 @@ from litellm.integrations.custom_logger import CustomLogger
 # is "hosted_vllm/black-forest-labs/FLUX.2-klein-4B" (register_model remaps
 # the provider-prefixed spelling onto the same entry, so one key suffices).
 # The calculator multiplies by n.
+#
+# MiniMax-H3 entry (2026-10-06, video): video_generation_cost only honors
+# deployment pricing when use_custom_pricing_for_model() is True, and that
+# gate never opens for video on 1.103.x — Logging.__init__ builds
+# litellm_params via get_litellm_params(), whose fixed signature +
+# OPTIONAL_KWARGS_KEYS allowlist DROPS output_cost_per_video_per_second
+# (in CustomPricingLiteLLMParams but not MirroredPricingParams, so
+# Deployment.__init__ never mirrors it into model_info either). The price
+# then survives only in the DB-stored model_info blob stamped into
+# metadata.model_info — which the admin API cannot even write
+# (without_server_derived_pricing strips it from every POST /model/new and
+# PATCH /model/update). This static entry fills the get_model_info()
+# fallback so spend = 0.08 * duration_seconds regardless of which
+# deployment serves the call. Retire both entries at the next base bump
+# that fixes the video gate (upstream #44458 is transcription-only).
 STATIC_MODEL_COST = {
     "black-forest-labs/FLUX.2-klein-4B": {
         "input_cost_per_image": 0.05,
         "mode": "image",
+        "litellm_provider": "hosted_vllm",
+    },
+    # H3 4s = $0.32 (verified: dc3cd142 stored-model_info shape bills
+    # 0.32 without this entry; a1a6a889 litellm_params-only shape bills 0.0
+    # — this entry makes both bill 0.32).
+    "MiniMax-H3": {
+        "output_cost_per_video_per_second": 0.08,
+        "mode": "video_generation",
         "litellm_provider": "hosted_vllm",
     },
 }
