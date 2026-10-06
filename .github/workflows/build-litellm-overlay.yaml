@@ -21,6 +21,12 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kubetee-ai/litellm-database
+  # 1.103.3-kubetee.7 (2026-10-06): GLM-5.2 low/medium/minimal now MAP to
+  # high instead of 400 — a live client sent effort=low on z-ai/glm-5.2 and
+  # was rejected ("reasoning_effort='low' is not supported"). The 5.2
+  # template accepts high/max only and coerces everything else to max, so
+  # "high" is the only faithful downgrade path for clients asking for less
+  # thinking; "none" keeps the native enable_thinking=False toggle.
   # 1.103.3-kubetee.6 (2026-10-06): kubetee_glm_effort posture revised
   # after checking the zai-org model cards — the GLM-5.3 card documents
   # any-other-value -> max ("defaults to max if not passed (or if set to
@@ -59,7 +65,7 @@ env:
   # (block GET /v1/videos list — global store, no per-key scoping),
   # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
   # (east-west client cert loading).
-  DEFAULT_TAG: 1.103.3-kubetee.6
+  DEFAULT_TAG: 1.103.3-kubetee.7
   DEFAULT_BASE_TAG: 1.103.3
 
 jobs:

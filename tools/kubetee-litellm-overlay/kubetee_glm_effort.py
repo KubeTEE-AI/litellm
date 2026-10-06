@@ -49,10 +49,17 @@
 #     none              -> chat_template_kwargs["enable_thinking"] = False
 #                           (native no-think), top-level effort dropped so
 #                           the template does not coerce it to "max"
+#     low | medium | minimal | * -> mapped to "high" — GLM-5.2's template
+#                           accepts high/max ONLY, and silently coerces every
+#                           other value to max. Rejecting low/medium with a
+#                           400 (kubetee.6) broke real SDK traffic whose
+#                           clients default to those values, and letting them
+#                           fall through to the backend would inflate cost
+#                           (max thinking on every call). Mapping to high —
+#                           the lowest ACTIVE thinking tier — honors the
+#                           client's "less thinking" intent without the
+#                           invented-semantics 400. max stays pass-through.
 #     high | max        -> pass through
-#     medium | minimal | * -> 400 (the 5.2 template accepts high/max only;
-#                           mapping medium to a thinking level would be our
-#                           invention — reject with the supported list)
 #
 # How: CustomLogger.async_pre_call_hook fires inside
 # base_process_llm_request BEFORE provider routing. Mutating `data` in place
@@ -68,6 +75,12 @@
 # the strict rejection (medium->high would be invented semantics). "none"
 # stays a hard 400 on GLM-5.3 — it is the one value a client legitimately
 # expects to suppress thinking, and silent max there is a cost/latency trap.
+# 2026-10-06 revision 2 (kubetee.7): GLM-5.2 low/medium/minimal now MAP to
+# high instead of 400 — a live client sent effort=low and was rejected
+# ("reasoning_effort='low' is not supported on z-ai/glm-5.2"). The 5.2
+# template only accepts high/max (everything else coerces to max), so
+# "high" is the only faithful downgrade path for a client asking for less
+# thinking. "none" keeps the native enable_thinking=False toggle.
 
 from typing import Any
 
@@ -80,7 +93,10 @@ from litellm.integrations.custom_logger import CustomLogger
 _GLM53_MODELS = frozenset({"glm-5.3", "glm-5.3-flash"})
 _GLM52_MODELS = frozenset({"glm-5.2"})
 _GLM53_EFFORTS = ("low", "high", "max")
-_GLM52_EFFORTS = ("high", "max", "none")
+# Everything else on 5.2 (low/medium/minimal/unknown) maps to "high" — the
+# lowest ACTIVE thinking tier the 5.2 template accepts. "none" is handled
+# separately via enable_thinking=False.
+_GLM52_PASS_EFFORTS = ("high", "max")
 
 
 def _model_segment(model: Any) -> str:
@@ -167,12 +183,19 @@ class KubeTEEGlmEffort(CustomLogger):
                 optional.pop("reasoning_effort", None)
             data.pop("reasoning_effort", None)
             return
-        if effort in _GLM52_EFFORTS:
+        if effort in _GLM52_PASS_EFFORTS:
             return
-        # GLM-5.2: high/max/none only. medium/minimal/low are NOT in the
-        # template's accepted set and mapping them to a thinking level would
-        # be invented semantics — reject with the supported list.
-        _reject(data.get("model"), effort, _GLM52_EFFORTS)
+        # low/medium/minimal/unknown on GLM-5.2: the template accepts
+        # high/max only and silently coerces everything else to max — a
+        # client asking for "low" would get max thinking (cost blowup) or
+        # a 400 (kubetee.6, broke real traffic). Map to "high" — the lowest
+        # ACTIVE tier — so the request runs with reduced thinking, exactly
+        # the intent of every common "low/medium" default.
+        data["reasoning_effort"] = "high"
+        optional = data.get("optional_params")
+        if isinstance(optional, dict):
+            optional["reasoning_effort"] = "high"
+        return
 
 
 kubetee_glm_effort_logger = KubeTEEGlmEffort()
