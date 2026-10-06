@@ -36,13 +36,23 @@
 # The mapping enforced here:
 #   glm-5.3 / glm-5.3-flash:
 #     low | high | max   -> pass through unchanged (template honors natively)
-#     none | minimal | * -> 400 (model always reasons; cannot disable)
+#     medium | minimal | * -> mapped to "max" — the OFFICIAL card semantics:
+#                           "defaults to max if not passed (or if set to any
+#                           other value)" (zai-org/GLM-5.3 README, Note §1).
+#                           No 400: z.ai's own contract is silent fallback,
+#                           and SDKs that default to medium must keep working.
+#     none              -> 400 (always-on reasoner; "none" on v0.5.20 is a
+#                           deterministic degenerate reasoning loop, and a
+#                           client asking for NO thinking must be told, not
+#                           silently maxed)
 #   glm-5.2:
 #     none              -> chat_template_kwargs["enable_thinking"] = False
 #                           (native no-think), top-level effort dropped so
 #                           the template does not coerce it to "max"
 #     high | max        -> pass through
-#     low | minimal | * -> 400
+#     medium | minimal | * -> 400 (the 5.2 template accepts high/max only;
+#                           mapping medium to a thinking level would be our
+#                           invention — reject with the supported list)
 #
 # How: CustomLogger.async_pre_call_hook fires inside
 # base_process_llm_request BEFORE provider routing. Mutating `data` in place
@@ -51,6 +61,13 @@
 # Relevant upstream SGLang context: #39227 (glm53 always-think parsing rule),
 # #37524 (GLM-5.3 tracker), #40843/#41939 (degenerate reasoning loops on
 # B200 + spec decode), #33155 (top-level enable_thinking still unmerged).
+# 2026-10-06 revision: real traffic (SDKs defaulting to effort=medium) hit
+# the original strict 400s within the hour. Posture re-checked against the
+# zai-org model cards and revised: GLM-5.3 follows the card's documented
+# any-other-value->max fallback (medium/minimal pass as max); GLM-5.2 keeps
+# the strict rejection (medium->high would be invented semantics). "none"
+# stays a hard 400 on GLM-5.3 — it is the one value a client legitimately
+# expects to suppress thinking, and silent max there is a cost/latency trap.
 
 from typing import Any
 
@@ -123,7 +140,20 @@ class KubeTEEGlmEffort(CustomLogger):
             if effort in _GLM53_EFFORTS:
                 # Template honors low/high/max natively — pass through.
                 return
-            _reject(data.get("model"), effort, _GLM53_EFFORTS)
+            if effort == "none":
+                # The one value a client expects to suppress thinking.
+                # GLM-5.3 cannot — tell them, don't silently max (a 2000-token
+                # degenerate reasoning loop on v0.5.20, and a cost trap on all).
+                _reject(data.get("model"), effort, _GLM53_EFFORTS)
+            # Card semantics (zai-org/GLM-5.3 README): "defaults to max if
+            # not passed (or if set to any other value)". medium/minimal/
+            # anything else -> max, no error — SDKs defaulting to medium
+            # keep working exactly as they would against z.ai directly.
+            data["reasoning_effort"] = "max"
+            optional = data.get("optional_params")
+            if isinstance(optional, dict):
+                optional["reasoning_effort"] = "max"
+            return
 
         # GLM-5.2: honor "none" via the template's native enable_thinking.
         if effort == "none":
@@ -139,6 +169,9 @@ class KubeTEEGlmEffort(CustomLogger):
             return
         if effort in _GLM52_EFFORTS:
             return
+        # GLM-5.2: high/max/none only. medium/minimal/low are NOT in the
+        # template's accepted set and mapping them to a thinking level would
+        # be invented semantics — reject with the supported list.
         _reject(data.get("model"), effort, _GLM52_EFFORTS)
 
 

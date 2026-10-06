@@ -21,11 +21,19 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kubetee-ai/litellm-database
+  # 1.103.3-kubetee.6 (2026-10-06): kubetee_glm_effort posture revised
+  # after checking the zai-org model cards — the GLM-5.3 card documents
+  # any-other-value -> max ("defaults to max if not passed (or if set to
+  # any other value)"), so medium/minimal/unknown on the glm-5.3 family now
+  # MAP to max instead of 400 (SDKs defaulting to medium were being
+  # rejected within the hour of kubetee.5 shipping). "none" stays a hard
+  # 400 (the one value a client expects to suppress thinking). glm-5.2
+  # unchanged: high/max/none only, no invented mappings.
   # 1.103.3-kubetee.5 (2026-10-06): adds kubetee_glm_effort.py —
   # validates/maps reasoning_effort for GLM models (Belarel audit item 10):
-  # glm-5.3 family rejects none/minimal/unknown with 400 (always-on
-  # reasoners; the template coerces them to max, and v0.5.20 degenerate-loops
-  # on "none"); glm-5.2 honors "none" via the native enable_thinking toggle;
+  # glm-5.3 family rejects none with 400 (always-on reasoners; the template
+  # coerces them to max, and v0.5.20 degenerate-loops on "none");
+  # glm-5.2 honors "none" via the native enable_thinking toggle;
   # low/high/max pass through (verified live at temperature 0).
   # 1.103.3-kubetee.4 (2026-10-06): kubetee_pricing adds the MiniMax-H3
   # video entry (output_cost_per_video_per_second 0.08) — video spend was $0
@@ -51,7 +59,7 @@ env:
   # (block GET /v1/videos list — global store, no per-key scoping),
   # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
   # (east-west client cert loading).
-  DEFAULT_TAG: 1.103.3-kubetee.5
+  DEFAULT_TAG: 1.103.3-kubetee.6
   DEFAULT_BASE_TAG: 1.103.3
 
 jobs:
