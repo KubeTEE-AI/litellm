@@ -21,6 +21,12 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kubetee-ai/litellm-database
+  # 1.103.3-kubetee.5 (2026-10-06): adds kubetee_glm_effort.py —
+  # validates/maps reasoning_effort for GLM models (Belarel audit item 10):
+  # glm-5.3 family rejects none/minimal/unknown with 400 (always-on
+  # reasoners; the template coerces them to max, and v0.5.20 degenerate-loops
+  # on "none"); glm-5.2 honors "none" via the native enable_thinking toggle;
+  # low/high/max pass through (verified live at temperature 0).
   # 1.103.3-kubetee.4 (2026-10-06): kubetee_pricing adds the MiniMax-H3
   # video entry (output_cost_per_video_per_second 0.08) — video spend was $0
   # on the litellm_params-only row shape (a1a6a889): get_litellm_params()
@@ -45,7 +51,7 @@ env:
   # (block GET /v1/videos list — global store, no per-key scoping),
   # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
   # (east-west client cert loading).
-  DEFAULT_TAG: 1.103.3-kubetee.4
+  DEFAULT_TAG: 1.103.3-kubetee.5
   DEFAULT_BASE_TAG: 1.103.3
 
 jobs:
@@ -80,7 +86,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           # Pricing module must register the static FLUX + MiniMax-H3 cost-map
@@ -95,6 +101,10 @@ jobs:
           grep -q 'avideo_list' kubetee_route_guard.py
           grep -q 'KubeTEERouteGuard' kubetee_route_guard.py
           grep -q 'HTTP_404_NOT_FOUND' kubetee_route_guard.py
+          # GLM effort module must validate + map, and its hook must be async.
+          grep -q 'KubeTEEGlmEffort' kubetee_glm_effort.py
+          grep -q 'reasoning_effort_not_supported' kubetee_glm_effort.py
+          grep -q 'enable_thinking' kubetee_glm_effort.py
           # The dispatch path does `await callback.async_pre_call_hook(...)` —
           # a SYNC def returns None and every request 500s (kubetee.1 incident
           # 2026-10-05). Both hooks MUST be coroutine functions.
@@ -108,8 +118,11 @@ jobs:
           sys.path.insert(0, '/overlay')
           from kubetee_route_guard import KubeTEERouteGuard
           from kubetee_attestation import KubeTEEAttestationLogger
+          from kubetee_glm_effort import KubeTEEGlmEffort
           assert inspect.iscoroutinefunction(KubeTEERouteGuard.async_pre_call_hook), \
               'async_pre_call_hook must be async def (awaited by proxy dispatch)'
+          assert inspect.iscoroutinefunction(KubeTEEGlmEffort.async_pre_call_hook), \
+              'glm effort async_pre_call_hook must be async def'
           assert inspect.iscoroutinefunction(KubeTEEAttestationLogger.async_post_call_response_headers_hook), \
               'async_post_call_response_headers_hook must be async def'
           print('hook coroutine-function check OK')
@@ -136,9 +149,11 @@ jobs:
           import kubetee_attestation
           import sitecustomize  # noqa - runs import-time ssl patch
           import kubetee_pricing  # noqa - runs import-time register_model
+          import kubetee_glm_effort  # noqa - request-path validation
           assert hasattr(kubetee_route_guard, 'kubetee_route_guard_logger')
           assert hasattr(kubetee_attestation, 'kubetee_attestation_logger')
           assert hasattr(kubetee_pricing, 'kubetee_pricing_logger')
+          assert hasattr(kubetee_glm_effort, 'kubetee_glm_effort_logger')
           print('overlay modules import OK against base', '${BASE_TAG}')
           "
 
@@ -159,13 +174,13 @@ jobs:
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            -c "import kubetee_route_guard, kubetee_attestation, sitecustomize, kubetee_pricing; print('verify: import OK')"
+            -c "import kubetee_route_guard, kubetee_attestation, sitecustomize, kubetee_pricing, kubetee_glm_effort; print('verify: import OK')"
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
             -c "
           from pathlib import Path
           p = Path('/app/.venv/lib/python3.13/site-packages')
-          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'sitecustomize.py', 'kubetee_pricing.py'):
+          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'sitecustomize.py', 'kubetee_pricing.py', 'kubetee_glm_effort.py'):
               f = p / m
               assert f.is_file(), f'MISSING {m}'
               print(m, f.stat().st_size, 'bytes')

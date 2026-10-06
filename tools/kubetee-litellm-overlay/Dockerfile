@@ -28,4 +28,10 @@ FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 # kubetee_pricing.py: static cost-map entries so image-generation spend
 #   tracks under honest model names on 1.103.x (upstream fix #39311 is
 #   1.104+ only; keep one release after the base bump, then drop).
-COPY kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py /app/.venv/lib/python3.13/site-packages/
+# kubetee_glm_effort.py: validates/maps reasoning_effort for GLM models
+#   (Belarel audit item 10). GLM-5.3/Flash are always-on reasoners — the
+#   chat template only accepts low/high/max and silently coerces anything
+#   else (incl. "none") to "max"; the hook 400s unsupported values.
+#   GLM-5.2 keeps the native enable_thinking toggle: "none" maps to
+#   chat_template_kwargs={"enable_thinking": false} and is honored.
+COPY kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py /app/.venv/lib/python3.13/site-packages/
