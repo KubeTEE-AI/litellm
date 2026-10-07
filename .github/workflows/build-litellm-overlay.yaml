@@ -21,6 +21,14 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kubetee-ai/litellm-database
+  # 1.103.3-kubetee.8 (2026-10-07): route guard also 404s video STATUS/
+  # CONTENT polls whose video_id cannot resolve to a router deployment
+  # (raw/unresolvable ids). Hit via Belarel 2026-10-06: 148x 500
+  # "Cannot connect to api.openai.com:443 [SSLCertVerificationError]" —
+  # unresolvable id -> provider defaults to "openai" -> direct
+  # litellm.avideo_status dials api.openai.com -> TLS verify fails (TDX pod
+  # trusts only the east-west CA). 404 video_not_found avoids the outbound
+  # call entirely; gateway-issued ids still poll normally.
   # 1.103.3-kubetee.7 (2026-10-06): GLM-5.2 low/medium/minimal now MAP to
   # high instead of 400 — a live client sent effort=low on z-ai/glm-5.2 and
   # was rejected ("reasoning_effort='low' is not supported"). The 5.2
@@ -65,7 +73,7 @@ env:
   # (block GET /v1/videos list — global store, no per-key scoping),
   # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
   # (east-west client cert loading).
-  DEFAULT_TAG: 1.103.3-kubetee.7
+  DEFAULT_TAG: 1.103.3-kubetee.8
   DEFAULT_BASE_TAG: 1.103.3
 
 jobs:
