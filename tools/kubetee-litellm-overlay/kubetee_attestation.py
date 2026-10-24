@@ -41,6 +41,10 @@
 # Non-JSON runtime_data is echoed by ITA as attester_runtime_data /
 # attester_held_data claims in the token.
 #
+# The payload additionally serves the kubetee.attestation.v1 statement and
+# keyset (kubetee_binding.py, spec section 4) while REPORTDATA stays
+# SHA512(nonce); report_data_input names the active construction.
+#
 # Auth: LiteLLM attaches user_api_key_auth to routes it knows; a custom
 # app.add_api_route endpoint does NOT get the auth dependency by default —
 # it is public on the guest network. The endpoint discloses no secrets
@@ -54,6 +58,7 @@ import re
 import socket
 from typing import Any
 
+import kubetee_binding
 from litellm.integrations.custom_logger import CustomLogger
 
 _NONCE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -61,6 +66,7 @@ _AA_BASE = os.environ.get("KUBETEE_AA_BASE", "http://127.0.0.1:8006")
 _NONCE_HEADER = "x-kubetee-nonce"
 _TLS_KEY_PATH = os.environ.get("KUBETEE_TLS_KEY", "/etc/tls/tls.key")
 _TLS_CERT_PATH = os.environ.get("KUBETEE_TLS_CERT", "/etc/tls/tls.crt")
+_TLS_DOMAIN = os.environ.get("KUBETEE_TLS_DOMAIN", "llm.kubetee.ai")
 
 
 def _pod_name() -> str | None:
@@ -132,6 +138,25 @@ def _tls_possession_proof(nonce: str) -> dict | None:
         return None
 
 
+def _binding_bundle(
+    nonce: str,
+) -> tuple[dict[str, kubetee_binding.JsonTree], kubetee_binding.Binding] | None:
+    """Served keyset (spec section 5) + v1 binding for this nonce, or None.
+
+    Additive until the gateway flip: REPORTDATA stays SHA512(nonce) and
+    these fields ride along for verifiers moving to the v1 construction
+    (report_data_input names the active construction). At the flip the
+    binding becomes mandatory and this fails closed.
+    """
+    try:
+        with open(_TLS_CERT_PATH, "rb") as f:
+            cert_pem = f.read()
+        keyset = kubetee_binding.keyset_from_cert_pem(cert_pem, _TLS_DOMAIN)
+    except Exception:
+        return None
+    return keyset, kubetee_binding.build_binding(keyset, nonce)
+
+
 async def _aa_get_evidence(runtime_data_b64url: str) -> dict:
     """Call in-guest /aa/evidence; parse the TdxEvidence JSON envelope.
 
@@ -170,6 +195,7 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
 
     evidence = await _aa_get_evidence(report_data_b64url)
 
+    bundle = _binding_bundle(raw_nonce)
     payload: dict[str, Any] = {
         "nonce": raw_nonce,
         "report_data_input": "sha512(nonce)",
@@ -178,6 +204,14 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
         "tee": "tdx",
         "runtime_class": "kata-qemu-tdx-runtime-rs",
     }
+    if bundle is not None:
+        keyset, binding = bundle
+        payload["keyset"] = keyset
+        payload["bindings"] = {
+            "version": binding.version,
+            "report_data_statement": binding.statement,
+            "keyset_digest": binding.keyset_digest,
+        }
     tls_proof = _tls_possession_proof(raw_nonce)
     if tls_proof is not None:
         payload["tls_possession"] = tls_proof
@@ -333,11 +367,16 @@ class KubeTEEAttestationLogger(CustomLogger):
         if not quote:
             return {"X-KubeTEE-Attestation-Error": "empty quote"}
 
+        bundle = _binding_bundle(raw_nonce)
         out = {
             "X-KubeTEE-Nonce": raw_nonce,
             "X-KubeTEE-Attestation-Quote": quote,
             "X-KubeTEE-Attestation-Tee": "tdx",
         }
+        if bundle is not None:
+            _, binding = bundle
+            out["X-KubeTEE-Binding-Statement"] = binding.statement
+            out["X-KubeTEE-Binding-Keyset-Digest"] = binding.keyset_digest
         tls_proof = _tls_possession_proof(raw_nonce)
         if tls_proof is not None:
             out["X-KubeTEE-TLS-Signature"] = tls_proof["tls_signature"]

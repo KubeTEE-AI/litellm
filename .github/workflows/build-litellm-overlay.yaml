@@ -73,7 +73,7 @@ env:
   # (block GET /v1/videos list — global store, no per-key scoping),
   # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
   # (east-west client cert loading).
-  DEFAULT_TAG: 1.103.3-kubetee.8
+  DEFAULT_TAG: 1.103.3-kubetee.9
   DEFAULT_BASE_TAG: 1.103.3
 
 jobs:
@@ -108,7 +108,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           # Pricing module must register the static FLUX + MiniMax-H3 cost-map
@@ -152,8 +152,12 @@ jobs:
           # Attestation module must mount /v1/attestation via CustomLogger.
           grep -q 'KubeTEEAttestationLogger' kubetee_attestation.py
           grep -q '/v1/attestation' kubetee_attestation.py
+          # Binding module must carry the v1 construction + its pinned purpose tag.
+          grep -q 'kubetee.attestation.v1' kubetee_binding.py
+          grep -q 'report_data_statement' kubetee_binding.py
+          grep -q 'zero-padded' kubetee_binding.py
           echo "overlay modules verified"
-          sha256sum kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py
+          sha256sum kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py sitecustomize.py kubetee_pricing.py
 
       - name: Smoke test modules against the base image
         run: |
@@ -169,6 +173,7 @@ jobs:
           sys.path.insert(0, '/overlay')
           import kubetee_route_guard
           import kubetee_attestation
+          import kubetee_binding
           import sitecustomize  # noqa - runs import-time ssl patch
           import kubetee_pricing  # noqa - runs import-time register_model
           import kubetee_glm_effort  # noqa - request-path validation
@@ -196,13 +201,13 @@ jobs:
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            -c "import kubetee_route_guard, kubetee_attestation, sitecustomize, kubetee_pricing, kubetee_glm_effort; print('verify: import OK')"
+            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, sitecustomize, kubetee_pricing, kubetee_glm_effort; print('verify: import OK')"
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
             -c "
           from pathlib import Path
           p = Path('/app/.venv/lib/python3.13/site-packages')
-          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'sitecustomize.py', 'kubetee_pricing.py', 'kubetee_glm_effort.py'):
+          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'sitecustomize.py', 'kubetee_pricing.py', 'kubetee_glm_effort.py'):
               f = p / m
               assert f.is_file(), f'MISSING {m}'
               print(m, f.stat().st_size, 'bytes')

@@ -23,6 +23,11 @@ FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 
 # kubetee_route_guard.py: blocks GET /v1/videos (global-store enumeration).
 # kubetee_attestation.py: GET /v1/attestation + inline X-KubeTEE-Nonce evidence.
+# kubetee_binding.py: the kubetee.attestation.v1 report_data construction
+#   (JCS statement -> SHA-256, zero-padded), pinned by
+#   tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_binding.py
+#   against the spec's conformance vectors. Served alongside the live
+#   SHA512(nonce) binding until the gateway flip.
 # sitecustomize.py: east-west client-cert chain for httpx 0.28 (ssl_verify CA
 #   path + load_cert_chain into the shared SSLContext).
 # kubetee_pricing.py: static cost-map entries so image-generation spend
@@ -34,4 +39,4 @@ FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 #   else (incl. "none") to "max"; the hook 400s unsupported values.
 #   GLM-5.2 keeps the native enable_thinking toggle: "none" maps to
 #   chat_template_kwargs={"enable_thinking": false} and is honored.
-COPY kubetee_route_guard.py kubetee_attestation.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py /app/.venv/lib/python3.13/site-packages/
+COPY kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py /app/.venv/lib/python3.13/site-packages/
