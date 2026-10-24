@@ -31,6 +31,14 @@ from typing import Final, TypeAlias
 PURPOSE: Final = "kubetee.attestation.v1"
 VERSION: Final = "kubetee.attestation.v1"
 
+# The legacy construction — the WIRE DEFAULT until the gm-miner switch PR
+# (taostat/gm-miner) is accepted upstream and redeployed. The deployed
+# verifier checks exactly this: SHA-512 over the ASCII nonce hex string
+# (64 bytes, no padding). Byte-verified against a live production quote
+# (2026-10-24, nonce 3161321c…e4). `report_data_input` names it
+# "sha512(nonce)" on every legacy response.
+LEGACY_REPORT_DATA_INPUT: Final = "sha512(nonce)"
+
 JsonTree: TypeAlias = "str | tuple[JsonTree, ...] | Mapping[str, JsonTree]"
 
 _NONCE_RE: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -83,6 +91,19 @@ def report_data_statement(keyset_digest_value: str, nonce: str) -> str:
         "purpose": PURPOSE,
     }
     return jcs(statement)
+
+
+def legacy_report_data(nonce: str) -> bytes:
+    """The legacy (pre-flip) binding: SHA-512 over the ASCII nonce (64 B).
+
+    This is what the deployed gm-miner verifies
+    (``Sha512::digest(nonce.as_bytes())`` over the nonce string it sent) and
+    what a live production quote's REPORTDATA carries — byte-exact both
+    sides (pinned by tests against a recorded live quote). The nonce is
+    normalized (lowercased) first: the verifier hashes the nonce in the
+    casing it sent, which is lowercase hex.
+    """
+    return hashlib.sha512(normalize_nonce(nonce).encode("ascii")).digest()
 
 
 def report_data(statement: str) -> bytes:

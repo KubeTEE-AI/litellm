@@ -39,4 +39,22 @@ FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 #   else (incl. "none") to "max"; the hook 400s unsupported values.
 #   GLM-5.2 keeps the native enable_thinking toggle: "none" maps to
 #   chat_template_kwargs={"enable_thinking": false} and is honored.
-COPY kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py /app/.venv/lib/python3.13/site-packages/
+# kubetee_ear.py: Trustee EAR / AR4SI appraisal (the bundle's appraisal{}
+#   block) + evidence.vm_config from the measured initdata + the tee_pubkey
+#   JWK helper for the RCAR mint. The EAR is a per-boot RCAR mint; the
+#   per-request nonce binding stays the v1 statement.
+# kubetee_eastwest.py: east-west mTLS material -> container scratch
+#   (/run/kubetee-eastwest) at startup, retiring the fetch-certs init
+#   container + the host-shared /certs emptyDir (eastwest-keys-strict).
+#   Strict per-boot in-TEE custody lands here under the attestation-gated
+#   signer follow-up (per-boot key + EAR-bound short-lived cert).
+# kubetee_bootstrap.py + kubetee-entrypoint.sh: run the east-west fetch
+#   before the base entrypoint — fail-closed. Client-facing TLS stays
+#   cert-manager (the ACME per-boot path was cut 2026-10-24).
+COPY kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py /app/.venv/lib/python3.13/site-packages/
+COPY kubetee-entrypoint.sh /app/docker/kubetee-entrypoint.sh
+RUN chmod 0755 /app/docker/kubetee-entrypoint.sh
+
+# Wrap the base ENTRYPOINT (docker/prod_entrypoint.sh): strict key custody
+# first, then exec the base entrypoint with the original CMD args.
+ENTRYPOINT ["/app/docker/kubetee-entrypoint.sh"]

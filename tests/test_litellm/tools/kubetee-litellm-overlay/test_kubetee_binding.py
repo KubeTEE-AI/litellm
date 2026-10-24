@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 _MODULE_PATH: Final = (
     Path(__file__).resolve().parents[4]
     / "tools"
@@ -185,3 +187,57 @@ def test_keyset_from_cert_pem_digest_changes_with_domain() -> None:
     assert kb.keyset_digest(kb.keyset_from_cert_pem(cert_pem, "a.example")) != kb.keyset_digest(
         kb.keyset_from_cert_pem(cert_pem, "b.example")
     )
+
+
+# --- legacy construction (the wire default until the gm-miner switch) -----
+
+# Live production vector (2026-10-24): GET /v1/attestation?nonce=<NONCE> ->
+# quote REPORTDATA (TDREPORT offset 568) == SHA-512(ascii nonce).
+LIVE_LEGACY_NONCE: Final = "3161321c1eea48b1d53e8b89490d8a12c5abafeacc2dee2cada12e80569321e4"
+LIVE_LEGACY_REPORT_DATA: Final = (
+    "840049a67f3c900663bf274975b2419f843c4a01a4c08149f410c3d338a9c6a0"
+    "54667dd1493c4909fb1b42b90e243f68fab96ac574d588e9ea47823bcce54a5b"
+)
+
+
+def test_legacy_report_data_is_sha512_of_ascii_nonce() -> None:
+    # Byte-exact against a LIVE production quote (2026-10-24):
+    # GET /v1/attestation?nonce=<LIVE_NONCE> -> quote REPORTDATA (TDREPORT
+    # offset 568) == SHA-512(ascii nonce), 64 bytes, no padding. This is
+    # also byte-exact with the deployed gm-miner verifier
+    # (Sha512::digest(nonce.as_bytes()) over the nonce it sent).
+    live = kb.legacy_report_data(LIVE_LEGACY_NONCE)
+    assert live == hashlib.sha512(LIVE_LEGACY_NONCE.encode("ascii")).digest()
+    assert live.hex() == LIVE_LEGACY_REPORT_DATA
+    assert len(live) == 64
+
+
+def test_legacy_report_data_normalizes_nonce_case() -> None:
+    # The verifier hashes the nonce in the casing it sent (lowercase hex);
+    # normalize so an upper-cased caller value cannot shift the binding.
+    assert kb.legacy_report_data(LIVE_LEGACY_NONCE.upper()) == kb.legacy_report_data(
+        LIVE_LEGACY_NONCE
+    )
+
+
+def test_legacy_report_data_rejects_malformed_nonce() -> None:
+    with pytest.raises(ValueError, match="nonce"):
+        kb.legacy_report_data("not-a-nonce")
+
+
+def test_legacy_report_data_is_not_the_v1_binding() -> None:
+    # The two constructions must never collide: a v1 quote must not verify
+    # under the legacy check and vice versa (the verifier fails mixed shapes
+    # closed — anti-downgrade).
+    nonce: Final = LIVE_LEGACY_NONCE
+    keyset: Final = {
+        "subject": "kubetee.attestation.v1/llm.kubetee.ai",
+        "not_after": "2030-01-01T00:00:00Z",
+        "tls_public_keys": (
+            {"domain": "llm.kubetee.ai", "spki_sha256": "0" * 64},
+        ),
+        "signing_keys": (),
+        "e2ee_keys": (),
+    }
+    v1 = kb.build_binding(keyset, nonce).report_data
+    assert v1 != kb.legacy_report_data(nonce)

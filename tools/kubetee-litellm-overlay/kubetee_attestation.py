@@ -1,49 +1,78 @@
 # KubeTEE client-facing attestation for the LiteLLM gateway (CPU TDX guest).
 #
-# Mounted into the LiteLLM container via the eastwest-fetch-certs ConfigMap
-# (subPath into site-packages), loaded as a custom callback:
+# Baked into the litellm-database overlay image (site-packages), loaded as a
+# custom callback:
 #   callbacks: ["dynamic_rate_limiter_v3", "prometheus",
 #               "kubetee_attestation.kubetee_attestation_logger"]
 #
-# What it does
-# ------------
-# 1. GET /v1/attestation?nonce=<64 hex>
-#      Mints a FRESH TDX quote with the client nonce bound into REPORTDATA
-#      (via the in-guest api-server-rest /aa/evidence on 127.0.0.1:8006).
-#      3-replica caveat: proves "a gateway replica", not "the replica that
-#      served a given chat" — use inline evidence (2) for that binding.
-# 2. Inline evidence (opt-in): client sends X-KubeTEE-Nonce: <64 hex> on
-#      /v1/chat/completions; the response then carries
-#      X-KubeTEE-Attestation-Quote (b64 TDX quote) + backend identity
-#      headers on the SAME response, binding proof to the serving replica.
+# The surface (kubetee-subnet/docs/ATTESTATION-SPEC-v1.md is the contract)
+# ---------------------------------------------------------------------------
+# GET /v1/attestation?nonce=<64 hex> returns the v1 bundle:
 #
-# TLS-possession proof (both surfaces)
-# ------------------------------------
+#   {spec_version, tee_type, nonce, report_data_input, pod, quote, cc_eventlog,
+#    keyset, bindings, tls_possession,                <- legacy top level
+#    evidence: {quote, quote_report_data, event_log, vm_config},
+#    appraisal: {ear_token, ar4si}}
+#
+# The legacy top-level fields stay for the dual-read window: gm-miner's
+# shipped AttestationPayload (evidence.rs) parses quote / cc_eventlog /
+# tls_possession at the top level with strict serde and drops unknown fields,
+# so the v1 shape is ADDITIVE until that window closes. `report_data_input`
+# names the active construction on every response.
+#
+# Inline evidence (opt-in): X-KubeTEE-Nonce on /v1/chat/completions puts
+# X-KubeTEE-Attestation-Quote + the same binding/possession headers on the
+# SAME response, binding proof to the serving replica.
+#
+# The binding — kubetee.attestation.v1 (spec section 4)
+# ---------------------------------------------------------------------------
+# REPORTDATA (64 B in the quote) = SHA-256(JCS(statement)) || 32 zero bytes
+# for the fixed template:
+#
+#   {"keyset_digest":"sha256:<hex>","nonce":"<64-hex>","purpose":"kubetee.attestation.v1"}
+#
+# This is the v1 construction — NOT the wire default yet. Until the gm-miner
+# switch PR (taostat/gm-miner, kubetee_verify) is accepted upstream AND
+# gm-miner is redeployed, the quote stays bound to the legacy SHA512(nonce)
+# construction the deployed verifier checks, and the response carries NO
+# keyset/bindings (binding claims appear only with the v1 binding — the
+# verifier fails mixed shapes closed). `report_data_input` names the active
+# construction on every response ("sha512(nonce)" default). Flip with
+# KUBETEE_ATTESTATION_V1=1 after the switch: the v1 statement then binds the
+# quote (travels verbatim as bindings.report_data_statement — no
+# reconstruction ambiguity), keyset_digest covers the served keyset, and the
+# v1 bundle (evidence/appraisal) rides along.
+#
+# TLS possession (both surfaces)
+# ---------------------------------------------------------------------------
 # llm.kubetee.ai is TLS PASSTHROUGH — the client's TLS session terminates
-# INSIDE this guest, on the litellm-tls secret's key. Both surfaces
-# additionally sign the nonce with that private key (RS256 over
-# sha256(nonce)); the client verifies the signature against the leaf
-# certificate from its OWN TLS session. This proves the TDX guest that
-# minted the quote holds the private key of the exact cert the client is
-# connected to — replica pinning without trusting any self-reported field.
+# INSIDE this guest. Both surfaces sign the nonce with this pod's serving
+# key — the cert-manager litellm-tls key (RS256) or, where a per-boot
+# in-guest key is configured via KUBETEE_TLS_KEY, that P-256 key (ES256).
+# The client verifies against the leaf from its OWN TLS session, so the quote
+# is pinned to the exact serving pod. `tls_signature_alg` names the algorithm
+# actually used — gm-miner accepts both and fails closed on any other or on
+# a key-type mismatch.
 #
-# Nonce binding — the critical semantics
-# --------------------------------------
-# The CoCo AA /aa/evidence binds the raw runtime_data bytes (zero-padded to
-# 64 B) into REPORTDATA. Intel Trust Authority's verification expects
-# REPORTDATA == SHA512(runtime_data supplied in the /attest request).
-# We therefore pass SHA512(nonce) (exactly 64 B) as runtime_data to the AA,
-# and the client submits the RAW nonce as runtime_data to ITA:
-#   ITA computes SHA512(raw nonce) == REPORTDATA  ✓
-# (Verified against intel/trustauthority-client-for-python TDXAdapter and
-# guest-components attester/tdx at pinned commit eae0bf63.)
+# Appraisal (spec section 1 — the EAR/AR4SI results leg)
+# ---------------------------------------------------------------------------
+# `appraisal.ear_token` is a Trustee EAR minted ONCE PER BOOT over the RCAR
+# binding (its own hash — see kubetee_ear.py for why it is not the v1
+# statement). It appraises this TD's measurements + initdata; the per-request
+# nonce binding is the v1 statement's job. `appraisal.ar4si` exposes the
+# trustworthiness vector plus the partner claim mapping so adapters never
+# parse the JWT by hand. Absent (field omitted) when Trustee is unreachable —
+# the quote and binding stand alone.
 #
-# Non-JSON runtime_data is echoed by ITA as attester_runtime_data /
-# attester_held_data claims in the token.
-#
-# The payload additionally serves the kubetee.attestation.v1 statement and
-# keyset (kubetee_binding.py, spec section 4) while REPORTDATA stays
-# SHA512(nonce); report_data_input names the active construction.
+# Key custody (spec section 5)
+# ---------------------------------------------------------------------------
+# The client-facing serving key is the cert-manager litellm-tls key
+# (Kubernetes Secret — an admin-readable Secret is the accepted posture for
+# the PUBLIC TLS surface; the quote + possession proof pin the pod). Strict
+# per-boot in-TEE key custody lives on the EAST-WEST identity: a per-boot
+# P-256 key certified only through the attestation-gated signer whose EAR
+# binds its tee-pubkey. The keyset's tls_public_keys[].spki_sha256 is the
+# serving key's SPKI digest, bound into REPORTDATA via keyset_digest.
 #
 # Auth: LiteLLM attaches user_api_key_auth to routes it knows; a custom
 # app.add_api_route endpoint does NOT get the auth dependency by default —
@@ -52,7 +81,6 @@
 
 import base64
 import hashlib
-import json
 import os
 import re
 import socket
@@ -61,11 +89,24 @@ from typing import Any
 import kubetee_binding
 from litellm.integrations.custom_logger import CustomLogger
 
+SPEC_VERSION = "kubetee.attestation.v1"
+TEE_TYPE = "tdx"
+RUNTIME_CLASS = "kata-qemu-tdx-runtime-rs"
+
+# Construction switch (see header): legacy SHA512(nonce) is the wire default
+# while the deployed gm-miner verifies it; KUBETEE_ATTESTATION_V1=1 flips the
+# quote binding to the v1 statement AFTER the gm-miner switch PR is accepted
+# and redeployed. The response shape follows the switch atomically: v1
+# (keyset/bindings/evidence/appraisal) or the exact legacy shape.
+V1_MODE = os.environ.get("KUBETEE_ATTESTATION_V1", "").strip().lower() in ("1", "true", "yes", "on")
+REPORT_DATA_INPUT = "kubetee.attestation.v1" if V1_MODE else kubetee_binding.LEGACY_REPORT_DATA_INPUT
+
 _NONCE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _AA_BASE = os.environ.get("KUBETEE_AA_BASE", "http://127.0.0.1:8006")
 _NONCE_HEADER = "x-kubetee-nonce"
-_TLS_KEY_PATH = os.environ.get("KUBETEE_TLS_KEY", "/etc/tls/tls.key")
-_TLS_CERT_PATH = os.environ.get("KUBETEE_TLS_CERT", "/etc/tls/tls.crt")
+_TLS_DIR = os.environ.get("KUBETEE_TLS_DIR", "/etc/tls")
+_TLS_KEY_PATH = os.environ.get("KUBETEE_TLS_KEY", os.path.join(_TLS_DIR, "tls.key"))
+_TLS_CERT_PATH = os.environ.get("KUBETEE_TLS_CERT", os.path.join(_TLS_DIR, "tls.crt"))
 _TLS_DOMAIN = os.environ.get("KUBETEE_TLS_DOMAIN", "llm.kubetee.ai")
 
 
@@ -77,13 +118,25 @@ def _pod_name() -> str | None:
 
 
 def _validate_nonce(nonce: str | None) -> str | None:
-    """Return the normalized nonce or None if malformed."""
+    """Return the normalized (lowercased) nonce or None if malformed."""
     if not nonce:
         return None
     nonce = nonce.strip()
     if not _NONCE_RE.match(nonce):
         return None
     return nonce.lower()
+
+
+def _load_serving_key():
+    """The serving key, or None. cert-manager litellm-tls (RS256) by
+    default; an EC P-256 override via KUBETEE_TLS_KEY signs ES256."""
+    try:
+        from cryptography.hazmat.primitives import serialization
+
+        with open(_TLS_KEY_PATH, "rb") as f:
+            return serialization.load_pem_private_key(f.read(), password=None)
+    except Exception:
+        return None
 
 
 def _tls_possession_proof(nonce: str) -> dict | None:
@@ -95,27 +148,49 @@ def _tls_possession_proof(nonce: str) -> dict | None:
     holds the private key of the cert the client is connected to — binding
     the quote to the exact serving pod, not just "some gateway replica".
 
-    Returns {"tls_signature": b64, "tls_signature_alg": "RS256",
+    The algorithm is reported, not assumed: the per-boot key is EC P-256 and
+    signs ES256 (ECDSA over SHA-256, ASN.1 DER signature); a legacy RSA key
+    signs RS256 (RSASSA-PKCS1-v1_5 over SHA-256). Both are one line of code
+    in cryptography and one verify call in gm-miner.
+
+    Returns {"tls_signature": b64, "tls_signature_alg": "ES256"|"RS256",
              "tls_signature_input": "sha256(nonce)", "tls_cert_sha256": hex}
     or None if the key is unavailable (best-effort; the quote is still the
     primary evidence).
     """
     try:
+        from cryptography import x509
         from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.primitives.asymmetric import ec, padding, utils
 
-        with open(_TLS_KEY_PATH, "rb") as f:
-            key = serialization.load_pem_private_key(f.read(), password=None)
-        # RS256 semantics: signature over SHA256(nonce). Pass the raw nonce;
-        # the lib hashes internally (same bytes as Prehashed(digest)).
-        sig = key.sign(
-            nonce.encode("ascii"),
-            padding.PKCS1v15(),
-            hashes.SHA256(),
-        )
+        key = _load_serving_key()
+        if key is None:
+            return None
+
+        if isinstance(key, ec.EllipticCurvePrivateKey):
+            # ES256: ECDSA over SHA-256. JWS/ES256 uses raw r||s, but the
+            # spec's verifier contract (and gm-miner) verify the ASN.1 DER
+            # signature that cryptography produces natively — same bytes
+            # a TLS stack would present. Report "ES256" + DER.
+            der = key.sign(nonce.encode("ascii"), ec.ECDSA(hashes.SHA256()))
+            # Normalize to JOSE raw r||s (64 bytes) for wire-format
+            # predictability; gm-miner decodes DER or raw.
+            r, s = utils.decode_dss_signature(der)
+            size = key.curve.key_size // 8
+            sig = r.to_bytes(size, "big") + s.to_bytes(size, "big")
+            alg = "ES256"
+        else:
+            # Legacy RSA path (a cert-manager-era key). RS256 semantics:
+            # signature over SHA256(nonce).
+            sig = key.sign(
+                nonce.encode("ascii"),
+                padding.PKCS1v15(),
+                hashes.SHA256(),
+            )
+            alg = "RS256"
+
         cert_fp: str | None = None
         try:
-            from cryptography import x509
             from cryptography.hazmat.primitives.serialization import Encoding
 
             with open(_TLS_CERT_PATH, "rb") as f:
@@ -123,14 +198,17 @@ def _tls_possession_proof(nonce: str) -> dict | None:
             # tls.crt carries the full chain (leaf + intermediates); the
             # client fingerprint is of the LEAF (first cert in the file,
             # and the one its TLS session serves). Hash only that.
-            first_pem = cert_pem.split(b"-----END CERTIFICATE-----")[0] + b"-----END CERTIFICATE-----"
+            first_pem = (
+                cert_pem.split(b"-----END CERTIFICATE-----")[0]
+                + b"-----END CERTIFICATE-----"
+            )
             der = x509.load_pem_x509_certificate(first_pem).public_bytes(Encoding.DER)
             cert_fp = hashlib.sha256(der).hexdigest()
         except Exception:
             pass
         return {
             "tls_signature": base64.b64encode(sig).decode("ascii"),
-            "tls_signature_alg": "RS256",
+            "tls_signature_alg": alg,
             "tls_signature_input": "sha256(nonce)",
             "tls_cert_sha256": cert_fp,
         }
@@ -143,10 +221,9 @@ def _binding_bundle(
 ) -> tuple[dict[str, kubetee_binding.JsonTree], kubetee_binding.Binding] | None:
     """Served keyset (spec section 5) + v1 binding for this nonce, or None.
 
-    Additive until the gateway flip: REPORTDATA stays SHA512(nonce) and
-    these fields ride along for verifiers moving to the v1 construction
-    (report_data_input names the active construction). At the flip the
-    binding becomes mandatory and this fails closed.
+    Mandatory at the gateway flip: a response without a binding is a bug, so
+    the caller logs and omits only when the key material is unreadable (the
+    possession proof degrades the same way).
     """
     try:
         with open(_TLS_CERT_PATH, "rb") as f:
@@ -165,59 +242,87 @@ async def _aa_get_evidence(runtime_data_b64url: str) -> dict:
     """
     import httpx
 
-    url = (
-        f"{_AA_BASE}/aa/evidence"
-        f"?runtime_data={runtime_data_b64url}&encoding=base64"
-    )
+    url = f"{_AA_BASE}/aa/evidence?runtime_data={runtime_data_b64url}&encoding=base64"
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(url)
         resp.raise_for_status()
-        return json.loads(resp.content)
+        import json as _json
+
+        return _json.loads(resp.content)
+
+
+def _binding_for_nonce(nonce: str) -> tuple[dict, kubetee_binding.Binding]:
+    """The served keyset + v1 binding for a nonce, or raise.
+
+    Fail-closed: rather than emit a quote with an unbound REPORTDATA (the
+    flip made the binding mandatory), missing key material raises and the
+    caller maps it to an error response.
+    """
+    bundle = _binding_bundle(nonce)
+    if bundle is None:
+        raise RuntimeError("serving key material unavailable for the v1 binding")
+    return bundle
 
 
 async def get_attestation_payload(nonce: str | None) -> dict | None:
-    """Mint a fresh TDX quote with the nonce bound into REPORTDATA.
+    """Mint a fresh TDX quote with the active construction bound into REPORTDATA.
 
-    Returns the JSON payload served by /v1/attestation, or None if the
-    nonce is malformed. Raises on AA failure (caller maps to 502).
+    Returns the JSON payload served by /v1/attestation — the exact legacy
+    shape (the deployed gm-miner's contract) by default, or the v1 bundle
+    under KUBETEE_ATTESTATION_V1=1 — or None if the nonce is malformed.
+    Raises on AA failure (caller maps to 502).
     """
     raw_nonce = _validate_nonce(nonce)
     if raw_nonce is None:
         return None
 
-    # ITA-verifiable binding: REPORTDATA = SHA512(nonce) (64 B, zero-pad is
-    # a no-op at exactly 64 bytes). The client later sends
-    # runtime_data=<raw nonce> to ITA /attest; ITA re-hashes and compares.
-    report_data = hashlib.sha512(raw_nonce.encode("ascii")).digest()
+    if V1_MODE:
+        keyset, binding = _binding_for_nonce(raw_nonce)
+        report_data = binding.report_data
+    else:
+        keyset = binding = None
+        report_data = kubetee_binding.legacy_report_data(raw_nonce)
     report_data_b64url = (
         base64.urlsafe_b64encode(report_data).decode("ascii").rstrip("=")
     )
-
     evidence = await _aa_get_evidence(report_data_b64url)
 
-    bundle = _binding_bundle(raw_nonce)
     payload: dict[str, Any] = {
         "nonce": raw_nonce,
-        "report_data_input": "sha512(nonce)",
+        "report_data_input": REPORT_DATA_INPUT,
         "quote": evidence.get("quote"),
         "cc_eventlog": evidence.get("cc_eventlog"),
-        "tee": "tdx",
-        "runtime_class": "kata-qemu-tdx-runtime-rs",
+        "tee": TEE_TYPE,
+        "runtime_class": RUNTIME_CLASS,
     }
-    if bundle is not None:
-        keyset, binding = bundle
-        payload["keyset"] = keyset
-        payload["bindings"] = {
-            "version": binding.version,
-            "report_data_statement": binding.statement,
-            "keyset_digest": binding.keyset_digest,
-        }
     tls_proof = _tls_possession_proof(raw_nonce)
     if tls_proof is not None:
         payload["tls_possession"] = tls_proof
     pod = _pod_name()
     if pod:
         payload["pod"] = pod
+
+    if V1_MODE:
+        payload["spec_version"] = SPEC_VERSION
+        payload["tee_type"] = TEE_TYPE
+        payload["keyset"] = keyset
+        payload["bindings"] = {
+            "version": binding.version,
+            "report_data_statement": binding.statement,
+            "keyset_digest": binding.keyset_digest,
+        }
+        # --- v1 spec bundle ---
+        import kubetee_ear
+
+        payload["evidence"] = {
+            "quote": evidence.get("quote"),
+            "quote_report_data": base64.b64encode(report_data).decode("ascii"),
+            "event_log": evidence.get("cc_eventlog"),
+            "vm_config": kubetee_ear.vm_config(),
+        }
+        appraisal = kubetee_ear.appraisal(kubetee_ear.load_cached_ear())
+        if appraisal is not None:
+            payload["appraisal"] = appraisal
     return payload
 
 
@@ -334,7 +439,7 @@ class KubeTEEAttestationLogger(CustomLogger):
         user_api_key_dict: Any,
         response: Any,
         request_headers: dict[str, str] | None = None,
-        litellm_call_info: dict[str, Any] | None = None,
+        litellm_call_info: dict[str, str] | None = None,
     ) -> dict[str, str] | None:
         """Opt-in inline TDX evidence on chat responses.
 
@@ -354,7 +459,15 @@ class KubeTEEAttestationLogger(CustomLogger):
         if raw_nonce is None:
             return None  # opt-in header absent — no-op
 
-        report_data = hashlib.sha512(raw_nonce.encode("ascii")).digest()
+        if V1_MODE:
+            try:
+                _keyset, binding = _binding_for_nonce(raw_nonce)
+            except Exception as e:
+                return {"X-KubeTEE-Attestation-Error": f"binding unavailable: {e}"}
+            report_data = binding.report_data
+        else:
+            binding = None
+            report_data = kubetee_binding.legacy_report_data(raw_nonce)
         report_data_b64url = (
             base64.urlsafe_b64encode(report_data).decode("ascii").rstrip("=")
         )
@@ -367,21 +480,20 @@ class KubeTEEAttestationLogger(CustomLogger):
         if not quote:
             return {"X-KubeTEE-Attestation-Error": "empty quote"}
 
-        bundle = _binding_bundle(raw_nonce)
         out = {
             "X-KubeTEE-Nonce": raw_nonce,
             "X-KubeTEE-Attestation-Quote": quote,
-            "X-KubeTEE-Attestation-Tee": "tdx",
+            "X-KubeTEE-Attestation-Tee": TEE_TYPE,
+            "X-KubeTEE-Report-Data-Input": REPORT_DATA_INPUT,
         }
-        if bundle is not None:
-            _, binding = bundle
+        if V1_MODE:
             out["X-KubeTEE-Binding-Statement"] = binding.statement
             out["X-KubeTEE-Binding-Keyset-Digest"] = binding.keyset_digest
         tls_proof = _tls_possession_proof(raw_nonce)
         if tls_proof is not None:
             out["X-KubeTEE-TLS-Signature"] = tls_proof["tls_signature"]
-            out["X-KubeTEE-TLS-Signature-Alg"] = "RS256"
-            out["X-KubeTEE-TLS-Signature-Input"] = "sha256(nonce)"
+            out["X-KubeTEE-TLS-Signature-Alg"] = tls_proof["tls_signature_alg"]
+            out["X-KubeTEE-TLS-Signature-Input"] = tls_proof["tls_signature_input"]
             if tls_proof.get("tls_cert_sha256"):
                 out["X-KubeTEE-TLS-Cert-SHA256"] = tls_proof["tls_cert_sha256"]
         out.update(_backend_identity_headers(data, litellm_call_info))
