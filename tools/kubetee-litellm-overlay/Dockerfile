@@ -4,7 +4,7 @@
 # runtime (wolfi + python3.13 venv at /app/.venv + prisma + pgbouncer).
 # Everything the gateway runs that is NOT upstream litellm ships here, so
 # the TDX measurement chain covers it:
-#   git (KubeTEE-AI/litellm, branch kubetee-1.103.3) -> Actions -> ghcr.io/kubetee-ai/litellm-database:<tag>
+#   git (KubeTEE-AI/litellm, branch kubetee-overlay) -> Actions -> ghcr.io/kubetee-ai/litellm-database:<tag>
 #   -> measured container allowlist (policy-litellm.rego / initdata)
 #
 # Previously these modules were ConfigMap-mounted via subPath — unmeasured

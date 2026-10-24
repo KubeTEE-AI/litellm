@@ -5,7 +5,7 @@ Kata pod). Everything the gateway runs that is **not** upstream LiteLLM
 ships in this image so it is covered by the TDX measurement chain:
 
 ```
-git (this repo, branch kubetee-1.103.3, tag v1.103.3)
+git (this repo, branch kubetee-overlay, tag v1.103.3)
   -> GitHub Actions (.github/workflows/build-litellm-overlay.yaml)
   -> ghcr.io/kubetee-ai/litellm-database:<upstream>-kubetee.N
   -> measured container allowlist (nim/eastwest/policy-litellm.rego,
@@ -71,7 +71,7 @@ kata-deploy CSI `-kubetee3` incident).
 
 ## Build / verify
 
-Pushes to `tools/kubetee-litellm-overlay/**` on branch `kubetee-1.103.3`
+Pushes to `tools/kubetee-litellm-overlay/**` on branch `kubetee-overlay`
 build automatically; `workflow_dispatch` allows a custom tag + base.
 
 CI gates:
@@ -115,7 +115,7 @@ curl -s -X POST https://llm.kubetee.ai/v1/videos -H "Authorization: Bearer $KEY"
 
 1. Edit the module in this directory.
 2. Bump the `-kubetee.N` suffix (never reuse).
-3. Push to `kubetee-1.103.3` (or dispatch with a custom tag).
+3. Push to `kubetee-overlay` (or dispatch with a custom tag).
 4. Update `nim/eastwest/kubetee_attestation.py` (and `kubetee_binding.py`) in the root repo to match
    (source-of-truth sync), and the Fleet values if registration changed.
 5. Update the policy allowlist if the image tag changed (see above).

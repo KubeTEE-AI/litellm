@@ -11,6 +11,12 @@ on:
         description: "Upstream litellm-database tag override (optional; default = env.DEFAULT_BASE_TAG)"
         required: false
         type: string
+  push:
+    branches:
+      - kubetee-overlay
+    paths:
+      - "tools/kubetee-litellm-overlay/**"
+      - ".github/workflows/build-litellm-overlay.yaml"
 
 env:
   REGISTRY: ghcr.io
