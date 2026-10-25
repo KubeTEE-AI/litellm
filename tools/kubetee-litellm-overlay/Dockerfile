@@ -18,7 +18,7 @@
 #
 # Tags: <upstream>-kubetee.N (e.g. 1.103.3-kubetee.1). Never reuse a tag.
 
-ARG BASE_TAG=1.103.3
+ARG BASE_TAG=1.103.9
 FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 
 # kubetee_route_guard.py: blocks GET /v1/videos (global-store enumeration).

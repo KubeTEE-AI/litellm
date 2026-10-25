@@ -73,7 +73,7 @@ env:
   # (block GET /v1/videos list — global store, no per-key scoping),
   # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
   # (east-west client cert loading).
-  DEFAULT_BASE_TAG: 1.103.8
+  DEFAULT_BASE_TAG: 1.103.9
 
 jobs:
   build-and-push:
