@@ -38,9 +38,14 @@ Wire facts (pinned against the vendored Trustee, CoCo-trustee @ v0.22.0):
 - The primary runtime-data map hashed into REPORTDATA is
   ``{"additional-evidence": "", "nonce": …, "tee-pubkey": {…}}`` (backend.rs),
   canonicalized RFC 8785 JCS and SHA-384'd (48 bytes) then zero-padded to
-  64 by the verifier. ``kubetee_binding.jcs`` reproduces the AS test vector
-  ``e71ce8e70d814ba6639c3612ebee0ff1f76f650f8dbb5e47157e0f3f525cd22
-  c4597480a186427c813ca941da78870c3`` byte-for-byte.
+  64 by the verifier. ``kubetee_binding.jcs`` is RFC 8785 for the strings /
+  objects / arrays attestation input class and is pinned over the RCAR map by
+  ``tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_ear.py``
+  (SHA-384 ``cf82398c…2376d`` + 16 zero bytes). The AS's own canonicalization
+  vector (``{"a":"test","b":1,"c":{"d":"e"}}`` → ``e71ce8e7…870c3``,
+  attestation-service/src/lib.rs) carries a **number** and so is outside this
+  input class — it is the RFC 8785 equivalence reference for the AS, not a
+  runnable vector here (``jcs`` rejects numbers on purpose).
 - KBS protocol version is exact-match ``0.4.0`` (KBS_MINOR_VERSION in
   backend.rs; live-probed against https://kbs.kubetee.ai 2026-10-24).
 
@@ -169,21 +174,48 @@ def initdata_sha384() -> str | None:
 
 
 def tee_pubkey_of(key: Any) -> dict[str, str]:
-    """The ``TeePubKey::EC`` JWK of a P-256 key (the RCAR ``tee-pubkey`` input).
+    """The ``TeePubKey`` JWK (kbs-types) of the RCAR ``tee-pubkey`` input.
+
+    Both kbs-types variants are produced (``TeePubKey`` is ``#[serde(tag =
+    "kty")]``): an EC P-256 key → ``TeePubKey::EC``, an RSA key →
+    ``TeePubKey::RSA`` (wire names ``n``/``e`` per the serde renames in
+    kbs-types/src/lib.rs). The KBS runtime-data map accepts either.
+
+    The bound key is the EAST-WEST identity key whose cert carries
+    authorization (see ``bootstrap_ear_from_key_pem``): that key is fetched
+    from KBS as **RSA** (gen-certs.sh: ``openssl genrsa``) while an in-guest
+    per-boot key is P-256 — so both arms are live paths, not defensive ones.
+    The RSA arm is why ``appraisal`` was permanently absent before
+    2026-10-27: this helper was EC-only and raised
+    ``AttributeError: … 'RSAPublicNumbers' object has no attribute 'x'`` on
+    the real east-west key.
 
     Lives here (not in the retired ``kubetee_serving_cert``) because the RCAR
-    runtime-data construction above consumes it: under the attestation-gated
-    signer design the bound key is the per-boot EAST-WEST identity key.
+    runtime-data construction above consumes it.
     """
     numbers = key.public_key().public_numbers()
-    size = 32  # P-256 coordinate octet strings are fixed 32 bytes (RFC 7518)
-    return {
-        "kty": "EC",
-        "crv": "P-256",
-        "alg": "ES256",
-        "x": _b64u(numbers.x.to_bytes(size, "big")),
-        "y": _b64u(numbers.y.to_bytes(size, "big")),
-    }
+    if hasattr(numbers, "x") and hasattr(numbers, "y"):
+        # Only P-256 (RFC 7518 ES256) is a supported EC arm — a wider curve
+        # would serialize to the wrong coordinate width and silently produce
+        # a non-verifiable JWK. Reject it explicitly instead.
+        if numbers.x.bit_length() > 256 or numbers.y.bit_length() > 256:
+            raise EarError("tee-pubkey EC key must be P-256 (ES256)")
+        size = 32  # P-256 coordinate octet strings are fixed 32 bytes (RFC 7518)
+        return {
+            "kty": "EC",
+            "crv": "P-256",
+            "alg": "ES256",
+            "x": _b64u(numbers.x.to_bytes(size, "big")),
+            "y": _b64u(numbers.y.to_bytes(size, "big")),
+        }
+    if hasattr(numbers, "n") and hasattr(numbers, "e"):
+        return {
+            "kty": "RSA",
+            "alg": "RS256",
+            "n": _b64u(numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, "big")),
+            "e": _b64u(numbers.e.to_bytes((numbers.e.bit_length() + 7) // 8, "big")),
+        }
+    raise EarError(f"unsupported tee-pubkey key type: {type(key.public_key()).__name__}")
 
 
 def agent_policy_claims(rego_text: str) -> Any | None:
@@ -398,3 +430,18 @@ async def bootstrap_ear(tee_pubkey: dict[str, str]) -> str | None:
     except OSError:
         pass
     return boot.token
+
+
+def tee_pubkey_from_key_pem(tls_key_pem: bytes) -> dict[str, str] | None:
+    """``tee_pubkey_of`` over an east-west PEM private key (best-effort, None).
+
+    The east-west identity key arrives as TLS PEM (``tls.key`` from
+    ``kubetee_eastwest``); the RCAR mint wants the kbs-types ``TeePubKey``
+    JWK. Never raises — the appraisal is additive.
+    """
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    try:
+        return tee_pubkey_of(load_pem_private_key(tls_key_pem, password=None))
+    except Exception:
+        return None

@@ -98,7 +98,20 @@ async def fetch_eastwest() -> dict[str, str]:
     with open(paths["tls.crt"], "rb") as crt, open(paths["tls.key"], "rb") as key, open(
         pair_path, "wb"
     ) as pair:
-        pair.write(crt.read() + key.read())
+        key_pem = key.read()
+        pair.write(crt.read() + key_pem)
     os.chmod(pair_path, 0o600)
     paths[pair_name] = pair_path
+
+    # Boot-time EAR (best-effort): mint and cache the per-boot Trustee appraisal
+    # over the east-west identity key so the v1 bundle can serve `appraisal`.
+    # This is additive — the quote + binding stand without it, so any failure
+    # (Trustee down, no pub key) just leaves `appraisal` absent. NOTE: this
+    # call was missing entirely before 2026-10-27, which is why
+    # `appraisal` was permanently absent (bootstrap_ear() had no caller).
+    import kubetee_ear
+
+    tee_pubkey = kubetee_ear.tee_pubkey_from_key_pem(key_pem)
+    if tee_pubkey is not None:
+        await kubetee_ear.bootstrap_ear(tee_pubkey)
     return paths

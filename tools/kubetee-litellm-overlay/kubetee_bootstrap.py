@@ -4,6 +4,9 @@ Runs from the overlay's entrypoint (kubetee-entrypoint.sh) before LiteLLM:
 
 1. East-west mTLS material -> container scratch (kubetee_eastwest;
    fail-closed — nothing serves without its mTLS material).
+2. Boot-time Trustee EAR -> /run/kubetee-eastwest/boot-ear.jwt (best-effort,
+   additive — minted over the east-west key inside fetch_eastwest; when it
+   is absent the v1 bundle simply omits ``appraisal``).
 
 Failing exits non-zero so the container fails and kubelet retries the pod.
 Nothing here writes key material outside the guest.
