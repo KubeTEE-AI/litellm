@@ -121,7 +121,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           # Pricing module must register the static FLUX + MiniMax-H3 cost-map
@@ -169,6 +169,14 @@ jobs:
           grep -q 'kubetee.attestation.v1' kubetee_binding.py
           grep -q 'report_data_statement' kubetee_binding.py
           grep -q 'zero-padded' kubetee_binding.py
+          # EAR module must carry BOTH tee-pubkey arms (the RSA east-west key
+          # is the live identity; an EC-only helper raised AttributeError and
+          # left `appraisal` permanently absent — 2026-10-27) and the mint must
+          # actually be wired into the startup fetch (it had no caller at all).
+          grep -q 'TeePubKey::RSA' kubetee_ear.py
+          grep -q 'tee_pubkey_from_key_pem' kubetee_ear.py
+          grep -q 'bootstrap_ear' kubetee_eastwest.py
+          grep -q 'kubetee_ear' kubetee_eastwest.py
           echo "overlay modules verified"
           sha256sum kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py sitecustomize.py kubetee_pricing.py
 
@@ -187,6 +195,9 @@ jobs:
           import kubetee_route_guard
           import kubetee_attestation
           import kubetee_binding
+          import kubetee_ear
+          import kubetee_eastwest
+          import kubetee_bootstrap
           import sitecustomize  # noqa - runs import-time ssl patch
           import kubetee_pricing  # noqa - runs import-time register_model
           import kubetee_glm_effort  # noqa - request-path validation
@@ -194,6 +205,11 @@ jobs:
           assert hasattr(kubetee_attestation, 'kubetee_attestation_logger')
           assert hasattr(kubetee_pricing, 'kubetee_pricing_logger')
           assert hasattr(kubetee_glm_effort, 'kubetee_glm_effort_logger')
+          # Both tee-pubkey arms must work — RSA is the live east-west key.
+          from cryptography.hazmat.primitives.asymmetric import ec, rsa
+          assert kubetee_ear.tee_pubkey_of(ec.generate_private_key(ec.SECP256R1()))['kty'] == 'EC'
+          assert kubetee_ear.tee_pubkey_of(rsa.generate_private_key(public_exponent=65537, key_size=2048))['kty'] == 'RSA'
+          assert kubetee_ear.tee_pubkey_from_key_pem(b'not a key') is None
           print('overlay modules import OK against base', '${BASE_TAG}')
           "
 
@@ -214,13 +230,13 @@ jobs:
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, sitecustomize, kubetee_pricing, kubetee_glm_effort; print('verify: import OK')"
+            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, sitecustomize, kubetee_pricing, kubetee_glm_effort; print('verify: import OK')"
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
             -c "
           from pathlib import Path
           p = Path('/app/.venv/lib/python3.13/site-packages')
-          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'sitecustomize.py', 'kubetee_pricing.py', 'kubetee_glm_effort.py'):
+          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'kubetee_ear.py', 'kubetee_eastwest.py', 'kubetee_bootstrap.py', 'sitecustomize.py', 'kubetee_pricing.py', 'kubetee_glm_effort.py'):
               f = p / m
               assert f.is_file(), f'MISSING {m}'
               print(m, f.stat().st_size, 'bytes')
