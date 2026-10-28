@@ -21,6 +21,16 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: kubetee-ai/litellm-database
+  # 1.103.9-kubetee.3 (2026-10-28): adds kubetee_mcp_trust.py — the
+  # outbound MCP client gets its own measured trust context instead of
+  # inheriting the process-global ssl_verify (the east-west CA only). Public
+  # MCP servers (DeepWiki, HF) failed TLS ("unable to get local issuer
+  # certificate") and the fix must NOT widen the east-west lane: default
+  # KUBETEE_MCP_VERIFY=certifi (measured web PKI, in-image) — lanes disjoint;
+  # east-west stays measured-only. The anchor+certifi composite is an explicit
+  # opt-in ("eastwest") for deployments with private MCP upstreams. Also keeps
+  # the east-west CLIENT cert off the MCP lane (sitecustomize keys its attach
+  # on the east-west CA path only).
   # 1.103.3-kubetee.8 (2026-10-07): route guard also 404s video STATUS/
   # CONTENT polls whose video_id cannot resolve to a router deployment
   # (raw/unresolvable ids). Hit via Belarel 2026-10-06: 148x 500
@@ -121,7 +131,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py kubetee_mcp_trust.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           # Pricing module must register the static FLUX + MiniMax-H3 cost-map
@@ -140,6 +150,13 @@ jobs:
           grep -q 'KubeTEEGlmEffort' kubetee_glm_effort.py
           grep -q 'reasoning_effort_not_supported' kubetee_glm_effort.py
           grep -q 'enable_thinking' kubetee_glm_effort.py
+          # MCP trust module must carry the split-trust construction and the
+          # single patch seam (MCPClient.__init__ — the factory reads its
+          # ssl_verify). Anything less reproduces the public-MCP TLS failure
+          # or, worse, widens the east-west lane.
+          grep -q 'KubeTEEMCPTrust' kubetee_mcp_trust.py
+          grep -q 'build_mcp_trust_context' kubetee_mcp_trust.py
+          grep -q 'certifi.where' kubetee_mcp_trust.py
           # The dispatch path does `await callback.async_pre_call_hook(...)` —
           # a SYNC def returns None and every request 500s (kubetee.1 incident
           # 2026-10-05). Both hooks MUST be coroutine functions.

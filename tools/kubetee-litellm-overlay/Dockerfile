@@ -29,7 +29,15 @@ FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 #   against the spec's conformance vectors. Served alongside the live
 #   SHA512(nonce) binding until the gateway flip.
 # sitecustomize.py: east-west client-cert chain for httpx 0.28 (ssl_verify CA
-#   path + load_cert_chain into the shared SSLContext).
+#   path + load_cert_chain into the shared SSLContext). Keyed on the east-west
+#   CA path, so the serving lane gets the identity and the MCP lane (which
+#   builds its own context) never does.
+# kubetee_mcp_trust.py: MCP-client trust scope — the outbound MCP client's
+#   trust is built by measured code and never inherits the process-global
+#   ssl_verify (east-west CA only) that broke public MCP servers ("unable to
+#   get local issuer certificate"). Modes: certifi (default — measured web
+#   PKI), system (opt-in), explicit CA path, or eastwest (opt-in composite =
+#   measured anchor + certifi). Pinned by tests/.../test_kubetee_mcp_trust.py.
 # kubetee_pricing.py: static cost-map entries so image-generation spend
 #   tracks under honest model names on 1.103.x (upstream fix #39311 is
 #   1.104+ only; keep one release after the base bump, then drop).
@@ -51,7 +59,7 @@ FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 # kubetee_bootstrap.py + kubetee-entrypoint.sh: run the east-west fetch
 #   before the base entrypoint — fail-closed. Client-facing TLS stays
 #   cert-manager (the ACME per-boot path was cut 2026-10-24).
-COPY kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py /app/.venv/lib/python3.13/site-packages/
+COPY kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py kubetee_mcp_trust.py /app/.venv/lib/python3.13/site-packages/
 COPY kubetee-entrypoint.sh /app/docker/kubetee-entrypoint.sh
 RUN chmod 0755 /app/docker/kubetee-entrypoint.sh
 

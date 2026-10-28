@@ -6,6 +6,13 @@ import ssl
 # strict-custody roll (2026-10-24): the material is fetched into the
 # container's own scratch by kubetee_eastwest.py, not the host-shared /certs
 # emptyDir (which the same roll retires).
+#
+# KEYING IS SECURITY-RELEVANT (2026-10-28, the MCP trust fix): the attach
+# fires on `cafile == _CA`, i.e. the east-west trust anchor ONLY. That scope is
+# what keeps the east-west CLIENT identity on the serving lane (LiteLLM ->
+# GLM :8443) and off public upstreams (DeepWiki, HF, …). The MCP lane builds
+# its own contexts (kubetee_mcp_trust.build_mcp_trust_context) which never
+# carry _CA as cafile — do not relax either side of that pairing.
 _orig = ssl.create_default_context
 _EW_DIR = os.environ.get("KUBETEE_EASTWEST_DIR", "/run/kubetee-eastwest")
 _CA = os.path.join(_EW_DIR, "ca.pem")
