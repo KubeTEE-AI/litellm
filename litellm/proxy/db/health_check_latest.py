@@ -31,15 +31,31 @@ FROM "LiteLLM_HealthCheckTable"
 ORDER BY "model_id" ASC, "model_name" ASC, "checked_at" DESC
 """
 
+# KubeTEE overlay fix: the hub endpoints key health by model_name only, but this
+# query returns one row per (model_id, model_name) ordered by model_id ASC.
+# Legacy/manual rows carry model_id = <model_name> (not a UUID), which sorts
+# AFTER uuids, so in a name-keyed dict they clobber the fresh per-pod rows and
+# the hub shows months-old health (e.g. glm-5.2 healthy but dated 2026-08-09).
+# Ordering by checked_at DESC first makes the newest row win per name.
+LATEST_HEALTH_CHECKS_NAME_FIRST_SQL: Final = """
+SELECT DISTINCT ON ("model_name")
+       "health_check_id", "model_name", "model_id", "status",
+       "healthy_count", "unhealthy_count", "error_message",
+       "response_time_ms", "details", "checked_by",
+       "checked_at", "created_at", "updated_at"
+FROM "LiteLLM_HealthCheckTable"
+ORDER BY "model_name" ASC, "checked_at" DESC
+"""
+
 LATEST_HEALTH_CHECKS_FOR_MODELS_SQL: Final = """
-SELECT DISTINCT ON ("model_id", "model_name")
+SELECT DISTINCT ON ("model_name")
        "health_check_id", "model_name", "model_id", "status",
        "healthy_count", "unhealthy_count", "error_message",
        "response_time_ms", "details", "checked_by",
        "checked_at", "created_at", "updated_at"
 FROM "LiteLLM_HealthCheckTable"
 WHERE "model_name" = ANY($1)
-ORDER BY "model_id" ASC, "model_name" ASC, "checked_at" DESC
+ORDER BY "model_name" ASC, "checked_at" DESC
 """
 
 
@@ -75,7 +91,7 @@ _ROWS_ADAPTER: Final = TypeAdapter(tuple[LatestHealthCheckRow, ...])
 
 
 async def query_latest_health_checks(prisma_client: PrismaClient) -> tuple[LatestHealthCheckRow, ...]:
-    rows: Final = await prisma_client.db.query_raw(LATEST_HEALTH_CHECKS_SQL)
+    rows: Final = await prisma_client.db.query_raw(LATEST_HEALTH_CHECKS_NAME_FIRST_SQL)
     return _ROWS_ADAPTER.validate_python(rows)
 
 
