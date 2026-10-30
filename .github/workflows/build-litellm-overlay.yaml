@@ -131,7 +131,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py kubetee_mcp_trust.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           # Pricing module must register the static FLUX + MiniMax-H3 cost-map
@@ -157,6 +157,9 @@ jobs:
           grep -q 'KubeTEEMCPTrust' kubetee_mcp_trust.py
           grep -q 'build_mcp_trust_context' kubetee_mcp_trust.py
           grep -q 'certifi.where' kubetee_mcp_trust.py
+          # Health-latest patch must replace both SQL constants name-first.
+          grep -q 'LATEST_HEALTH_CHECKS_SQL' kubetee_health_latest.py
+          grep -q 'DISTINCT ON (\"model_name\")' kubetee_health_latest.py
           # The dispatch path does `await callback.async_pre_call_hook(...)` —
           # a SYNC def returns None and every request 500s (kubetee.1 incident
           # 2026-10-05). Both hooks MUST be coroutine functions.
@@ -218,6 +221,8 @@ jobs:
           import sitecustomize  # noqa - runs import-time ssl patch
           import kubetee_pricing  # noqa - runs import-time register_model
           import kubetee_glm_effort  # noqa - request-path validation
+          import kubetee_health_latest  # noqa - patches health_check_latest SQL at import
+          assert 'DISTINCT ON (\"model_name\")' in __import__('litellm.proxy.db.health_check_latest', fromlist=['x']).LATEST_HEALTH_CHECKS_SQL
           assert hasattr(kubetee_route_guard, 'kubetee_route_guard_logger')
           assert hasattr(kubetee_attestation, 'kubetee_attestation_logger')
           assert hasattr(kubetee_pricing, 'kubetee_pricing_logger')
