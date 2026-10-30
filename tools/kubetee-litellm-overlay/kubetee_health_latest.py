@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import litellm.proxy.db.health_check_latest as _hcl
+from litellm.integrations.custom_logger import CustomLogger
 
 _NAME_FIRST_SQL = """
 SELECT DISTINCT ON ("model_name")
@@ -46,7 +47,7 @@ _hcl.LATEST_HEALTH_CHECKS_SQL = _NAME_FIRST_SQL
 _hcl.LATEST_HEALTH_CHECKS_FOR_MODELS_SQL = _NAME_FIRST_MODELS_SQL
 
 
-class KubeTEEHealthLatest:
+class KubeTEEHealthLatest(CustomLogger):
     """No-op logger; applying the patch at import/registration is the feature."""
 
     async def async_log_success_event(self, *args, **kwargs):  # noqa: D401

@@ -160,6 +160,9 @@ jobs:
           # Health-latest patch must replace both SQL constants name-first.
           grep -q 'LATEST_HEALTH_CHECKS_SQL' kubetee_health_latest.py
           grep -q 'DISTINCT ON (\"model_name\")' kubetee_health_latest.py
+          # Health-latest logger must subclass CustomLogger (callback loader rejects plain objects).
+          grep -q 'CustomLogger' kubetee_health_latest.py
+          grep -q 'class KubeTEEHealthLatest(CustomLogger)' kubetee_health_latest.py
           # The dispatch path does `await callback.async_pre_call_hook(...)` —
           # a SYNC def returns None and every request 500s (kubetee.1 incident
           # 2026-10-05). Both hooks MUST be coroutine functions.
@@ -221,7 +224,9 @@ jobs:
           import sitecustomize  # noqa - runs import-time ssl patch
           import kubetee_pricing  # noqa - runs import-time register_model
           import kubetee_glm_effort  # noqa - request-path validation
+          from litellm.integrations.custom_logger import CustomLogger as _CL
           import kubetee_health_latest  # noqa - patches health_check_latest SQL at import
+          assert issubclass(kubetee_health_latest.KubeTEEHealthLatest, _CL)
           assert 'DISTINCT ON (\"model_name\")' in __import__('litellm.proxy.db.health_check_latest', fromlist=['x']).LATEST_HEALTH_CHECKS_SQL
           assert hasattr(kubetee_route_guard, 'kubetee_route_guard_logger')
           assert hasattr(kubetee_attestation, 'kubetee_attestation_logger')
