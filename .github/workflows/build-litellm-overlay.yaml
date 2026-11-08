@@ -1,0 +1,271 @@
+name: Build and Publish LiteLLM Gateway Overlay
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag override (optional; default = <base_tag>-kubetee.<auto-increment>)"
+        required: false
+        type: string
+      base_tag:
+        description: "Upstream litellm-database tag override (optional; default = env.DEFAULT_BASE_TAG)"
+        required: false
+        type: string
+  push:
+    branches:
+      - kubetee-overlay
+    paths:
+      - "tools/kubetee-litellm-overlay/**"
+      - ".github/workflows/build-litellm-overlay.yaml"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: kubetee-ai/litellm-database
+  # 1.103.9-kubetee.3 (2026-10-28): adds kubetee_mcp_trust.py — the
+  # outbound MCP client gets its own measured trust context instead of
+  # inheriting the process-global ssl_verify (the east-west CA only). Public
+  # MCP servers (DeepWiki, HF) failed TLS ("unable to get local issuer
+  # certificate") and the fix must NOT widen the east-west lane: default
+  # KUBETEE_MCP_VERIFY=certifi (measured web PKI, in-image) — lanes disjoint;
+  # east-west stays measured-only. The anchor+certifi composite is an explicit
+  # opt-in ("eastwest") for deployments with private MCP upstreams. Also keeps
+  # the east-west CLIENT cert off the MCP lane (sitecustomize keys its attach
+  # on the east-west CA path only).
+  # 1.103.3-kubetee.8 (2026-10-07): route guard also 404s video STATUS/
+  # CONTENT polls whose video_id cannot resolve to a router deployment
+  # (raw/unresolvable ids). Hit via Belarel 2026-10-06: 148x 500
+  # "Cannot connect to api.openai.com:443 [SSLCertVerificationError]" —
+  # unresolvable id -> provider defaults to "openai" -> direct
+  # litellm.avideo_status dials api.openai.com -> TLS verify fails (TDX pod
+  # trusts only the east-west CA). 404 video_not_found avoids the outbound
+  # call entirely; gateway-issued ids still poll normally.
+  # 1.103.3-kubetee.7 (2026-10-06): GLM-5.2 low/medium/minimal now MAP to
+  # high instead of 400 — a live client sent effort=low on z-ai/glm-5.2 and
+  # was rejected ("reasoning_effort='low' is not supported"). The 5.2
+  # template accepts high/max only and coerces everything else to max, so
+  # "high" is the only faithful downgrade path for clients asking for less
+  # thinking; "none" keeps the native enable_thinking=False toggle.
+  # 1.103.3-kubetee.6 (2026-10-06): kubetee_glm_effort posture revised
+  # after checking the zai-org model cards — the GLM-5.3 card documents
+  # any-other-value -> max ("defaults to max if not passed (or if set to
+  # any other value)"), so medium/minimal/unknown on the glm-5.3 family now
+  # MAP to max instead of 400 (SDKs defaulting to medium were being
+  # rejected within the hour of kubetee.5 shipping). "none" stays a hard
+  # 400 (the one value a client expects to suppress thinking). glm-5.2
+  # unchanged: high/max/none only, no invented mappings.
+  # 1.103.3-kubetee.5 (2026-10-06): adds kubetee_glm_effort.py —
+  # validates/maps reasoning_effort for GLM models (Belarel audit item 10):
+  # glm-5.3 family rejects none with 400 (always-on reasoners; the template
+  # coerces them to max, and v0.5.20 degenerate-loops on "none");
+  # glm-5.2 honors "none" via the native enable_thinking toggle;
+  # low/high/max pass through (verified live at temperature 0).
+  # 1.103.3-kubetee.4 (2026-10-06): kubetee_pricing adds the MiniMax-H3
+  # video entry (output_cost_per_video_per_second 0.08) — video spend was $0
+  # on the litellm_params-only row shape (a1a6a889): get_litellm_params()
+  # drops the key, use_custom_pricing_for_model never opens, and the
+  # get_model_info() fallback raised ModelNotMappedError (proxy swallows
+  # cost exceptions -> $0). Static entry makes both row shapes bill
+  # 0.08/s * duration.
+  # 1.103.3-kubetee.3 (2026-10-05): adds kubetee_pricing.py — static
+  # cost-map entries (litellm.register_model, persist_across_reloads) so
+  # image-generation spend tracks $0.05/image under the honest FLUX.2-klein
+  # model name on 1.103.x (deployment input_cost_per_image is ignored for
+  # images pre-#39311/1.104.0). DB row c4eb8424 migrated off the dall-e-2
+  # masquerade the same day; drop this module one release after the base
+  # moves to >= 1.104.
+  # 1.103.3-kubetee.2 (2026-10-05): route guard async_pre_call_hook fixed to
+  # `async def` — kubetee.1 shipped a SYNC def; the proxy dispatch does
+  # `await callback.async_pre_call_hook(...)` -> None -> TypeError on EVERY
+  # request (gateway 500s). CI now asserts coroutine-function hooks.
+  # Base 1.103.3 (ecae261b10) = 1.103.2 + migration-check hardening, wolfi
+  # glibc bump, pyjwt/pypdf/tornado/urllib3/gitpython advisory bumps,
+  # streamed-chunk pricing fix. Overlay contents: kubetee_route_guard.py
+  # (block GET /v1/videos list — global store, no per-key scoping),
+  # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
+  # (east-west client cert loading).
+  DEFAULT_BASE_TAG: 1.103.9
+
+jobs:
+  build-and-push:
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Clean root-owned leftovers from prior runs
+        run: |
+          sudo rm -rf tools/kubetee-litellm-overlay/__pycache__ || true
+          sudo chown -R $(id -u):$(id -g) . 2>/dev/null || true
+
+      - name: Checkout litellm fork
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_BASE_TAG: ${{ inputs.base_tag }}
+        run: |
+          BASE_TAG="$INPUT_BASE_TAG"
+          [ -z "$BASE_TAG" ] && BASE_TAG="${DEFAULT_BASE_TAG}"
+      
+          TAG="$INPUT_TAG"
+          if [ -z "$TAG" ]; then
+            MAX_N=$(curl -fsSL \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/orgs/KubeTEE-AI/packages/container/${IMAGE_NAME#*/}/versions?per_page=100" \
+              | grep -oE "\"${BASE_TAG}-kubetee\.[0-9]+\"" \
+              | sed -E 's/.*-kubetee\.([0-9]+)"/\1/' \
+              | sort -n | tail -1)
+            TAG="${BASE_TAG}-kubetee.$((${MAX_N:-0} + 1))"
+          fi
+      
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "BASE_TAG=$BASE_TAG" >> "$GITHUB_ENV"
+          echo "Resolved TAG=${TAG} BASE_TAG=${BASE_TAG}"
+
+      - name: Login to ghcr (authenticated pulls — anonymous is IP-rate-limited)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u KubeTEE-AI --password-stdin
+
+      - name: Verify overlay modules are present and non-trivial
+        run: |
+          cd tools/kubetee-litellm-overlay
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py Dockerfile; do
+            test -s "$f" || { echo "MISSING $f"; exit 1; }
+          done
+          # Pricing module must register the static FLUX + MiniMax-H3 cost-map
+          # entries.
+          grep -q 'STATIC_MODEL_COST' kubetee_pricing.py
+          grep -q 'register_model' kubetee_pricing.py
+          grep -q 'persist_across_reloads' kubetee_pricing.py
+          grep -q 'input_cost_per_image' kubetee_pricing.py
+          grep -q 'output_cost_per_video_per_second' kubetee_pricing.py
+          grep -q 'MiniMax-H3' kubetee_pricing.py
+          # Route guard must block the video list call type.
+          grep -q 'avideo_list' kubetee_route_guard.py
+          grep -q 'KubeTEERouteGuard' kubetee_route_guard.py
+          grep -q 'HTTP_404_NOT_FOUND' kubetee_route_guard.py
+          # GLM effort module must validate + map, and its hook must be async.
+          grep -q 'KubeTEEGlmEffort' kubetee_glm_effort.py
+          grep -q 'reasoning_effort_not_supported' kubetee_glm_effort.py
+          grep -q 'enable_thinking' kubetee_glm_effort.py
+          # MCP trust module must carry the split-trust construction and the
+          # single patch seam (MCPClient.__init__ — the factory reads its
+          # ssl_verify). Anything less reproduces the public-MCP TLS failure
+          # or, worse, widens the east-west lane.
+          grep -q 'KubeTEEMCPTrust' kubetee_mcp_trust.py
+          grep -q 'build_mcp_trust_context' kubetee_mcp_trust.py
+          grep -q 'certifi.where' kubetee_mcp_trust.py
+          # Health-latest patch must replace both SQL constants name-first.
+          grep -q 'LATEST_HEALTH_CHECKS_SQL' kubetee_health_latest.py
+          grep -q 'DISTINCT ON (\"model_name\")' kubetee_health_latest.py
+          # Health-latest logger must subclass CustomLogger (callback loader rejects plain objects).
+          grep -q 'CustomLogger' kubetee_health_latest.py
+          grep -q 'class KubeTEEHealthLatest(CustomLogger)' kubetee_health_latest.py
+          # The dispatch path does `await callback.async_pre_call_hook(...)` —
+          # a SYNC def returns None and every request 500s (kubetee.1 incident
+          # 2026-10-05). Both hooks MUST be coroutine functions.
+          docker run --rm \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/overlay" \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database:${BASE_TAG} \
+            -c "
+          import sys, inspect
+          sys.path.insert(0, '/overlay')
+          from kubetee_route_guard import KubeTEERouteGuard
+          from kubetee_attestation import KubeTEEAttestationLogger
+          from kubetee_glm_effort import KubeTEEGlmEffort
+          assert inspect.iscoroutinefunction(KubeTEERouteGuard.async_pre_call_hook), \
+              'async_pre_call_hook must be async def (awaited by proxy dispatch)'
+          assert inspect.iscoroutinefunction(KubeTEEGlmEffort.async_pre_call_hook), \
+              'glm effort async_pre_call_hook must be async def'
+          assert inspect.iscoroutinefunction(KubeTEEAttestationLogger.async_post_call_response_headers_hook), \
+              'async_post_call_response_headers_hook must be async def'
+          print('hook coroutine-function check OK')
+          "
+          # Attestation module must mount /v1/attestation via CustomLogger.
+          grep -q 'KubeTEEAttestationLogger' kubetee_attestation.py
+          grep -q '/v1/attestation' kubetee_attestation.py
+          # Binding module must carry the v1 construction + its pinned purpose tag.
+          grep -q 'kubetee.attestation.v1' kubetee_binding.py
+          grep -q 'report_data_statement' kubetee_binding.py
+          grep -q 'zero-padded' kubetee_binding.py
+          # EAR module must carry BOTH tee-pubkey arms (the RSA east-west key
+          # is the live identity; an EC-only helper raised AttributeError and
+          # left `appraisal` permanently absent — 2026-10-27) and the mint must
+          # actually be wired into the startup fetch (it had no caller at all).
+          grep -q 'TeePubKey::RSA' kubetee_ear.py
+          grep -q 'tee_pubkey_from_key_pem' kubetee_ear.py
+          grep -q 'bootstrap_ear' kubetee_eastwest.py
+          grep -q 'kubetee_ear' kubetee_eastwest.py
+          echo "overlay modules verified"
+          sha256sum kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py sitecustomize.py kubetee_pricing.py
+
+      - name: Smoke test modules against the base image
+        run: |
+          cd tools/kubetee-litellm-overlay
+          docker pull ghcr.io/berriai/litellm-database:${BASE_TAG}
+          docker run --rm \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/overlay" \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database:${BASE_TAG} \
+            -c "
+          import sys
+          sys.path.insert(0, '/overlay')
+          import kubetee_route_guard
+          import kubetee_attestation
+          import kubetee_binding
+          import kubetee_ear
+          import kubetee_eastwest
+          import kubetee_bootstrap
+          import sitecustomize  # noqa - runs import-time ssl patch
+          import kubetee_pricing  # noqa - runs import-time register_model
+          import kubetee_glm_effort  # noqa - request-path validation
+          from litellm.integrations.custom_logger import CustomLogger as _CL
+          import kubetee_health_latest  # noqa - patches health_check_latest SQL at import
+          assert issubclass(kubetee_health_latest.KubeTEEHealthLatest, _CL)
+          assert 'DISTINCT ON (\"model_name\")' in __import__('litellm.proxy.db.health_check_latest', fromlist=['x']).LATEST_HEALTH_CHECKS_SQL
+          assert hasattr(kubetee_route_guard, 'kubetee_route_guard_logger')
+          assert hasattr(kubetee_attestation, 'kubetee_attestation_logger')
+          assert hasattr(kubetee_pricing, 'kubetee_pricing_logger')
+          assert hasattr(kubetee_glm_effort, 'kubetee_glm_effort_logger')
+          # Both tee-pubkey arms must work — RSA is the live east-west key.
+          from cryptography.hazmat.primitives.asymmetric import ec, rsa
+          assert kubetee_ear.tee_pubkey_of(ec.generate_private_key(ec.SECP256R1()))['kty'] == 'EC'
+          assert kubetee_ear.tee_pubkey_of(rsa.generate_private_key(public_exponent=65537, key_size=2048))['kty'] == 'RSA'
+          assert kubetee_ear.tee_pubkey_from_key_pem(b'not a key') is None
+          print('overlay modules import OK against base', '${BASE_TAG}')
+          "
+
+      - name: Build and push overlay image
+        run: |
+          cd tools/kubetee-litellm-overlay
+          docker buildx build --platform linux/amd64 \
+            --build-arg BASE_TAG=${BASE_TAG} \
+            -f Dockerfile \
+            -t ${REGISTRY}/${IMAGE_NAME}:${TAG} \
+            --push \
+            .
+          echo "Pushed ${REGISTRY}/${IMAGE_NAME}:${TAG}"
+
+      - name: Verify pushed image
+        run: |
+          docker pull ${REGISTRY}/${IMAGE_NAME}:${TAG}
+          # Modules land in the venv site-packages the proxy runs with.
+          docker run --rm --entrypoint /app/.venv/bin/python \
+            ${REGISTRY}/${IMAGE_NAME}:${TAG} \
+            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, sitecustomize, kubetee_pricing, kubetee_glm_effort; print('verify: import OK')"
+          docker run --rm --entrypoint /app/.venv/bin/python \
+            ${REGISTRY}/${IMAGE_NAME}:${TAG} \
+            -c "
+          from pathlib import Path
+          p = Path('/app/.venv/lib/python3.13/site-packages')
+          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'kubetee_ear.py', 'kubetee_eastwest.py', 'kubetee_bootstrap.py', 'sitecustomize.py', 'kubetee_pricing.py', 'kubetee_glm_effort.py'):
+              f = p / m
+              assert f.is_file(), f'MISSING {m}'
+              print(m, f.stat().st_size, 'bytes')
+          "
+          echo "image ${REGISTRY}/${IMAGE_NAME}:${TAG} verified"
