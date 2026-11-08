@@ -16,10 +16,12 @@
 # (/app/.venv/lib/python3.13/site-packages), so behavior is identical to the
 # ConfigMap setup — the modules are just measured image content now.
 #
-# Tags: <upstream>-kubetee.N (e.g. 1.103.3-kubetee.1). Never reuse a tag.
-
-ARG BASE_TAG=1.103.9
-FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
+# Tags: <upstream>-kubetee.N (e.g. 1.108.3-kubetee.1). Never reuse a tag.
+# BASE_DIGEST is the cosign-verified upstream multi-architecture index.
+# The AMD64 build resolves and records the matching child image digest.
+ARG BASE_TAG=1.108.3
+ARG BASE_DIGEST=sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26
+FROM ghcr.io/berriai/litellm-database@${BASE_DIGEST}
 
 # kubetee_route_guard.py: blocks GET /v1/videos (global-store enumeration).
 # kubetee_attestation.py: GET /v1/attestation + inline X-KubeTEE-Nonce evidence.
@@ -38,9 +40,8 @@ FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 #   get local issuer certificate"). Modes: certifi (default — measured web
 #   PKI), system (opt-in), explicit CA path, or eastwest (opt-in composite =
 #   measured anchor + certifi). Pinned by tests/.../test_kubetee_mcp_trust.py.
-# kubetee_pricing.py: static cost-map entries so image-generation spend
-#   tracks under honest model names on 1.103.x (upstream fix #39311 is
-#   1.104+ only; keep one release after the base bump, then drop).
+# kubetee_pricing.py is retired on 1.108.3: FLUX.2 and MiniMax-H3 are not
+# live gateways lanes. Upstream's cost map remains unmodified.
 # kubetee_glm_effort.py: validates/maps reasoning_effort for GLM models
 #   (Belarel audit item 10). GLM-5.3/Flash are always-on reasoners — the
 #   chat template only accepts low/high/max and silently coerces anything
@@ -59,7 +60,7 @@ FROM ghcr.io/berriai/litellm-database:${BASE_TAG}
 # kubetee_bootstrap.py + kubetee-entrypoint.sh: run the east-west fetch
 #   before the base entrypoint — fail-closed. Client-facing TLS stays
 #   cert-manager (the ACME per-boot path was cut 2026-10-24).
-COPY kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py sitecustomize.py kubetee_pricing.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py /app/.venv/lib/python3.13/site-packages/
+COPY kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py /app/.venv/lib/python3.13/site-packages/
 COPY kubetee-entrypoint.sh /app/docker/kubetee-entrypoint.sh
 RUN chmod 0755 /app/docker/kubetee-entrypoint.sh
 
