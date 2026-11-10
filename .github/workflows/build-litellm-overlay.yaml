@@ -341,21 +341,19 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
 
-      - name: Scan release image for actionable high and critical vulnerabilities
-        if: ${{ env.PUBLISH == 'true' }}
-        run: |
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
         with:
           version: v0.76.2
           cache: false
+        if: ${{ env.PUBLISH == 'true' }}
 
       - name: Scan release image for actionable high and critical vulnerabilities
         if: ${{ env.PUBLISH == 'true' }}
         run: |
           trivy image --image-src remote --scanners vuln --severity HIGH,CRITICAL \
             --ignore-unfixed --format json --output /tmp/kubetee-11083-trivy.json \
-            --exit-code 1 "${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
+            --exit-code 1 "${IMAGE_REF}"
 
       - name: Save supply-chain evidence
         uses: actions/upload-artifact@v4
@@ -366,6 +364,8 @@ jobs:
             /tmp/kubetee-image-metadata.json
             /tmp/kubetee-overlay-provenance.json
             /tmp/kubetee-11083-trivy.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Verify built image and published registry reference
         run: |
