@@ -101,6 +101,7 @@ jobs:
       id-token: write
       actions: write
     env:
+      PR_NUMBER: ${{ github.event.number }}
       PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/kubetee-prod' }}
     steps:
       - name: Clean root-owned leftovers from prior runs
@@ -132,7 +133,7 @@ jobs:
       
           TAG="$INPUT_TAG"
           if [ -z "$TAG" ] && [ "$PUBLISH" != "true" ]; then
-            TAG="pr-${GITHUB_EVENT_PULL_REQUEST_NUMBER}-validation"
+            TAG="pr-${PR_NUMBER}-validation"
           fi
           if [ -z "$TAG" ]; then
             MAX_N=$(curl -fsSL \
@@ -197,8 +198,8 @@ jobs:
           done
           test ! -e kubetee_pricing.py
           grep -q 'COPY.*kubetee_health_latest' Dockerfile
-          test "$(BASE_TAG)" = "1.108.3" || { echo 'BASE_TAG override changes this release candidate'; exit 1; }
-          test "$(DEFAULT_BASE_DIGEST)" = "sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26"
+          test "$BASE_TAG" = "1.108.3" || { echo 'BASE_TAG override changes this release candidate'; exit 1; }
+          test "$DEFAULT_BASE_DIGEST" = "sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26"
           # Route guard must block the video list call type.
           grep -q 'avideo_list' kubetee_route_guard.py
           grep -q 'KubeTEERouteGuard' kubetee_route_guard.py
