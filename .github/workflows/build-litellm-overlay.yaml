@@ -344,7 +344,15 @@ jobs:
       - name: Scan release image for actionable high and critical vulnerabilities
         if: ${{ env.PUBLISH == 'true' }}
         run: |
-          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/v0.68.2/install.sh | sh -s -- -b /usr/local/bin v0.68.2
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        with:
+          version: v0.76.2
+          cache: false
+
+      - name: Scan release image for actionable high and critical vulnerabilities
+        if: ${{ env.PUBLISH == 'true' }}
+        run: |
           trivy image --image-src remote --scanners vuln --severity HIGH,CRITICAL \
             --ignore-unfixed --format json --output /tmp/kubetee-11083-trivy.json \
             --exit-code 1 "${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
