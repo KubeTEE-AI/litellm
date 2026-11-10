@@ -359,9 +359,11 @@ jobs:
             /tmp/kubetee-overlay-provenance.json
             /tmp/kubetee-11083-trivy.json
 
-      - name: Verify published image
+      - name: Verify built image and published registry reference
         run: |
-          docker pull ${REGISTRY}/${IMAGE_NAME}:${TAG}
+          if [ "$PUBLISH" = "true" ]; then
+            docker pull ${REGISTRY}/${IMAGE_NAME}:${TAG}
+          fi
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
