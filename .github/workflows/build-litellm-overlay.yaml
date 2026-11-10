@@ -101,6 +101,7 @@ jobs:
       id-token: write
       actions: write
     env:
+      PR_NUMBER: ${{ github.event.number }}
       PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/kubetee-prod' }}
     steps:
       - name: Clean root-owned leftovers from prior runs
@@ -110,6 +111,9 @@ jobs:
 
       - name: Checkout litellm fork
         uses: actions/checkout@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
 
       - name: Require production source branch for publishing
         run: |
@@ -129,7 +133,7 @@ jobs:
       
           TAG="$INPUT_TAG"
           if [ -z "$TAG" ] && [ "$PUBLISH" != "true" ]; then
-            TAG="pr-${GITHUB_EVENT_PULL_REQUEST_NUMBER}-validation"
+            TAG="pr-${PR_NUMBER}-validation"
           fi
           if [ -z "$TAG" ]; then
             MAX_N=$(curl -fsSL \
@@ -194,8 +198,8 @@ jobs:
           done
           test ! -e kubetee_pricing.py
           grep -q 'COPY.*kubetee_health_latest' Dockerfile
-          test "$(BASE_TAG)" = "1.108.3" || { echo 'BASE_TAG override changes this release candidate'; exit 1; }
-          test "$(DEFAULT_BASE_DIGEST)" = "sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26"
+          test "$BASE_TAG" = "1.108.3" || { echo 'BASE_TAG override changes this release candidate'; exit 1; }
+          test "$DEFAULT_BASE_DIGEST" = "sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26"
           # Route guard must block the video list call type.
           grep -q 'avideo_list' kubetee_route_guard.py
           grep -q 'KubeTEERouteGuard' kubetee_route_guard.py
@@ -355,9 +359,11 @@ jobs:
             /tmp/kubetee-overlay-provenance.json
             /tmp/kubetee-11083-trivy.json
 
-      - name: Verify published image
+      - name: Verify built image and published registry reference
         run: |
-          docker pull ${REGISTRY}/${IMAGE_NAME}:${TAG}
+          if [ "$PUBLISH" = "true" ]; then
+            docker pull ${REGISTRY}/${IMAGE_NAME}:${TAG}
+          fi
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
