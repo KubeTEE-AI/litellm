@@ -5,7 +5,7 @@ Kata pod). Everything the gateway runs that is **not** upstream LiteLLM
 ships in this image so it is covered by the TDX measurement chain:
 
 ```
-git (this repo, branch kubetee-overlay, tag v1.103.3)
+git (this repo, default branch kubetee-prod, base v1.108.3)
   -> GitHub Actions (.github/workflows/build-litellm-overlay.yaml)
   -> ghcr.io/kubetee-ai/litellm-database:<upstream>-kubetee.N
   -> measured container allowlist (nim/eastwest/policy-litellm.rego,
@@ -63,15 +63,15 @@ the `register_model` call in module scope is the actual feature.)
 
 ## Tags
 
-`<upstream-version>-kubetee.N` — e.g. `1.103.3-kubetee.1`. The base tag
-(default `1.103.3`) is overridable per run via `workflow_dispatch` inputs.
+`<upstream-version>-kubetee.N` — e.g. `1.108.3-kubetee.2`. The base tag
+(default `1.108.3`) is overridable per run via `workflow_dispatch` inputs.
 **Never reuse a tag** (a node with `imagePullPolicy: IfNotPresent` caches
 by tag; overwriting a tag leaves stale layers on nodes — same rule as the
 kata-deploy CSI `-kubetee3` incident).
 
 ## Build / verify
 
-Pushes to `tools/kubetee-litellm-overlay/**` on branch `kubetee-overlay`
+Pushes to `tools/kubetee-litellm-overlay/**` on branch `kubetee-prod`
 build automatically; `workflow_dispatch` allows a custom tag + base.
 
 CI gates:
@@ -83,6 +83,11 @@ CI gates:
    (`docker run base python -c "import kubetee_route_guard, ..."`).
 3. Post-push verify: modules import from the venv site-packages inside the
    pushed image, and file sizes are printed for the build log.
+
+Pull requests targeting `kubetee-prod` run the same tests and build the image
+locally without login, publishing, or signing. Only pushes and manual dispatches
+on `kubetee-prod` publish and sign an image. Production deployment is always a
+separate, reviewed measured-allowlist and Fleet change.
 
 ## Rollout coupling
 
@@ -115,7 +120,7 @@ curl -s -X POST https://llm.kubetee.ai/v1/videos -H "Authorization: Bearer $KEY"
 
 1. Edit the module in this directory.
 2. Bump the `-kubetee.N` suffix (never reuse).
-3. Push to `kubetee-overlay` (or dispatch with a custom tag).
+3. Merge a reviewed, passing PR to `kubetee-prod`, or dispatch that branch with a custom tag. A build publishes an image but never deploys it automatically.
 4. Update `nim/eastwest/kubetee_attestation.py` (and `kubetee_binding.py`) in the root repo to match
    (source-of-truth sync), and the Fleet values if registration changed.
 5. Update the policy allowlist if the image tag changed (see above).

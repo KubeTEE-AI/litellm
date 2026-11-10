@@ -13,12 +13,15 @@ on:
         type: string
   push:
     branches:
-      - kubetee-overlay
-      - litellm_11083_kubetee_overlay
+      - kubetee-prod
     paths:
       - "tools/kubetee-litellm-overlay/**"
       - "tests/test_litellm/tools/kubetee-litellm-overlay/**"
       - ".github/workflows/build-litellm-overlay.yaml"
+
+  pull_request:
+    branches:
+      - kubetee-prod
 
 env:
   REGISTRY: ghcr.io
@@ -97,6 +100,8 @@ jobs:
       packages: write
       id-token: write
       actions: write
+    env:
+      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/kubetee-prod' }}
     steps:
       - name: Clean root-owned leftovers from prior runs
         run: |
@@ -105,6 +110,14 @@ jobs:
 
       - name: Checkout litellm fork
         uses: actions/checkout@v4
+
+      - name: Require production source branch for publishing
+        run: |
+          if [ "$PUBLISH" = "true" ]; then
+            test "${GITHUB_REF_NAME}" = "kubetee-prod"
+          else
+            test "${GITHUB_EVENT_NAME}" = "pull_request"
+          fi
 
       - name: Resolve tag
         env:
@@ -115,6 +128,9 @@ jobs:
           [ -z "$BASE_TAG" ] && BASE_TAG="${DEFAULT_BASE_TAG}"
       
           TAG="$INPUT_TAG"
+          if [ -z "$TAG" ] && [ "$PUBLISH" != "true" ]; then
+            TAG="pr-${GITHUB_EVENT_PULL_REQUEST_NUMBER}-validation"
+          fi
           if [ -z "$TAG" ]; then
             MAX_N=$(curl -fsSL \
                 -H "Accept: application/vnd.github+json" \
@@ -166,6 +182,7 @@ jobs:
           "
 
       - name: Login to ghcr (authenticated pulls — anonymous is IP-rate-limited)
+        if: ${{ env.PUBLISH == 'true' }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u KubeTEE-AI --password-stdin
 
@@ -278,20 +295,26 @@ jobs:
           print('overlay modules import OK against base', '${BASE_TAG}')
           "
 
-      - name: Build and push overlay image
+      - name: Build and push overlay image (publish only from kubetee-prod)
         run: |
           cd tools/kubetee-litellm-overlay
+          if [ "$PUBLISH" = "true" ]; then
+            OUTPUT="--push"
+          else
+            OUTPUT="--load"
+          fi
           docker buildx build --platform linux/amd64 \
             --build-arg BASE_TAG=${BASE_TAG} \
             --build-arg BASE_DIGEST=${DEFAULT_BASE_DIGEST} \
             --metadata-file /tmp/kubetee-image-metadata.json \
             -f Dockerfile \
             -t ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            --push \
+            ${OUTPUT} \
             .
-          echo "Pushed ${REGISTRY}/${IMAGE_NAME}:${TAG}"
+          echo "Built ${REGISTRY}/${IMAGE_NAME}:${TAG} (PUBLISH=${PUBLISH})"
 
       - name: Record and sign immutable digest
+        if: ${{ env.PUBLISH == 'true' }}
         run: |
           IMAGE_DIGEST=$(python3 -c 'import json; print(json.load(open("/tmp/kubetee-image-metadata.json"))["containerimage.digest"])')
           echo "IMAGE_REF=${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
@@ -315,6 +338,7 @@ jobs:
             "${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
 
       - name: Scan release image for actionable high and critical vulnerabilities
+        if: ${{ env.PUBLISH == 'true' }}
         run: |
           curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/v0.68.2/install.sh | sh -s -- -b /usr/local/bin v0.68.2
           trivy image --image-src remote --scanners vuln --severity HIGH,CRITICAL \
