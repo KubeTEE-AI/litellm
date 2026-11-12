@@ -108,6 +108,87 @@ async def signed(api, client: AsyncClient, hotkey, action="claim", *, signed=Non
 
 
 @pytest.mark.asyncio
+async def test_real_redis_nonce_is_unique_and_challenge_is_atomically_single_use():
+    """Native client: real cjson script, NX keys, KEEPTTL and replay rejection."""
+    if not os.environ.get("GAMMA_REDIS_TEST_URL"):
+        pytest.skip("explicit Redis integration requires GAMMA_REDIS_TEST_URL")
+    import hashlib
+    import secrets
+    from datetime import datetime, timezone
+    import redis.asyncio
+    client = redis.asyncio.from_url(os.environ["GAMMA_REDIS_TEST_URL"])
+    authority = claim.RedisAuthority(client)
+    hotkey = new_hotkey()
+    nonce = secrets.token_hex(32)
+    identifier = secrets.token_hex(16)
+    message = "synthetic-exact-hotkey-message"
+    now = claim.utc_now()
+    entry = {"challenge_id": identifier, "message": message,
+             "message_digest": hashlib.sha256(message.encode()).hexdigest(),
+             "hotkey_ss58": hotkey.ss58_address, "action": "claim",
+             "source_ip": "127.0.0.1", "expires": now.timestamp() + 60,
+             "used": False}
+    signature = hotkey.sign(message.encode()).hex()
+    try:
+        await client.flushdb()
+        assert await authority.insert_nonce(hotkey.ss58_address, nonce, 3600)
+        assert not await authority.insert_nonce(hotkey.ss58_address, nonce, 3600)
+        nonce_key = "kubetee:gamma:nonce:v1:" + claim._nonce_digest(hotkey.ss58_address, nonce)
+        assert 0 < await client.ttl(nonce_key) <= 3600
+        await authority.insert_challenge(identifier, {**entry, "expires": datetime.fromtimestamp(entry["expires"], timezone.utc)}, 60)
+        assert claim._standard_signature_verified(message, signature, hotkey.ss58_address)
+        peer_authority = claim.RedisAuthority(client)
+        tasks = [asyncio.create_task(authority.consume(identifier, "claim", signature, "127.0.0.1")),
+                 asyncio.create_task(peer_authority.consume(identifier, "claim", signature, "127.0.0.1"))]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        successful = [result for result in results if isinstance(result, dict) and result["used"]]
+        rejected = [result for result in results if isinstance(result, claim.HTTPException) and result.status_code == 401]
+        assert len(successful) == 1 and len(rejected) == 1, [(type(result), repr(result)) for result in results]
+        assert 0 < await client.ttl(authority._key(identifier)) <= 60
+        await client.set(authority._key("tampered"), '{"used":false,"message_digest":"wrong","source_ip":"127.0.0.1","action":"claim","expires":9999999999}', ex=60)
+        with pytest.raises(claim.HTTPException):
+            await authority.consume("tampered", "claim", signature, "127.0.0.1")
+    finally:
+        for task in locals().get("tasks", []):
+            task.cancel()
+        await asyncio.gather(*locals().get("tasks", []), return_exceptions=True)
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_native_sentinel_monitor_and_data_identities_are_distinct():
+    uri = os.environ.get("GAMMA_REDIS_SENTINEL_TEST_URL")
+    if not uri:
+        pytest.skip("explicit Sentinel integration requires GAMMA_REDIS_SENTINEL_TEST_URL")
+    from kubetee_gamma_transport import native_async_redis, redis_production_settings
+    client = native_async_redis(redis_production_settings(uri))
+    try:
+        await client.flushdb()
+        authority = claim.RedisAuthority(client)
+        hotkey = new_hotkey()
+        assert await authority.insert_nonce(hotkey.ss58_address, "disposable-nonce", 60)
+        assert not await authority.insert_nonce(hotkey.ss58_address, "disposable-nonce", 60)
+        assert await client.ping()
+        connection = await client.connection_pool.get_connection()
+        try:
+            from urllib.parse import urlsplit
+            monitor = urlsplit(uri)
+            assert (connection.host, connection.port) != (monitor.hostname, monitor.port)
+            monitor_client = client.connection_pool.sentinel_manager.sentinels[0]
+            assert monitor_client.connection_pool.connection_kwargs["password"] == "monitor-secret"
+            assert client.connection_pool.connection_kwargs["db"] == 12
+            assert client.connection_pool.connection_kwargs["username"] == "data-user"
+        finally:
+            await client.connection_pool.release(connection)
+    finally:
+        await client.flushdb()
+        await client.aclose()
+        managers = client.connection_pool.sentinel_manager.sentinels
+        for monitor in managers:
+            await monitor.aclose()
+
+
+@pytest.mark.asyncio
 async def test_exact_h_wrong_h_amount_replay_expiry_and_throttle(api):
     hotkey, wrong = new_hotkey(), new_hotkey()
     async with AsyncClient(transport=ASGITransport(app=api), base_url="http://test", headers={"x-test-agent": "negative"}) as client:

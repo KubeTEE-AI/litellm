@@ -59,3 +59,30 @@ def redis_production_settings(url: str) -> dict:
         return {**parse_url(url), "decode_responses": True, "socket_connect_timeout": 5.0}
     except (TypeError, ValueError) as error:
         raise ValueError("invalid production Redis URI configuration") from error
+
+
+def native_async_redis(config: dict):
+    """Native LiteLLM client, preserving independent Sentinel authentication.
+
+    The current base factory inherits monitor username and TLS from the data
+    node. Create redis-py's standard discovery pool with distinct settings;
+    LiteLLM's get_redis_async_client(connection_pool=...) still creates the
+    only queried client, exactly as its supported pool-injection path allows.
+    """
+    from litellm._redis import get_redis_async_client
+    settings = dict(config)
+    monitor = settings.pop("sentinel_kwargs", None)
+    if monitor is None:
+        return get_redis_async_client(**settings)
+    if bool(monitor.get("ssl")) != bool(settings.get("ssl")):
+        raise ValueError("monitor and data Redis require equal TLS mode")
+    from redis.asyncio import Sentinel
+    nodes = settings.pop("sentinel_nodes")
+    service_name = settings.pop("service_name")
+    discovered = Sentinel(nodes, sentinel_kwargs=dict(monitor))
+    pool = discovered.master_for(service_name, **settings).connection_pool
+    # Native factory input validation requires a host even when the caller's
+    # pool owns master discovery. The sentinel node addresses placeholders;
+    # SentinelConnectionPool.get_master_address always resolves a master first.
+    host = nodes[0][0]
+    return get_redis_async_client(connection_pool=pool, host=host)

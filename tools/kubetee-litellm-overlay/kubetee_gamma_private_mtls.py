@@ -8,14 +8,17 @@ No sidecar, no master credential, no public management auth bypass.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import hashlib
+import hmac
 import os
 import ssl
 import threading
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from uvicorn import Config, Server
@@ -59,30 +62,49 @@ class PrivateTransportCycle(h11_impl.RequestResponseCycle):
 
 
 class PrivateTransportProtocol(h11_impl.H11Protocol):
-    """Dedicated protocol, scoped cycle selection (Granian public stays unchanged)."""
+    """Pass transport explicitly in Uvicorn's current constructor interface."""
     def handle_events(self):
-        # Uvicorn resolves the request cycle via its module attribute. Substitute
-        # only during synchronous HTTP event parsing; other servers resume the
-        # original class immediately. Public Granian never uses this path.
-        # Keep the override only for this synchronous per-connection parse. No
-        # global replacement survives a task or a module reload.
-        with self.cycle_selection():
-            return super().handle_events()
-
-    @staticmethod
-    @contextlib.contextmanager
-    def cycle_selection():
-        standard = h11_impl.RequestResponseCycle
-        h11_impl.RequestResponseCycle = PrivateTransportCycle
+        original = h11_impl.RequestResponseCycle
+        # Both variants forward every positional or keyword argument; Uvicorn's
+        # current no-cycle-attribute implementation is also supported.
+        h11_impl.RequestResponseCycle = lambda *args, **kwargs: PrivateTransportCycle(*args, **kwargs)
         try:
-            yield
+            return super().handle_events()
         finally:
-            h11_impl.RequestResponseCycle = standard
+            h11_impl.RequestResponseCycle = original
+
+
+class PinnedHTTPXTransport(httpx.AsyncBaseTransport):
+    """Only Gamma's fixed DNS identity may authenticate this native bridge."""
+    def __init__(self, tls_context: ssl.SSLContext, expected_hostname: str, expected_fingerprint: str):
+        self.expected_hostname = expected_hostname
+        self.expected_fingerprint = expected_fingerprint
+        self.native = httpx.AsyncHTTPTransport(verify=tls_context, trust_env=False,
+            http2=False, limits=httpx.Limits(max_connections=40))
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host != "127.0.0.1":
+            raise httpx.ConnectError("Gamma native HTTP is restricted to the in-process listener")
+        request.extensions["sni_hostname"] = self.expected_hostname
+        request.headers["Host"] = self.expected_hostname
+        response = await self.native.handle_async_request(request)
+        stream = response.extensions.get("network_stream")
+        tls = stream.get_extra_info("ssl_object") if stream is not None else None
+        der = tls.getpeercert(True) if tls is not None else None
+        if not isinstance(der, bytes) or not hmac.compare_digest(
+                hashlib.sha256(der).hexdigest(), self.expected_fingerprint):
+            await response.aclose()
+            raise httpx.ConnectError("private gateway listener fingerprint mismatch")
+        return response
+
+    async def aclose(self):
+        await self.native.aclose()
 
 
 def create_private_application(service) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.kubetee_gamma_private_callback = True
+    app.state.kubetee_gamma_private_management = service
     app.add_middleware(DelegatingPeerMiddleware)
 
     @app.exception_handler(HTTPException)
@@ -111,10 +133,11 @@ def create_private_listener(settings: dict[str, str] | None = None):
         der = ssl.PEM_cert_to_DER_cert(cert.read())
     if hashlib.sha256(der).hexdigest() != env.get("KUBETEE_GAMMA_MTLS_CERT_SHA256", ""):
         raise RuntimeError("private gateway TLS fingerprint mismatch")
-    # The gateway worker-facing identity is separately verified at claim time,
-    # not via Redis or a discovery hub imported into this private API.
+    # Inbound mTLS presents the worker's outbound CLIENT certificate. Never
+    # confuse it with the worker's serverAuth certificate pinned by our own
+    # outbound client at connect_public_claims().
     service = kubetee_gamma_management.GammaManagement(
-        certificate_fingerprint=env["KUBETEE_GAMMA_WORKER_CERT_SHA256"],
+        certificate_fingerprint=env["KUBETEE_GAMMA_WORKER_CLIENT_CERT_SHA256"],
         proxy_ip="127.0.0.1", models=env["KUBETEE_GAMMA_MODELS"].split(","),
         mcp_servers=[name for name in env.get("KUBETEE_GAMMA_MCP_SERVERS", "").split(",") if name] or None,
     )
@@ -130,11 +153,19 @@ def create_private_listener(settings: dict[str, str] | None = None):
         http="kubetee_gamma_private_mtls:PrivateTransportProtocol", timeout_keep_alive=5,
         log_level="info", ssl_ca_certs=paths[0], ssl_certfile=paths[1], ssl_keyfile=paths[2],
         ssl_cert_reqs=ssl.CERT_REQUIRED)
+    # Bind on LiteLLM's event loop in its async lifespan, then only schedule
+    # the already listening Uvicorn server. A thread cannot bind reliably
+    # before this async startup hook connects the in-process native bridge.
+    import socket as socket_module
+    listener = socket_module.socket()
+    listener.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1)
+    listener.bind((configuration.host, configuration.port))
+    listener.set_inheritable(False)
     server = Server(configuration)
-    # Prisma/KBS have already succeeded when this starts. If certificate or app
-    # composition failed earlier, no unauthorized management socket ever bound.
-    thread = threading.Thread(target=server.run, name="kubetee-gamma-private-mtls", daemon=True)
+    thread = threading.Thread(target=server.run, args=([listener],), name="kubetee-gamma-private-mtls", daemon=True)
     thread._gamma_service = service
+    thread._gamma_server = server
+    thread._gamma_listener = listener
     return thread
 
 
@@ -150,7 +181,6 @@ async def connect_public_claims():
     import httpx
     import socket
     from litellm.proxy import proxy_server
-    from litellm.caching.redis_cache import RedisCache
     import kubetee_gamma_claim as claim
     if os.environ.get("KUBETEE_GAMMA_PRIVATE_MANAGEMENT_READY") != "1":
         raise RuntimeError("private mtls is required before any key bridges")
@@ -167,24 +197,28 @@ async def connect_public_claims():
         raise RuntimeError("worker TLS certificate pin mismatch")
     native_context = ssl.create_default_context(cafile=os.path.join(root, "ca.pem"))
     native_context.load_cert_chain(client_cert, client_key)
-    port = os.environ.get("KUBETEE_GAMMA_MTLS_PORT", "4001")
-    with socket.create_connection(("127.0.0.1", int(port)), timeout=5) as raw:
-        with native_context.wrap_socket(raw, server_hostname="litellm-gateway-mtls.litellm.svc.cluster.local") as tls:
-            native_der = tls.getpeercert(True)
-    if hashlib.sha256(native_der).hexdigest() != os.environ["KUBETEE_GAMMA_MTLS_CERT_SHA256"]:
-        raise RuntimeError("private gateway listener fingerprint mismatch")
-    native_http = httpx.AsyncClient(verify=native_context,
-        base_url="https://127.0.0.1:" + port, timeout=60)
+    expected_hostname = "litellm-gateway-mtls.litellm.svc.cluster.local"
+    pinned_der = os.environ["KUBETEE_GAMMA_MTLS_CERT_SHA256"]
+    port = int(os.environ.get("KUBETEE_GAMMA_MTLS_PORT", "4001"))
+    native_http = httpx.AsyncClient(
+        transport=PinnedHTTPXTransport(native_context, expected_hostname, pinned_der),
+        base_url=f"https://127.0.0.1:{port}", timeout=60)
     worker_http = httpx.AsyncClient(verify=trust, base_url=os.environ["KUBETEE_GAMMA_WORKER_URL"], timeout=60)
     from kubetee_gamma_transport import redis_production_settings
     redis_config = redis_production_settings(os.environ.get("KUBETEE_GAMMA_REDIS_URL", ""))
-    sentinel_credentials = redis_config.pop("sentinel_kwargs", None)
-    if sentinel_credentials is not None:
-        redis_config["sentinel_password"] = sentinel_credentials["password"]
-        redis_config["sentinel_username"] = sentinel_credentials.get("username")
-    redis = RedisCache(**redis_config)
+    from kubetee_gamma_transport import native_async_redis
+    # Claim consumption and key issuance share this bounded loop-scoped client.
+    # Sentinel has distinct monitor credentials; the native pool-injection path
+    # preserves them rather than silently inheriting data-node username/TLS.
+    issuance_lease = native_async_redis(redis_config)
+    await issuance_lease.ping()
+    authority = claim.RedisAuthority(issuance_lease)
+    service = getattr(proxy_server.app.state, "kubetee_gamma_private_management", None)
+    if service is None:
+        raise RuntimeError("native private management identity missing at claim bridge setup")
+    service.issuance_lease = issuance_lease
     bridge = claim.PrivateWorkerResponse(worker_http, native_http, {})
-    handler = claim.KubeTEEGammaClaimHandler(bridge, authority=claim.RedisAuthority(redis),
+    handler = claim.KubeTEEGammaClaimHandler(bridge, authority=authority,
         wait_seconds=float(os.environ.get("KUBETEE_GAMMA_WAIT_SECONDS", "55")))
     handler.register(proxy_server.app)
 
@@ -241,5 +275,15 @@ async def initialize_private_management(fetch, client_class=None):
     service = getattr(thread, "_gamma_service", None)
     if not isinstance(service, kubetee_gamma_management.GammaManagement):
         raise RuntimeError("private native service identity was not established")
+    server = thread._gamma_server
+    for attempt in range(120):
+        if not thread.is_alive() or server.should_exit:
+            raise RuntimeError("private Gamma mTLS listener failed during startup")
+        if server.started:
+            break
+        await asyncio.sleep(0.25)
+    else:
+        raise RuntimeError("private Gamma mTLS listener did not become ready in 30 seconds")
+    service.issuance_lease = None
     os.environ["KUBETEE_GAMMA_PRIVATE_MANAGEMENT_READY"] = "1"
     return thread

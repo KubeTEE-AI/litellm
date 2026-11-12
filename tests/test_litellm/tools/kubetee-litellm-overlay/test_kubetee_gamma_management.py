@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+import pytest_asyncio
 
 # Lease fencing mutex applies to native row transitions, including zero reservations.
 
@@ -146,10 +147,10 @@ class SyntheticStore:
                                              expected_spend, target_max_budget=target_max_budget)
 
     async def stored_key(self, row):
-        return self.secret
+        return self.secret if row.token == hashlib.sha256(self.secret.encode()).hexdigest() else None
 
     async def evict(self, token):
-        assert token == self.row.token
+        assert isinstance(token, str) and len(token) == 64
 
     async def rotate(self, hotkey):
         assert hotkey == HK
@@ -181,8 +182,11 @@ def app(store, identity):
     return private.create_private_application(service)
 
 
-def management(store, identity):
+def management(store, identity, lease=None):
     certificate, _ = identity
+    private_app = app(store, identity)
+    private_management = private_app.state.kubetee_gamma_private_management
+    private_management.issuance_lease = lease
     class VerifiedSocket:
         def get_extra_info(self, name):
             assert name == "ssl_object"
@@ -190,7 +194,7 @@ def management(store, identity):
         def getpeercert(self, binary_form):
             assert binary_form is True
             return b64decode(certificate.replace("\n", ""), validate=True)
-    asgi = ASGITransport(app=app(store, identity), client=("127.0.0.1", 1234))
+    asgi = ASGITransport(app=private_app, client=("127.0.0.1", 1234))
     class SocketTransport(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request):
             original_app = asgi.app
@@ -201,7 +205,7 @@ def management(store, identity):
             return await asgi.handle_async_request(request)
     transport = SocketTransport()
     http = AsyncClient(transport=transport, headers={"x-kubetee-worker-cert-der": "forged"})
-    return http, Management(http, "https://internal.invalid", "narrow worker credential")
+    return private_management, http
 
 
 @pytest.mark.asyncio
@@ -233,7 +237,8 @@ def test_signed_challenge_digest_must_match_signed_message_identity():
 @pytest.mark.asyncio
 async def test_checkpoint_read_before_and_after_credit_with_replay_rejection(worker_identity):
     store = SyntheticStore()
-    http, worker = management(store, worker_identity)
+    service, http = management(store, worker_identity)
+    worker = Management(http, "https://internal.invalid", "narrow worker credential")
     async with http:
         assert await worker.info(HK) is None
         cp, settlement = settlement_intent()
@@ -255,7 +260,8 @@ async def test_concurrent_credit_and_pending_intent_only_advance_once(worker_ide
     store = SyntheticStore()
     cp, settlement = settlement_intent()
     await store.reserve(HK, cp, {"models": ["m"], "mcp_servers": None}, SECRET)
-    http, worker = management(store, worker_identity)
+    service, http = management(store, worker_identity)
+    worker = Management(http, "https://internal.invalid", "narrow worker credential")
     async with http:
         row = await worker.info(HK)
         calls = await asyncio.gather(
@@ -265,6 +271,135 @@ async def test_concurrent_credit_and_pending_intent_only_advance_once(worker_ide
         assert [isinstance(result, Exception) for result in calls].count(False) == 1
         assert all(isinstance(result, StateConflict) for result in calls if isinstance(result, Exception))
     assert store.credit_writes == 1
+
+
+@pytest.mark.asyncio
+async def test_redis_fence_excludes_second_replica_and_withholds_lost_credentials(worker_identity, redis_lease):
+    store = SyntheticStore()
+    cp, settlement = settlement_intent()
+    await store.reserve(HK, cp, {"models": ["m"], "mcp_servers": None}, SECRET)
+    await store.compare_checkpoint(HK, cp, settled_checkpoint(cp, settlement), "0", "0", target_max_budget="1")
+    native, native_http = management(store, worker_identity, lease=redis_lease)
+    caller, caller_http = management(store, worker_identity, lease=redis_lease)
+    rotating = asyncio.Event()
+    complete = asyncio.Event()
+
+    async def interlocked_rotation(hotkey):
+        rotating.set()
+        await complete.wait()
+        await asyncio.sleep(.25)
+        store.rotations += 1
+        store.secret = ROTATED
+        store.row.token = hashlib.sha256(ROTATED.encode()).hexdigest()
+        return store.row, ROTATED
+
+    original_rotate = store.rotate
+    store.rotate = interlocked_rotation
+    first = second = None
+    try:
+        # This is deliberately the same native async Redis client as production;
+    # distinct event-loop ownership is tested by the function-scoped fixture.
+        lease_waited = asyncio.Event()
+        original_set = redis_lease.set
+        async def observed_acquire(*args, **kwargs):
+            result = await original_set(*args, **kwargs)
+            if result is not True:
+                lease_waited.set()
+            return result
+        caller.issuance_lease.set = observed_acquire
+        # Real native GammaManagement service on both replicas, sharing only Redis.
+        first = asyncio.create_task(native.issue(HK, "regenerate", "a" * 64))
+        started = asyncio.create_task(rotating.wait())
+        ready, _ = await asyncio.wait({first, started}, timeout=5,
+                                      return_when=asyncio.FIRST_COMPLETED)
+        if first in ready:
+            await first
+        assert started in ready, "rotation never reached the cross-replica interlock"
+        await started
+        second = asyncio.create_task(mg.GammaManagement.issue(caller, HK, "claim", "b" * 64))
+        await asyncio.wait_for(lease_waited.wait(), 5)
+        assert not second.done(), "second gateway instance bypassed its Redis lease"
+        complete.set()
+        assert (await first)["api_key"] == ROTATED
+        recovered = await second
+        assert recovered["api_key"] == ROTATED
+        assert store.rotations == 1, "claim used the stale credential after a true lease race"
+    finally:
+        complete.set()
+        if first is not None:
+            await asyncio.gather(first, return_exceptions=True)
+        if second is not None:
+            await asyncio.gather(second, return_exceptions=True)
+        store.rotate = original_rotate
+        await native_http.aclose()
+        await caller_http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_lost_issuance_lease_never_discloses_a_rotated_secret(worker_identity, redis_lease):
+    store = SyntheticStore()
+    cp, settlement = settlement_intent()
+    await store.reserve(HK, cp, {"models": ["m"], "mcp_servers": None}, SECRET)
+    await store.compare_checkpoint(HK, cp, settled_checkpoint(cp, settlement), "0", "0", target_max_budget="1")
+    service, http = management(store, worker_identity, lease=redis_lease)
+    lock_key = "kubetee:gamma:key-issue-lease:v1:" + HK
+    rotated = asyncio.Event()
+    original_rotate = store.rotate
+    first = None
+    try:
+        def lost_owner(**kwargs):
+            return 0
+        lost_owner.__module__ = mg.__name__ + ".redis_fencing"
+        service.release_script = lost_owner
+        service.owner_script = lost_owner
+        async def release_after_lost_owner(**kwargs):
+            # The lost holder releases its token AFTER their successor acquires;
+            # only token-comparing Lua deletion preserves the successor fence.
+            await redis_lease.set(lock_key, "successor-token", nx=True, ex=60)
+            return await redis_lease.eval(
+                "if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",
+                1, lock_key, kwargs["args"][0])
+        redis_lease.register_script = lambda script: release_after_lost_owner
+        async def pause_rotation(hotkey):
+            await rotated.wait()
+            return await original_rotate(hotkey)
+        store.rotate = pause_rotation
+        first = asyncio.create_task(service.issue(HK, "regenerate", "a" * 64))
+        await asyncio.sleep(.1)
+        assert await redis_lease.exists(lock_key)
+        await redis_lease.delete(lock_key)
+        rotated.set()
+        with pytest.raises(mg.HTTPException) as failed:
+            await first
+        assert failed.value.status_code == 503, failed.value
+        assert ROTATED not in str(failed.value.detail)
+        assert store.rotations == 1
+        # A leader who has timed out must not drop the next holder's lease.
+        successor = await redis_lease.get(lock_key)
+        if isinstance(successor, bytes):
+            successor = successor.decode("ascii")
+        assert successor == "successor-token"
+        assert store.secret == ROTATED
+    finally:
+        rotated.set()
+        if first is not None:
+            await asyncio.gather(first, return_exceptions=True)
+        store.rotate = original_rotate
+        await http.aclose()
+
+
+@pytest_asyncio.fixture(loop_scope="function")
+async def redis_lease():
+    """Opt-in real Redis; only an explicitly supplied disposable test DB."""
+    if not os.environ.get("GAMMA_REDIS_TEST_URL"):
+        pytest.skip("explicit Redis integration requires GAMMA_REDIS_TEST_URL")
+    import redis.asyncio
+    client = redis.asyncio.from_url(os.environ["GAMMA_REDIS_TEST_URL"])
+    try:
+        await client.flushdb()
+        yield client
+    finally:
+        await client.aclose()
 
 
 @pytest.mark.asyncio
@@ -319,8 +454,10 @@ async def test_signed_claim_real_worker_then_private_native_key(worker_identity,
     chain.HK = HK
     store = SyntheticStore()
     chain.mint(1_000_000_000)
-    native_http, native = management(store, worker_identity)
-    reconciler = Reconciler(chain, native, None, signer=object())
+    native, native_http = management(store, worker_identity)
+    reconciler = Reconciler(
+        chain, Management(native_http, "https://internal.invalid", "narrow worker credential"),
+        None, signer=object())
     worker_service = WorkerService(chain, lambda hotkey: chain.finalized_snapshot(hotkey),
                                     reconciler, certificate_fingerprint=worker_identity[1])
     # This test isolates cross-service orchestration; the worker suite independently
@@ -333,7 +470,8 @@ async def test_signed_claim_real_worker_then_private_native_key(worker_identity,
     worker_http = AsyncClient(transport=ASGITransport(app=worker_app), base_url="https://worker.invalid")
     native_http.base_url = "https://native.invalid"
     bridge = PrivateWorkerResponse(worker_http, native_http,
-                                    worker_headers={"x-kubetee-worker-proof": "synthetic-auth-test"})
+                                    worker_headers={"x-kubetee-worker-proof": "synthetic-auth-test"},
+                                    )
     public = FastAPI()
     KubeTEEGammaClaimHandler(bridge, authority=MemoryAuthority()).register(public)
     async with native_http, worker_http, AsyncClient(transport=ASGITransport(app=public), base_url="https://public.invalid") as client:

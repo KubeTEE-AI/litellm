@@ -45,7 +45,10 @@ async def main() -> None:
             async with router_hook(app) as state:
                 await initialize_private_management(kubetee_eastwest._fetch)
                 await connect_public_claims()
-                yield state if state is not None else {}
+                try:
+                    yield state if state is not None else {}
+                finally:
+                    await proxy_server.app.state.kubetee_gamma_handler.close()
         proxy_server.proxy_startup_event = gamma_lifespan
         proxy_server.app.router.lifespan_context = gamma_lifespan
         import os

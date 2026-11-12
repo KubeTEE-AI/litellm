@@ -188,6 +188,32 @@ jobs:
             echo "gamma_worker_source=/tmp/gamma-worker/gamma_funder" >> "$GITHUB_ENV"
           fi
 
+      - name: Start disposable authenticated Redis Sentinel pair
+        run: |
+          # Test-only isolated network: never substitute a Sentinel monitor for
+          # its discovered data-server master or run any state against production.
+          docker network create --internal gamma-overlay-test-net
+          docker run --name gamma-test-data -d --network gamma-overlay-test-net \
+            --network-alias gamma-data redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+            redis-server --requirepass data-secret --user data-user on nopass '~*' +@all
+          printf '%s\n' \
+            'port 26379' 'protected-mode yes' 'requirepass monitor-secret' \
+            'sentinel monitor gamma-master gamma-data 6379 1' \
+            'sentinel auth-user gamma-master data-user' \
+            'sentinel auth-pass gamma-master data-secret' > /tmp/gamma-sentinel.conf
+          docker run --name gamma-test-sentinel -d --network gamma-overlay-test-net \
+            --network-alias gamma-sentinel -v /tmp/gamma-sentinel.conf:/etc/redis/sentinel.conf \
+            -e SKIP_FIX_PERMS=1 redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+            redis-server /etc/redis/sentinel.conf --sentinel
+          for attempt in $(seq 1 30); do
+            if docker run --rm --network gamma-overlay-test-net redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+              redis-cli --user data-user --pass data-secret -h gamma-data ping | grep -q PONG; then break; fi
+            test "${attempt}" -lt 30
+            sleep 1
+          done
+          docker run --rm --network gamma-overlay-test-net redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+            redis-cli --pass monitor-secret -p 26379 -h gamma-sentinel sentinel get-master-addr-by-name gamma-master
+
       - name: Run overlay tests against supported LiteLLM base
         run: |
           # The omitted pytest-asyncio plugin makes the 13 async Gamma
@@ -237,8 +263,10 @@ jobs:
           # through dist-info entry points, including the asyncio event loop.
           # Do not also pass -p: it registers that same plugin a second time.
           rm -rf /tmp/litellm-overlay-test-packet
-          docker run --rm \
+          docker run --rm --network gamma-overlay-test-net \
             -e PYTHONDONTWRITEBYTECODE=1 \
+            -e GAMMA_REDIS_TEST_URL=redis://data-user:data-secret@gamma-data:6379/12 \
+            -e GAMMA_REDIS_SENTINEL_TEST_URL='redis+sentinel://data-user:data-secret@gamma-sentinel:26379/?service_name=gamma-master&db=12&sentinel_username=default&sentinel_password=monitor-secret' \
             -e PYTHONPATH=/tmp/test-deps:/tmp/gamma-cli:${{ env.gamma_worker_source }} \
             -e PATH=/tmp/gamma-test-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -e KUBETEE_GAMMA_WORKER_ROOT=${{ env.gamma_worker_source }} \

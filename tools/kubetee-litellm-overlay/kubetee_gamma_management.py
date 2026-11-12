@@ -10,6 +10,8 @@ not a structured Json field; whole-metadata compare-and-swap is therefore used.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import secrets
 import hashlib
 import hmac
 import ipaddress
@@ -335,6 +337,13 @@ class GammaManagement:
         self.proxy = proxy
         self.locks: dict[str, asyncio.Lock] = {}
         self.state_lock = asyncio.Lock()
+        # Set only by the measured bridge after Redis succeeds. Synthetic
+        # test adapters remain local-only; production cannot omit this mutex.
+        self.issuance_lease = None
+
+    async def protected_issue(self, hotkey: str, action: str, digest: str) -> dict[str, Any]:
+        """Private proxy boundary retained for signed claim request compatibility."""
+        return await self.issue(hotkey, action, digest)
 
     def assert_hotkey(self, hotkey: str) -> None:
         try:
@@ -446,10 +455,87 @@ class GammaManagement:
         return await self.credit(body)
 
     async def issue(self, hotkey: str, action: str, verification_digest: str) -> dict[str, Any]:
+        """Serialize issue/rotate across workers of this process and replicas.
+
+        The public handler holds the per-key sequencer. This bounded Redis
+        lease additionally excludes a second gateway instance; any lease
+        timeout or loss prevents a potentially revoked credential's delivery.
+        """
         if action not in ("claim", "regenerate") or not re.fullmatch(r"[0-9a-f]{64}", verification_digest):
             raise HTTPException(422, {"error": "key claim requires exact challenge context"})
         self.assert_hotkey(hotkey)
+        async with self.state_lock:
+            lock = self.locks.setdefault(hotkey, asyncio.Lock())
+        async with lock:
+            if self.issuance_lease is None:
+                return await self._issue_serialized(hotkey, action)
+            lock_key = "kubetee:gamma:key-issue-lease:v1:" + hotkey
+            import secrets
+            # Signed challenge contents never choose the lease owner; each
+            # process gets an independent token even on the same hotkey.
+            token = secrets.token_urlsafe(32)
+            deadline = asyncio.get_running_loop().time() + 45
+            while not await self.issuance_lease.set(lock_key, token, nx=True, ex=60):
+                if asyncio.get_running_loop().time() > deadline:
+                    raise HTTPException(503, {"status": "pending", "reason": "key_issuance_in_progress"})
+                await asyncio.sleep(0.2)
+            owner_script = self.issuance_lease.register_script(
+                "if redis.call('GET',KEYS[1]) == ARGV[1] then "
+                "return redis.call('EXPIRE',KEYS[1],60) else return 0 end")
+            release_script = self.issuance_lease.register_script(
+                "if redis.call('GET',KEYS[1]) == ARGV[1] then "
+                "return redis.call('DEL',KEYS[1]) else return 0 end")
+            renew_failed = asyncio.Event()
+            async def assert_lease_owner():
+                owned = await asyncio.wait_for(owner_script(
+                    keys=[lock_key], args=[token]), 5)
+                if renew_failed.is_set() or owned != 1:
+                    raise RuntimeError("distributed key-issuance fencing lease lost")
+            async def renew():
+                try:
+                    while True:
+                        await asyncio.sleep(1)
+                        await assert_lease_owner()
+                except asyncio.CancelledError:
+                    return
+                except BaseException as error:
+                    renew_failed.set()
+                    if not isinstance(error, Exception):
+                        raise
+            renewal = asyncio.create_task(renew())
+            try:
+                result_task = asyncio.create_task(self._issue_serialized(hotkey, action))
+                while not result_task.done():
+                    try:
+                        await asyncio.wait_for(asyncio.shield(result_task), 1)
+                    except asyncio.TimeoutError:
+                        await assert_lease_owner()
+                if renewal.done():
+                    failure = renewal.exception()
+                    raise HTTPException(503, {"status": "pending", "reason": "key_issuance_in_progress"}) from failure
+                result = await result_task
+                # Validate immediately before the raw credential is serialized.
+                await assert_lease_owner()
+                return result
+            except RuntimeError as error:
+                renewal.cancel()
+                raise HTTPException(503, {"status": "pending", "reason": "key_issuance_in_progress"}) from error
+            finally:
+                renewal.cancel()
+                with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                    await asyncio.wait_for(renewal, 5)
+                # Renewal's returned cancellations are intentional here; a
+                # lost ownership check after shutdown maps to bounded pending.
+                try:
+                    await assert_lease_owner()
+                except RuntimeError as error:
+                    raise HTTPException(503, {"status": "pending", "reason": "key_issuance_in_progress"}) from error
+                with contextlib.suppress(BaseException):
+                    await asyncio.wait_for(release_script(keys=[lock_key], args=[token]), 5)
+
+    async def _issue_serialized(self, hotkey: str, action: str) -> dict[str, Any]:
         native = await self.keys()
+        selected_token = None
         row = await native.find_exact_hotkey(hotkey)
         if row is None:
             raise HTTPException(409, {"error": "no native retention identity"})
@@ -473,12 +559,18 @@ class GammaManagement:
             if row is None or row.blocked:
                 raise ManagingConflict("regenerated native key is not a funded active key")
         else:
+            selected_token = row.token
             raw = await native.stored_key(row)
         if not isinstance(raw, str) or not raw.startswith("sk-"):
             return {"status": "pending", "error": "configured native virtual-key recovery unavailable"}
         if not hmac.compare_digest(hashlib.sha256(raw.encode()).hexdigest(), row.token):
             raise RuntimeError("native stored virtual-key hash mismatch; refusing delivery")
         row = await native.find_exact_hotkey(hotkey)
+        if row is None:
+            raise ManagingConflict("native identity disappeared during credential issue")
+        if selected_token is not None and row.token != selected_token:
+            # Never pair a credential read from one row with a newer row.
+            raise ManagingConflict("credential changed during delivery; retry the claim")
         cp = decode_metadata(row.metadata).get("gamma", {})
         reference = cp.get("last_spent_reference")
         if cp.get("hotkey_ss58", hotkey) != hotkey or not isinstance(reference, str):
@@ -495,7 +587,7 @@ def _environment_management() -> GammaManagement | None:
     if os.environ.get("KUBETEE_GAMMA_ENABLED", "").lower() not in ("true", "1"):
         return None
     return GammaManagement(
-        certificate_fingerprint=os.environ.get("KUBETEE_GAMMA_WORKER_CERT_SHA256", ""),
+        certificate_fingerprint=os.environ.get("KUBETEE_GAMMA_WORKER_CLIENT_CERT_SHA256", ""),
         proxy_ip=os.environ.get("KUBETEE_GAMMA_SIDECAR_IP", "127.0.0.1"),
         models=[m for m in os.environ.get("KUBETEE_GAMMA_MODELS", "").split(",") if m],
         mcp_servers=[m for m in os.environ.get("KUBETEE_GAMMA_MCP_SERVERS", "").split(",") if m] or None,

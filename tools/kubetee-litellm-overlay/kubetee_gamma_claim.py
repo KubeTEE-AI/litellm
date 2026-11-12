@@ -236,35 +236,11 @@ class MemoryAuthority:
 
 
 class RedisAuthority:
-    """Shared challenge authority over LiteLLM's Redis-backed cache facade."""
+    """Atomic claim challenges on LiteLLM's native async Redis client."""
 
     def __init__(self, cache: Any):
         self.cache = cache
-        self.local_lock = asyncio.Lock()
-
-    @staticmethod
-    def _key(challenge_id: str) -> str:
-        return "kubetee:gamma:challenge:v1:" + challenge_id
-
-    async def insert_nonce(self, hotkey_ss58: str, nonce: str, ttl: int) -> bool:
-        return await self.cache.async_set_cache(
-            "kubetee:gamma:nonce:v1:" + _nonce_digest(hotkey_ss58, nonce), "1", ttl=ttl, nx=True,
-        )
-
-    async def insert_challenge(self, challenge_id: str, entry: dict[str, Any], ttl: int) -> None:
-        value = json.dumps(dict(entry, expires=entry["expires"].timestamp()), separators=(",", ":"))
-        inserted = await self.cache.async_set_cache(self._key(challenge_id), value, ttl=ttl, nx=True)
-        if inserted is not True:
-            raise RuntimeError("challenge reservation failed")
-
-    async def consume(self, challenge_id: str, expected_action: str,
-                      signature: str, source_ip: str) -> dict[str, Any]:
-        import ipaddress
-        ipaddress.ip_address(source_ip)
-        key = self._key(challenge_id)
-        # Native Redis facade executes only this fixed application-owned command.
-        # Cache transport, credentials, and cleanup remain in LiteLLM.
-        consume_script = """
+        self.consume_script = cache.register_script("""
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local entry = cjson.decode(raw)
@@ -273,40 +249,72 @@ if entry.message_digest ~= ARGV[1] or entry.source_ip ~= ARGV[2] or entry.action
 entry.used = true
 redis.call('SET', KEYS[1], cjson.encode(entry), 'KEEPTTL')
 return 1
-"""
-        token = secrets.token_hex(16)
-        deadline = time.monotonic() + 5.0
-        while True:
-            acquired = await self.cache.async_set_cache(key + ":verify", token, nx=True, ttl=5)
-            if acquired is True:
-                break
-            if time.monotonic() >= deadline:
+""")
+        self.local_lock = asyncio.Lock()
+
+    @staticmethod
+    def _key(challenge_id: str) -> str:
+        return "kubetee:gamma:challenge:v1:" + challenge_id
+
+    async def insert_nonce(self, hotkey_ss58: str, nonce: str, ttl: int) -> bool:
+        return await self.cache.set(
+            "kubetee:gamma:nonce:v1:" + _nonce_digest(hotkey_ss58, nonce), "1", ex=ttl, nx=True,
+        )
+
+    async def insert_challenge(self, challenge_id: str, entry: dict[str, Any], ttl: int) -> None:
+        value = json.dumps(dict(entry, expires=entry["expires"].timestamp()), separators=(",", ":"))
+        inserted = await self.cache.set(self._key(challenge_id), value, ex=ttl, nx=True)
+        if inserted is not True:
+            raise RuntimeError("challenge reservation failed")
+
+    async def consume(self, challenge_id: str, expected_action: str,
+                      signature: str, source_ip: str) -> dict[str, Any]:
+        import ipaddress
+        ipaddress.ip_address(source_ip)
+        key = self._key(challenge_id)
+        # Consume once, preserving creation TTL; the client owns credentials
+        # and Sentinel routing. Challenge keys have no cache_namespace prefix.
+        # This script is fixed application-owned code, never request input.
+        async with self.local_lock:
+            serialized = await self.cache.get(key)
+            if not isinstance(serialized, (str, bytes)):
                 raise HTTPException(401, {"status": "ineligible", "reason": "invalid_or_replayed_challenge"})
-            await asyncio.sleep(0.1)
-        try:
-            serialized = await self.cache.async_get_cache(key)
-            if not isinstance(serialized, str):
-                raise HTTPException(401, {"status": "ineligible", "reason": "invalid_or_replayed_challenge"})
-            entry = json.loads(serialized)
-            entry["expires"] = datetime.fromtimestamp(entry["expires"], timezone.utc)
+            try:
+                stored = json.loads(serialized)
+                if not isinstance(stored, dict):
+                    raise ValueError("challenge is not an object")
+                if type(stored["expires"]) not in (int, float):
+                    raise ValueError("invalid challenge expiry")
+                required = {"used", "challenge_id", "action", "source_ip", "message", "hotkey_ss58", "message_digest"}
+                if not required <= stored.keys() or any(not isinstance(stored[field], str) for field in required - {"used"}):
+                    raise ValueError("missing challenge identity")
+                if type(stored["used"]) is not bool:
+                    raise ValueError("malformed challenge usage")
+                entry = stored
+                entry["expires"] = datetime.fromtimestamp(stored["expires"], timezone.utc)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError, KeyError, OverflowError):
+                raise HTTPException(401, {"status": "ineligible", "reason": "invalid_or_replayed_challenge"}) from None
             if entry["used"] or entry["challenge_id"] != challenge_id:
                 raise HTTPException(401, {"status": "ineligible", "reason": "invalid_or_replayed_challenge"})
             if entry["action"] != expected_action:
                 raise HTTPException(403, {"status": "ineligible", "reason": "action_mismatch"})
             if entry["source_ip"] != source_ip:
                 raise HTTPException(403, {"status": "ineligible", "reason": "challenge_source_mismatch"})
+            # The challenge-issuing side has already authenticated exact-H;
+            # this side verifies a standard sr25519 signature for that same
+            # stored address then the Lua script checks the message digest.
+            if entry["message_digest"] != hashlib.sha256(entry["message"].encode()).hexdigest():
+                raise HTTPException(403, {"status": "ineligible", "reason": "invalid_challenge_context"})
             if not _standard_signature_verified(entry["message"], signature, entry["hotkey_ss58"]):
                 raise HTTPException(403, {"status": "ineligible", "reason": "invalid_signature"})
-            consumed = await self.cache.redis_cache.client.eval(
-                consume_script, 1, key, hashlib.sha256(entry["message"].encode()).hexdigest(),
-                source_ip, expected_action, str(utc_now().timestamp()),
+            consumed = await self.consume_script(
+                keys=[key], args=[hashlib.sha256(entry["message"].encode()).hexdigest(),
+                source_ip, expected_action, str(utc_now().timestamp())],
             )
             entry["used"] = True
             if consumed != 1:
                 raise HTTPException(401, {"status": "ineligible", "reason": "invalid_or_replayed_challenge"})
             return entry
-        finally:
-            await self.cache.async_delete_cache(key + ":verify")
 
 
 def utc_now() -> datetime:
@@ -442,6 +450,14 @@ class KubeTEEGammaClaimHandler:
         self.wait_seconds = wait_seconds
         self.challenge_limit = RateLimit()
         self.signed_limit = RateLimit()
+
+    async def close(self):
+        """Close only clients opened by the measured claim bridge."""
+        resources = (self.authority.cache if isinstance(self.authority, RedisAuthority) else None,
+                     getattr(self.worker, "native_http", None), getattr(self.worker, "worker_http", None))
+        for resource in resources:
+            if resource is not None:
+                await resource.aclose()
 
     def source_ip(self, request: Request) -> str:
         if request.client is None:
