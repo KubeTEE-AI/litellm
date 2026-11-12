@@ -320,7 +320,12 @@ def test_separate_worker_pending_translates_to_public_bounded_wait():
         "status": "pending", "reason": "spend_final_credit_pending",
         "retry_after_seconds": 6, "correlation_id": None,
     })
-    transport = claim.PrivateWorkerResponse(object(), object(), {})
+    from kubetee_gamma_private_mtls import InProcessIssueClient
+    from test_kubetee_gamma_management import SyntheticStore
+    import kubetee_gamma_management as mg
+    service = mg.GammaManagement(proxy=SyntheticStore(), models=["m"],
+                                 certificate_fingerprint="a" * 64)
+    transport = claim.PrivateWorkerResponse(object(), InProcessIssueClient(service))
     assert transport._result(response) == (202, response.json())
     code, result = transport._result(response)
     projected = claim._typed_response(code, result)

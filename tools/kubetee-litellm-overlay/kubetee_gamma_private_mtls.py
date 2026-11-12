@@ -74,31 +74,20 @@ class PrivateTransportProtocol(h11_impl.H11Protocol):
             h11_impl.RequestResponseCycle = original
 
 
-class PinnedHTTPXTransport(httpx.AsyncBaseTransport):
-    """Only Gamma's fixed DNS identity may authenticate this native bridge."""
-    def __init__(self, tls_context: ssl.SSLContext, expected_hostname: str, expected_fingerprint: str):
-        self.expected_hostname = expected_hostname
-        self.expected_fingerprint = expected_fingerprint
-        self.native = httpx.AsyncHTTPTransport(verify=tls_context, trust_env=False,
-            http2=False, limits=httpx.Limits(max_connections=40))
+class InProcessIssueClient:
+    """Narrow raw-key issuance only inside the measured gateway process.
 
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        if request.url.host != "127.0.0.1":
-            raise httpx.ConnectError("Gamma native HTTP is restricted to the in-process listener")
-        request.extensions["sni_hostname"] = self.expected_hostname
-        request.headers["Host"] = self.expected_hostname
-        response = await self.native.handle_async_request(request)
-        stream = response.extensions.get("network_stream")
-        tls = stream.get_extra_info("ssl_object") if stream is not None else None
-        der = tls.getpeercert(True) if tls is not None else None
-        if not isinstance(der, bytes) or not hmac.compare_digest(
-                hashlib.sha256(der).hexdigest(), self.expected_fingerprint):
-            await response.aclose()
-            raise httpx.ConnectError("private gateway listener fingerprint mismatch")
-        return response
+    The separate mTLS worker can verify funding and request checkpoint CAS but
+    cannot obtain a raw customer virtual-key credential. This is deliberately
+    not a generic HTTP transport or a secret-returning private endpoint.
+    """
+    def __init__(self, management):
+        if not isinstance(management, kubetee_gamma_management.GammaManagement):
+            raise TypeError("native Gamma management service required")
+        self.management = management
 
-    async def aclose(self):
-        await self.native.aclose()
+    async def issue(self, hotkey: str, action: str, verification_digest: str):
+        return await self.management.issue(hotkey, action, verification_digest)
 
 
 def create_private_application(service) -> FastAPI:
@@ -195,14 +184,13 @@ async def connect_public_claims():
             certificate = tls.getpeercert(True)
     if hashlib.sha256(certificate).hexdigest() != os.environ["KUBETEE_GAMMA_WORKER_CERT_SHA256"]:
         raise RuntimeError("worker TLS certificate pin mismatch")
-    native_context = ssl.create_default_context(cafile=os.path.join(root, "ca.pem"))
-    native_context.load_cert_chain(client_cert, client_key)
-    expected_hostname = "litellm-gateway-mtls.litellm.svc.cluster.local"
-    pinned_der = os.environ["KUBETEE_GAMMA_MTLS_CERT_SHA256"]
-    port = int(os.environ.get("KUBETEE_GAMMA_MTLS_PORT", "4001"))
-    native_http = httpx.AsyncClient(
-        transport=PinnedHTTPXTransport(native_context, expected_hostname, pinned_der),
-        base_url=f"https://127.0.0.1:{port}", timeout=60)
+    service = getattr(proxy_server.app.state, "kubetee_gamma_private_management", None)    # Worker-to-gateway control uses four independently pinned mTLS leaves.
+    # Credential delivery belongs only to the in-process narrow issue wrapper,
+    # never through the separately attested worker's external HTTP API.
+    service = getattr(proxy_server.app.state, "kubetee_gamma_private_management", None)
+    if service is None:
+        raise RuntimeError("native private management identity missing at claim bridge setup")
+    native_delivery = InProcessIssueClient(service)
     worker_http = httpx.AsyncClient(verify=trust, base_url=os.environ["KUBETEE_GAMMA_WORKER_URL"], timeout=60)
     from kubetee_gamma_transport import redis_production_settings
     redis_config = redis_production_settings(os.environ.get("KUBETEE_GAMMA_REDIS_URL", ""))
@@ -217,7 +205,7 @@ async def connect_public_claims():
     if service is None:
         raise RuntimeError("native private management identity missing at claim bridge setup")
     service.issuance_lease = issuance_lease
-    bridge = claim.PrivateWorkerResponse(worker_http, native_http, {})
+    bridge = claim.PrivateWorkerResponse(worker_http, native_delivery)
     handler = claim.KubeTEEGammaClaimHandler(bridge, authority=authority,
         wait_seconds=float(os.environ.get("KUBETEE_GAMMA_WAIT_SECONDS", "55")))
     handler.register(proxy_server.app)

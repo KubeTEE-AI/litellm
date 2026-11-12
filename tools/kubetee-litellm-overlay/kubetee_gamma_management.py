@@ -98,12 +98,6 @@ class CreditRequest(RowReference):
     amount_units: int = Field(gt=0)
 
 
-class IssueRequest(ChainScope):
-    model_config = ConfigDict(extra="forbid")
-    action: Literal["claim", "regenerate"] = "claim"
-    verification_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
 def decode_metadata(value: object) -> dict[str, Any]:
     if isinstance(value, str):
         value = json.loads(value)
@@ -194,7 +188,7 @@ class NativeKeys:
                 skip=before, take=250, include={"object_permission": True})
             for row in chunk:
                 _project(row)
-                cp = row.metadata.get("gamma")
+                cp = decode_metadata(row.metadata).get("gamma")
                 if isinstance(cp, dict) and cp.get("schema") == 1:
                     rows.append({"metadata": {"gamma": cp}})
             if len(chunk) < 250:
@@ -341,10 +335,6 @@ class GammaManagement:
         # test adapters remain local-only; production cannot omit this mutex.
         self.issuance_lease = None
 
-    async def protected_issue(self, hotkey: str, action: str, digest: str) -> dict[str, Any]:
-        """Private proxy boundary retained for signed claim request compatibility."""
-        return await self.issue(hotkey, action, digest)
-
     def assert_hotkey(self, hotkey: str) -> None:
         try:
             assert_hotkey(hotkey)
@@ -447,12 +437,6 @@ class GammaManagement:
         if decode_metadata(row.metadata).get("gamma") != cp or exact_units(row.max_budget) != exact_units(body.target_max_budget):
             raise RuntimeError("native credit readback failed")
         return {"row": _project(row)}
-
-    async def credit_replay(self, body: CreditRequest):
-        live = await self.key(body.hotkey_ss58)
-        if live and live["metadata"].get("gamma", {}).get("last_spent_reference") == body.settlement.reference:
-            return {"error": "settlement intent already consumed"}
-        return await self.credit(body)
 
     async def issue(self, hotkey: str, action: str, verification_digest: str) -> dict[str, Any]:
         """Serialize issue/rotate across workers of this process and replicas.
@@ -573,7 +557,7 @@ class GammaManagement:
             raise ManagingConflict("credential changed during delivery; retry the claim")
         cp = decode_metadata(row.metadata).get("gamma", {})
         reference = cp.get("last_spent_reference")
-        if cp.get("hotkey_ss58", hotkey) != hotkey or not isinstance(reference, str):
+        if check.get("hotkey_ss58", hotkey) != hotkey or not isinstance(check.get("last_spent_reference"), str):
             raise ManagingConflict("settled checkpoint has wrong exact-H identity")
         return {"status": "provisioned", "has_positive_chain_settlement": True,
                 "max_budget": str(row.max_budget), "spend": str(row.spend),
@@ -632,9 +616,9 @@ def installed_router(app: FastAPI, service: GammaManagement | None = None) -> AP
     router.add_api_route("/internal/v1/gamma/key/reservation", session.reserve, methods=["POST"], dependencies=guarded)
     router.add_api_route("/internal/v1/gamma/checkpoint", session.checkpoint, methods=["POST"], dependencies=guarded)
     router.add_api_route("/internal/v1/gamma/credit", session.credit, methods=["POST"], dependencies=guarded)
-    async def issue(body: IssueRequest = Body(...)):
-        return await session.issue(body.hotkey_ss58, body.action, body.verification_digest)
-    router.add_api_route("/internal/v1/gamma/key/issue", issue, methods=["POST"], dependencies=guarded)
+    # Raw-key issue is deliberately absent from the worker HTTP surface. Raw
+    # credentials leave only the in-process connect_public_claims callback after
+    # exact-hotkey settlement is rechecked, creating no second authority.
     app.include_router(router)
     return router
 

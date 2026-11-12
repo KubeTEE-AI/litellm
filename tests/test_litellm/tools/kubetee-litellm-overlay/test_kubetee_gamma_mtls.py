@@ -113,7 +113,7 @@ async def test_gateway_private_callback_uses_only_verified_socket(tmp_path):
         service.fingerprint = "0" * 64
         result = await request("/internal/v1/gamma/key/issue", {"hotkey_ss58": HK, "network": "finney", "genesis_hash": mg.GENESIS,
             "netuid": "90", "action": "claim", "verification_digest": "0" * 64}, spoof=True)
-        assert result.startswith(b"HTTP/1.1 403 Forbidden"), result
+        assert result.startswith(b"HTTP/1.1 404 Not Found"), result
         assert store.row.max_budget == "0"
         result = await request("/key/generate", {"hotkey_ss58": HK})
         assert result.startswith(b"HTTP/1.1 403 Forbidden"), result

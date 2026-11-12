@@ -106,8 +106,9 @@ jobs:
       actions: write
     env:
       PR_NUMBER: ${{ github.event.number }}
-      # Only pushes to protected kubetee-prod may publish. The isolated
-      # gamma-mtls-release push is purely read-only review validation.
+      # Production publishes only protected kubetee-prod pushes. An explicit
+      # manual gamma-mtls-release run signs a nonproduction review candidate;
+      # feature pushes and PRs never publish.
       PUBLISH: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/kubetee-prod') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/gamma-mtls-release') }}
     steps:
       - name: Clean root-owned leftovers from prior runs
@@ -121,10 +122,13 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
 
-      - name: Require production source branch for publishing
+      - name: Require authorized source for publishing
         run: |
           if [ "$PUBLISH" = "true" ]; then
-            test "${GITHUB_REF_NAME}" = "kubetee-prod"
+            test "${GITHUB_REF_NAME}" = "kubetee-prod" || {
+              test "${GITHUB_REF_NAME}" = "gamma-mtls-release" &&
+              test "${GITHUB_EVENT_NAME}" = "workflow_dispatch"
+            }
           else
             # Scope test-only events; never publish feature review artifacts.
             test "${GITHUB_EVENT_NAME}" = "push" || test "${GITHUB_EVENT_NAME}" = "pull_request"
@@ -151,6 +155,9 @@ jobs:
               | sed -E 's/.*-kubetee\.([0-9]+)"/\1/' \
               | sort -n | tail -1)
             TAG="${BASE_TAG}-kubetee.$((${MAX_N:-0} + 1))"
+            if [ "${GITHUB_REF_NAME}" = "gamma-mtls-release" ]; then
+              TAG="1.108.3-gamma.0.0.${GITHUB_SHA::10}"
+            fi
           fi
       
           echo "TAG=$TAG" >> "$GITHUB_ENV"
@@ -416,7 +423,7 @@ jobs:
           print('overlay modules import OK against base', '${BASE_TAG}')
           "
 
-      - name: Build and push overlay image (publish only from kubetee-prod)
+      - name: Build and push overlay image (authorized production or explicit review dispatch)
         run: |
           cd tools/kubetee-litellm-overlay
           if [ "$PUBLISH" = "true" ]; then

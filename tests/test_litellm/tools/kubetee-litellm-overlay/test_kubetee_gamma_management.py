@@ -209,6 +209,40 @@ def management(store, identity, lease=None):
 
 
 @pytest.mark.asyncio
+async def test_native_serialized_index_and_no_external_issue_endpoint(worker_identity):
+    store = SyntheticStore()
+    await store.reserve(HK, fresh_checkpoint(), {"models": ["m"], "mcp_servers": None}, SECRET)
+    _, http = management(store, worker_identity)
+    async with http:
+        result = await http.get("http://gateway/internal/v1/gamma/keys")
+        assert result.status_code == 200 and result.json()["keys"][0]["metadata"]["gamma"]["observation_coldkey"] == COLD
+        # The measured worker only supplies a verified context to the gateway's
+        # in-process callback; external issuance can never substitute a digest.
+        issue = await http.post("http://gateway/internal/v1/gamma/key/issue", json={
+            "network": "finney", "genesis_hash": mg.GENESIS, "netuid": 90,
+            "hotkey_ss58": HK, "action": "claim", "verification_digest": "a" * 64})
+        assert issue.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_issue_rechecks_finalized_checkpoint_identity(worker_identity):
+    store = SyntheticStore()
+    await store.reserve(HK, fresh_checkpoint(), {"models": ["m"], "mcp_servers": None}, SECRET)
+    data = json.loads(store.row.metadata)
+    data["gamma"]["total_settled_units"] = 1
+    data["gamma"]["last_spent_reference"] = "a" * 64
+    store.row.max_budget = "1"
+    store.row.metadata = json.dumps(data)
+    service = mg.GammaManagement(proxy=store, models=["m"], certificate_fingerprint="3" * 64)
+    result = await service.issue(HK, "claim", "a" * 64)
+    assert result["status"] == "provisioned"
+    data["gamma"]["hotkey_ss58"] = "5" * 48
+    store.row.metadata = json.dumps(data)
+    with pytest.raises(mg.ManagingConflict, match="wrong exact-H"):
+        await service.issue(HK, "claim", "a" * 64)
+
+
+@pytest.mark.asyncio
 async def test_mtls_fingerprint_and_proxy_are_required(worker_identity):
     certificate, fingerprint = worker_identity
     store = SyntheticStore()
@@ -455,6 +489,8 @@ async def test_signed_claim_real_worker_then_private_native_key(worker_identity,
     store = SyntheticStore()
     chain.mint(1_000_000_000)
     native, native_http = management(store, worker_identity)
+    from kubetee_gamma_private_mtls import InProcessIssueClient
+    delivery = InProcessIssueClient(native)
     reconciler = Reconciler(
         chain, Management(native_http, "https://internal.invalid", "narrow worker credential"),
         None, signer=object())
@@ -468,10 +504,8 @@ async def test_signed_claim_real_worker_then_private_native_key(worker_identity,
     worker_app = FastAPI()
     worker_app.include_router(internal_router(worker_service))
     worker_http = AsyncClient(transport=ASGITransport(app=worker_app), base_url="https://worker.invalid")
-    native_http.base_url = "https://native.invalid"
-    bridge = PrivateWorkerResponse(worker_http, native_http,
-                                    worker_headers={"x-kubetee-worker-proof": "synthetic-auth-test"},
-                                    )
+    bridge = PrivateWorkerResponse(worker_http, delivery,
+        worker_headers={"x-kubetee-worker-proof": "synthetic-auth-test"})
     public = FastAPI()
     KubeTEEGammaClaimHandler(bridge, authority=MemoryAuthority()).register(public)
     async with native_http, worker_http, AsyncClient(transport=ASGITransport(app=public), base_url="https://public.invalid") as client:
@@ -531,10 +565,9 @@ async def test_no_native_secret_response_without_definitive_worker_funding():
         async def status(self, hotkey): raise AssertionError("no unsigned private call")
 
     transport, native_worker = WorkerTransport(), NativeTransport()
-    bridge = PrivateWorkerResponse(transport, native_worker, worker_headers={})
-    code, result = await bridge.claim({"hotkey_ss58": HK, "action": "regenerate", "verified_challenge_digest": "a" * 64})
-    assert code == 503 and result == {"status": "retryable_error"}
-    assert transport.calls == 1 and native_worker.calls == 0
+    with pytest.raises(RuntimeError, match="in-process"):
+        PrivateWorkerResponse(transport, native_worker)
+    assert transport.calls == 0 and native_worker.calls == 0
     public = FastAPI()
     KubeTEEGammaClaimHandler(UnsignedWorker(), authority=MemoryAuthority()).register(public)
     async with AsyncClient(transport=ASGITransport(app=public), base_url="https://public.invalid") as client:

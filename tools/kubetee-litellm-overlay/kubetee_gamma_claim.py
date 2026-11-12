@@ -84,12 +84,13 @@ class PrivateWorkerResponse:
     trusted_proxy_ips: tuple[str, ...] = ()
     ready = True
 
-    def __init__(self, chain_worker: Any, native_response: Any, worker_headers: dict[str, str]):
-        if chain_worker is None or native_response is None:
-            raise ValueError("worker and private native response required")
+    def __init__(self, chain_worker: Any, native_response: Any = None, worker_headers: dict[str, str] | None = None):
+        from kubetee_gamma_private_mtls import InProcessIssueClient
+        if chain_worker is None or not isinstance(native_response, InProcessIssueClient):
+            raise RuntimeError("raw-key issuance requires the measured in-process private client")
         self.worker_http = chain_worker
         self.native_http = native_response
-        self.worker_headers = worker_headers
+        self.worker_headers = worker_headers or {}
 
     async def _worker(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         response = await self.worker_http.post("/internal/v1/reconcile", json={
@@ -140,31 +141,33 @@ class PrivateWorkerResponse:
             return code, result
         # The worker result is advisory. The mTLS-pinned native callback re-reads
         # the key and requires settled positive credit before issuance.
-        response = await self.native_http.post("/internal/v1/gamma/key/issue", json={
-            "network": NETWORK, "genesis_hash": GENESIS, "netuid": NETUID,
-            "hotkey_ss58": body["hotkey_ss58"], "action": body["action"],
-            "verification_digest": body["verified_challenge_digest"],
-        })
-        if response.status_code in (403, 404):
-            raise RuntimeError("private native response authentication lost")
-        if response.status_code != 200:
-            LOG.warning("Native Gamma key response failed with HTTP %s", response.status_code)
-        return self._result(response)
+        try:
+            issued = await self.native_http.issue(
+                body["hotkey_ss58"], body["action"], body["verified_challenge_digest"],
+            )
+        except Exception:
+            # Funding is retained in LiteLLM. It is safer to return bounded
+            # pending-and-retry than discard a successful reconciliation solely
+            # because credential delivery encountered a transient DB conflict.
+            LOG.exception("Measured in-process Gamma key issuance failed")
+            return 202, {"status": "pending", "reason": "spend_final_credit_pending",
+                         "retry_after_seconds": RETRY_SECONDS}
+        if isinstance(issued, dict) and issued.get("status") == "provisioned":
+            return 200, issued
+        if isinstance(issued, dict) and issued.get("status") == "pending":
+            return 202, issued
+        return 503, {"status": "retryable_error"}
 
     async def status(self, hotkey_ss58: str) -> tuple[int, dict[str, Any]]:
-        response = await self.native_http.get("/internal/v1/gamma/key", params={
-            "network": NETWORK, "genesis_hash": GENESIS, "netuid": NETUID,
-            "hotkey_ss58": hotkey_ss58,
-        })
-        result = response.json()
-        row = result.get("row") if isinstance(result, dict) else None
+        row_data = await self.native_http.management.key(hotkey_ss58)
+        row = row_data.get("row")
         checkpoint = (row.get("metadata", {}).get("gamma") or {}) if isinstance(row, dict) else {}
         if row is None:
             return 403, {"status": "ineligible", "reason": "not_provisioned"}
         budget, spent = Decimal(str(row["max_budget"])), Decimal(str(row["spend"]))
         if not budget.is_finite() or not spent.is_finite() or spent < 0:
             raise ValueError("invalid native money in private status")
-        return response.status_code, {"status": "provisioned", "max_budget": str(budget),
+        return 200, {"status": "provisioned", "max_budget": str(budget),
             "spend": str(spent), "remaining_credit": str(budget - spent),
             "reconciliation_reference": checkpoint.get("last_spent_reference")}
 
@@ -456,7 +459,7 @@ class KubeTEEGammaClaimHandler:
         resources = (self.authority.cache if isinstance(self.authority, RedisAuthority) else None,
                      getattr(self.worker, "native_http", None), getattr(self.worker, "worker_http", None))
         for resource in resources:
-            if resource is not None:
+            if resource is not None and callable(getattr(resource, "aclose", None)):
                 await resource.aclose()
 
     def source_ip(self, request: Request) -> str:
