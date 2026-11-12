@@ -161,29 +161,38 @@ async def test_native_sentinel_monitor_and_data_identities_are_distinct():
         pytest.skip("explicit Sentinel integration requires GAMMA_REDIS_SENTINEL_TEST_URL")
     from kubetee_gamma_transport import native_async_redis, redis_production_settings
     settings = redis_production_settings(uri)
-    from urllib.parse import urlsplit
+    from urllib.parse import parse_qs, unquote, urlsplit
     service = settings["service_name"]
     client = native_async_redis(settings)
     manager = client.connection_pool.sentinel_manager
     monitor = urlsplit(uri)
+    # Expectations come from the supplied URI, never a hard-coded environment:
+    # CI's disposable Sentinel and any other target use different DBs.
+    options = {name: values[0] for name, values in parse_qs(monitor.query).items()}
     master_before = await manager.discover_master(service)
     try:
-        authority = claim.RedisAuthority(client)
         authority = claim.RedisAuthority(client)
         hotkey = new_hotkey()
         nonce = "disposable-nonce-60"
         nonce_key = "kubetee:gamma:nonce:v1:" + claim._nonce_digest(hotkey.ss58_address, nonce)
-        monitor = urlsplit(uri)
         assert await authority.insert_nonce(hotkey.ss58_address, nonce, 60)
         assert not await authority.insert_nonce(hotkey.ss58_address, nonce, 60)
         assert await client.ping()
         connection = await client.connection_pool.get_connection()
-        assert (connection.host, connection.port) != (monitor.hostname, monitor.port)
-        assert master_before == (connection.host, connection.port)
-        assert client.connection_pool.service_name == service
-        assert client.connection_pool.connection_kwargs["db"] == 15
-        assert await manager.discover_master(service) == master_before
-        await client.connection_pool.release(connection)
+        try:
+            assert (connection.host, connection.port) != (monitor.hostname, monitor.port)
+            assert master_before == (connection.host, connection.port)
+            data = client.connection_pool.connection_kwargs
+            assert client.connection_pool.service_name == service
+            assert data["db"] == int(options.get("db", 0))
+            assert data["username"] == unquote(monitor.username)
+            # The monitor authenticates with its own credential when the URI
+            # supplies one; it must not silently inherit the data identity.
+            monitor_password = manager.sentinels[0].connection_pool.connection_kwargs["password"]
+            assert monitor_password == options.get("sentinel_password", unquote(monitor.password))
+            assert await manager.discover_master(service) == master_before
+        finally:
+            await client.connection_pool.release(connection)
     finally:
         if "client" in locals() and "nonce_key" in locals():
             await client.delete(nonce_key)
