@@ -203,8 +203,17 @@ jobs:
           docker run --name gamma-test-data -d --network gamma-overlay-test-net \
             --network-alias gamma-data redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
             redis-server --requirepass data-secret --user data-user on nopass '~*' +@all
+          # Redis Sentinel hostname support is opt-in. Monitor startup waits for
+          # the actual data alias on this SAME network, not a prewarmed network.
+          for attempt in $(seq 1 30); do
+            if docker run --rm --network gamma-overlay-test-net redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+              redis-cli --user data-user --pass data-secret -h gamma-data ping | grep -q PONG; then break; fi
+            test "${attempt}" -lt 30
+            sleep 1
+          done
           printf '%s\n' \
             'port 26379' 'protected-mode yes' 'requirepass monitor-secret' \
+            'resolve-hostnames yes' 'announce-hostnames yes' \
             'sentinel monitor gamma-master gamma-data 6379 1' \
             'sentinel auth-user gamma-master data-user' \
             'sentinel auth-pass gamma-master data-secret' > /tmp/gamma-sentinel.conf
@@ -212,12 +221,7 @@ jobs:
             --network-alias gamma-sentinel -v /tmp/gamma-sentinel.conf:/etc/redis/sentinel.conf \
             -e SKIP_FIX_PERMS=1 redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
             redis-server /etc/redis/sentinel.conf --sentinel
-          for attempt in $(seq 1 30); do
-            if docker run --rm --network gamma-overlay-test-net redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
-              redis-cli --user data-user --pass data-secret -h gamma-data ping | grep -q PONG; then break; fi
-            test "${attempt}" -lt 30
-            sleep 1
-          done
+
           # Docker DNS can briefly lag a listening Sentinel on the isolated
           # network. Retry the actual monitor contract, not a guessed address.
           for attempt in $(seq 1 30); do
