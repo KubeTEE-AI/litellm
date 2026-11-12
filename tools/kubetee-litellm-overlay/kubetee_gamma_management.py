@@ -5,8 +5,15 @@ calls these methods. Native max_budget / spend remain ordinary LiteLLM money;
 Gamma's tiny technical checkpoint sits in the existing key metadata. No SQL,
 Prisma write, receipt table, alternate budget, arbitrary metadata mutation, or
 master key fallback is exposed. This adapter calls only LiteLLM's native
-generate/update/regenerate management handlers. Recovery-before-credit and a
-version-match/or-newer transition prevent stale or duplicate credit states.
+generate/update/regenerate management handlers.
+
+Accounting rule: ``max_budget`` is the only money this adapter changes and it
+always equals ``metadata.gamma.total_settled_units``. A credit is ONE native
+``/key/update`` carrying the receipt checkpoint and the new absolute
+``max_budget`` together (LiteLLM persists one key update as one row write), so
+no reader can observe a receipt without its allowance or the reverse. Native
+``spend`` is LiteLLM's own usage meter: reported, never a precondition and
+never an input to ``max_budget``.
 """
 from __future__ import annotations
 
@@ -84,7 +91,9 @@ class RowReference(ChainScope):
     token_id: str = Field(min_length=16, max_length=128)
     row_version: str | None = None  # native metadata/token CAS; timestamps are advisory
     previous_max_budget: str
-    previous_spend: str
+    # Accepted for wire compatibility and ignored: usage moves while a key is
+    # in service, and Gamma credit never depends on it.
+    previous_spend: str | None = None
 
 
 class CheckpointRequest(RowReference):
@@ -126,6 +135,33 @@ def exact_units(value: object) -> int:
 
 def units_text(value: int) -> str:
     return format(Decimal(value) / UNITS, "f")
+
+
+def settled_total(checkpoint: object) -> int:
+    """Total chain-settled Gamma base units recorded by a checkpoint."""
+    total = checkpoint.get("total_settled_units", 0) if isinstance(checkpoint, dict) else None
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        raise ManagingConflict("checkpoint has no exact settled Gamma total")
+    return total
+
+
+def native_budget(value: str) -> float:
+    """LiteLLM stores max_budget as a float; refuse totals it cannot hold exactly."""
+    number = float(Decimal(value))
+    if exact_units(number) != exact_units(value):
+        raise ManagingConflict("settled total is not exactly representable as native max_budget")
+    return number
+
+
+def usage_text(value: object) -> str:
+    """Native spend for display. It is a float usage meter, not Gamma units."""
+    try:
+        spend = Decimal(str(value))
+    except (DecimalException, TypeError, ValueError) as error:
+        raise ManagingConflict("native spend is not a number") from error
+    if not spend.is_finite() or spend < 0:
+        raise ManagingConflict("native spend is not a finite nonnegative number")
+    return format(spend, "f")
 
 
 def require_reference(checkpoint: dict[str, Any], settlement: ProvenanceSettlement) -> None:
@@ -231,7 +267,7 @@ class NativeKeys:
                              "headers": [], "query_string": b""}),
             data=UpdateKeyRequest(key=row.token,
                 **({"metadata": metadata} if metadata is not None else {}),
-                **({"max_budget": float(Decimal(max_budget))} if max_budget is not None else {}),
+                **({"max_budget": native_budget(max_budget)} if max_budget is not None else {}),
                 **({"blocked": blocked} if blocked is not None else {})),
             user_api_key_dict=await self.admin(), litellm_changed_by="kubetee-sn90-gamma-funder")
         current = await self.find_exact_hotkey(
@@ -303,36 +339,48 @@ class NativeKeys:
 
     async def compare_checkpoint(self, hotkey: str, expected: dict[str, Any] | None,
                                  checkpoint: dict[str, Any], expected_max_budget: str,
-                                 expected_spend: str, *, target_max_budget: str | None = None):
+                                 *, target_max_budget: str | None = None):
         row = await self.find_exact_hotkey(hotkey)
         if row is None:
             raise ManagingConflict("native identity disappeared")
         metadata = decode_metadata(row.metadata)
-        if (metadata.get("gamma") != expected or exact_units(row.spend) != exact_units(expected_spend)
+        if (metadata.get("gamma") != expected
                 or exact_units(row.max_budget) != exact_units(expected_max_budget)):
             raise ManagingConflict("unchanged version required for conditional transition")
         updated_metadata = {**metadata, "gamma": checkpoint}
         if target_max_budget is None:
+            if (settled_total(checkpoint) != settled_total(expected)
+                    or checkpoint.get("receipt_ids") != (expected or {}).get("receipt_ids")):
+                raise ManagingConflict("only a credit may change settled Gamma or its receipts")
             return await self.update(row, metadata=updated_metadata)
-        # Intentionally fail closed: ordinary /key/update does not expose an
-        # atomic metadata+max_budget conditional write. Two updates can duplicate
-        # money or expose a settled receipt before its allowance. Do not disguise
-        # a pre-read or in-process lock as native cross-replica CAS.
-        if exact_units(target_max_budget) != exact_units(expected_max_budget) + pending_amount(checkpoint, expected):
-            raise ManagingConflict("target is not previous max_budget + proven Gamma units")
-        raise ManagingConflict(
-            "native Management API does not expose an atomic credit CAS; activation remains gated"
-        )
+        # Credit. max_budget is exactly the settled total before and after, and
+        # both the receipt and the allowance travel in one native key update.
+        # The preceding read is a precondition check, not a database CAS: the
+        # worker's per-hotkey lease is what serializes writers. Because every
+        # credit writes the checkpoint and its own total together, a writer
+        # that outlives its lease can lose a newer receipt but can never leave
+        # more budget on the row than the receipts stored beside it.
+        before, after = settled_total(expected), settled_total(checkpoint)
+        if exact_units(row.max_budget) != before:
+            raise ManagingConflict("native max_budget is not the settled Gamma total; credit refused")
+        if after != before + pending_amount(checkpoint, expected):
+            raise ManagingConflict("settled total is not previous total + proven Gamma units")
+        if exact_units(target_max_budget) != after:
+            raise ManagingConflict("target max_budget is not the settled Gamma total")
+        native_budget(target_max_budget)  # refuse before writing, not at readback
+        # The reservation is blocked with zero budget. Its first proven credit
+        # enables it in the same write, so key delivery never has to write the
+        # row. Later credits leave ``blocked`` alone: an operator block stays.
+        enable = False if before == 0 and row.blocked else None
+        return await self.update(row, metadata=updated_metadata,
+                                 max_budget=target_max_budget, blocked=enable)
 
     async def compare_and_checkpoint(self, hotkey: str, expected: dict[str, Any],
                                      checkpoint: dict[str, Any], previous_max_budget: str,
-                                     target_max_budget: str, expected_spend: str):
-        # The worker fence plus conditional pre-match prevents double settlement;
-        # native update_key_fn performs the receipt checkpoint and budget credit.
+                                     target_max_budget: str):
         return await self.compare_checkpoint(
-            hotkey, expected, checkpoint, previous_max_budget, expected_spend,
+            hotkey, expected, checkpoint, previous_max_budget,
             target_max_budget=target_max_budget,
-
         )
 
     async def evict(self, token: str):
@@ -500,12 +548,14 @@ class GammaManagement:
                 raise ManagingConflict("pending settlement is in progress; compare and recover its intent")
             require_reference(body.checkpoint, ProvenanceSettlement.from_settlement(
                 pending["reference"], pending["planning_hash"]))
+        if (settled_total(body.checkpoint) != settled_total(body.expected_checkpoint)
+                or body.checkpoint.get("receipt_ids") != body.expected_checkpoint.get("receipt_ids")):
+            raise ManagingConflict("only a credit may change settled Gamma or its receipts")
         row = await (await self.keys()).compare_checkpoint(body.hotkey_ss58,
-            body.expected_checkpoint, body.checkpoint, body.previous_max_budget, body.previous_spend)
+            body.expected_checkpoint, body.checkpoint, body.previous_max_budget)
         if row is None:
             raise ManagingConflict("conditional write readback failed")
-        expected_units = exact_units(body.previous_max_budget)
-        if exact_units(row.max_budget) != expected_units or exact_units(row.spend) != exact_units(body.previous_spend):
+        if exact_units(row.max_budget) != exact_units(body.previous_max_budget):
             raise ManagingConflict("checkpoint endpoint cannot change native money")
         return {"row": _project(row)}
 
@@ -525,12 +575,22 @@ class GammaManagement:
             raise HTTPException(403, {"error": "chain-settled totals cannot be inferred backwards"})
         if exact_units(body.previous_max_budget) + body.settlement.amount_units != exact_units(body.target_max_budget):
             raise HTTPException(409, {"error": "target is not prior native max_budget plus confirmed Gamma"})
+        # max_budget is the settled Gamma total, before and after. Anything else
+        # (an operator edit, a lost write) stops crediting until it is repaired.
+        if (exact_units(body.previous_max_budget) != settled_total(body.previous_checkpoint)
+                or exact_units(body.target_max_budget) != settled_total(cp)):
+            raise HTTPException(409, {"error": "native max_budget must equal the settled Gamma total"})
         row = await (await self.keys()).compare_and_checkpoint(body.hotkey_ss58,
-            body.previous_checkpoint, cp, body.previous_max_budget, body.target_max_budget, body.previous_spend)
+            body.previous_checkpoint, cp, body.previous_max_budget, body.target_max_budget)
         if row is None:
             raise ManagingConflict("settlement write did not persist")
-        if decode_metadata(row.metadata).get("gamma") != cp or exact_units(row.max_budget) != exact_units(body.target_max_budget):
+        written = decode_metadata(row.metadata).get("gamma")
+        if written != cp or exact_units(row.max_budget) != exact_units(body.target_max_budget):
             raise RuntimeError("native credit readback failed")
+        if exact_units(row.max_budget) != settled_total(written):
+            raise RuntimeError("credited key does not hold exactly its settled Gamma")
+        if settled_total(body.previous_checkpoint) == 0 and row.blocked:
+            raise RuntimeError("first credit did not enable the reserved key")
         return {"row": _project(row)}
 
     async def issue(self, hotkey: str, action: str, verification_digest: str,
@@ -633,9 +693,7 @@ class GammaManagement:
             raise HTTPException(409, {"error": "no positive finalized chain settlement"})
         if not isinstance(reference, str) or not reference:
             raise HTTPException(409, {"error": "no signed-chain reconciliation reference"})
-        # Inference auth must see the unblocked row before any credential leaves
-        # this process. Enable once through the ordinary unblocked native routine,
-        # which also evicts its cached key state; never store a raw vk in metadata.
+        # Never store a raw vk in metadata.
         required_alias = check["observation_coldkey"] + "-" + hotkey.lower()
         if row.key_alias != required_alias:
             # Alias is also the stored-secret lookup name. Do not read another
@@ -652,9 +710,13 @@ class GammaManagement:
                 # there is no public caller-driven receipt-to-token remap.
                 if check.get("last_spent_reference") != reconciliation_reference:
                     raise ManagingConflict("settled proof belongs to another exact-hotkey identity")
-        # A failed proof must not enable or rotate anything.
+        # The first credit enables the key in the same write as its budget.
+        # Delivery never writes the row: a native key update rewrites the whole
+        # metadata column from its own earlier read, so an unblock here could
+        # roll back a credit landing at the same moment. A funded key that is
+        # blocked was blocked by an operator; do not hand it out or undo that.
         if row.blocked:
-            await native.update(row, blocked=False)
+            raise HTTPException(409, {"error": "funded key is blocked; operator review required"})
         if action == "regenerate":
             # Keep the durable proof on the new token while the old token moves
             # to LiteLLM DeletedVerificationToken. preserves paid credit and
@@ -685,8 +747,9 @@ class GammaManagement:
             # Never pair a credential read from one row with a newer row.
             raise ManagingConflict("credential changed during delivery; retry the claim")
         return {"status": "provisioned", "has_positive_chain_settlement": True,
-                "max_budget": str(row.max_budget), "spend": str(row.spend),
-                "remaining_credit": units_text(exact_units(row.max_budget) - exact_units(row.spend)),
+                "max_budget": str(row.max_budget), "spend": usage_text(row.spend),
+                "remaining_credit": format(
+                    Decimal(units_text(exact_units(row.max_budget))) - Decimal(usage_text(row.spend)), "f"),
                 "reconciliation_reference": reference,
                 "models": list(row.models or []), "receipts": check.get("receipt_ids", []),
                 "api_key": raw}

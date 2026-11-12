@@ -94,9 +94,31 @@ def settled_checkpoint(cp, s):
     next_cp.update({"pending": None, "delta_units": 0,
         "observation_height": s.block_number, "observation_hash": s.block_hash,
         "last_spent_height": s.block_number, "last_spent_amount": s.amount_units,
-        "last_spent_reference": s.reference, "total_settled_units": s.amount_units,
+        "last_spent_reference": s.reference,
+        "total_settled_units": cp["total_settled_units"] + s.amount_units,
         "receipt_ids": [*cp["receipt_ids"], s.model_dump(exclude={"observation_hash"})]})
     return next_cp
+
+
+def top_up_intent(settled, amount, height):
+    """A later mint on an already-settled key: (observed, pending intent, settlement)."""
+    planning_hash = f"0x{height:064x}"
+    pending_ref = {"block_number": height, "block_hash": planning_hash, "event_index": -1,
+        "hotkey_ss58": HK, "netuid": 90, "amount_units": amount,
+        "reference": settlement_reference(90, HK, planning_hash, amount)}
+    observed = {**copy.deepcopy(settled), "delta_units": amount, "pending": None}
+    intent = {**copy.deepcopy(observed), "pending": {"reference": pending_ref,
+        "intake_height": height, "planning_hash": planning_hash, "attempts": 1,
+        "parent_units": amount, "expected_checkpoint": copy.deepcopy(observed)}}
+    settlement = mg.ProvenanceSettlement.from_settlement(
+        {**pending_ref, "block_number": height + 1, "event_index": 2,
+         "block_hash": f"0x{height + 1:064x}"}, planning_hash)
+    return observed, intent, settlement
+
+
+def scope(store, **fields):
+    return {"network": "finney", "genesis_hash": mg.GENESIS, "netuid": 90,
+            "hotkey_ss58": HK, "token_id": store.row.token, **fields}
 
 
 class SyntheticStore:
@@ -130,25 +152,27 @@ class SyntheticStore:
         return self.row
 
     async def compare_checkpoint(self, hotkey, expected, checkpoint, expected_max_budget,
-                                 expected_spend, *, target_max_budget=None):
+                                 *, target_max_budget=None):
         await asyncio.sleep(0)
         md = json.loads(self.row.metadata)
+        # Native spend is deliberately not part of the precondition.
         if (hotkey != HK or md["gamma"] != expected
-                or Decimal(self.row.max_budget) != Decimal(expected_max_budget)
-                or Decimal(self.row.spend) != Decimal(expected_spend)):
+                or Decimal(self.row.max_budget) != Decimal(expected_max_budget)):
             raise mg.ManagingConflict("stale native row")
         md["gamma"] = checkpoint
         self.row.metadata = json.dumps(md)
         self.row.updated_at = datetime.now(timezone.utc)
         if target_max_budget is not None:
             self.row.max_budget = target_max_budget
+            if not expected.get("total_settled_units"):
+                self.row.blocked = False  # first credit enables in the same write
             self.credit_writes += 1
         return self.row
 
     async def compare_and_checkpoint(self, hotkey, expected, checkpoint, previous_max_budget,
-                                     target_max_budget, expected_spend):
+                                     target_max_budget):
         return await self.compare_checkpoint(hotkey, expected, checkpoint, previous_max_budget,
-                                             expected_spend, target_max_budget=target_max_budget)
+                                             target_max_budget=target_max_budget)
 
     async def stored_key(self, row):
         return self.secret if row.token == hashlib.sha256(self.secret.encode()).hexdigest() else None
@@ -307,6 +331,7 @@ async def test_issue_rechecks_finalized_checkpoint_identity(worker_identity):
     data["gamma"]["total_settled_units"] = 1
     data["gamma"]["last_spent_reference"] = "a" * 64
     store.row.max_budget = "1"
+    store.row.blocked = False
     store.row.metadata = json.dumps(data)
     service = mg.GammaManagement(proxy=store, models=["m"], certificate_fingerprint="3" * 64)
     result = await service.issue(HK, "claim", "a" * 64)
@@ -387,7 +412,7 @@ async def test_redis_fence_excludes_second_replica_and_withholds_lost_credential
     store = SyntheticStore()
     cp, settlement = settlement_intent()
     await store.reserve(HK, cp, {"models": ["m"], "mcp_servers": None}, SECRET)
-    await store.compare_checkpoint(HK, cp, settled_checkpoint(cp, settlement), "0", "0", target_max_budget="1")
+    await store.compare_checkpoint(HK, cp, settled_checkpoint(cp, settlement), "0", target_max_budget="1")
     native, native_http = management(store, worker_identity, lease=redis_lease)
     caller, caller_http = management(store, worker_identity, lease=redis_lease)
     rotating = asyncio.Event()
@@ -449,7 +474,7 @@ async def test_lost_issuance_lease_never_discloses_a_rotated_secret(worker_ident
     store = SyntheticStore()
     cp, settlement = settlement_intent()
     await store.reserve(HK, cp, {"models": ["m"], "mcp_servers": None}, SECRET)
-    await store.compare_checkpoint(HK, cp, settled_checkpoint(cp, settlement), "0", "0", target_max_budget="1")
+    await store.compare_checkpoint(HK, cp, settled_checkpoint(cp, settlement), "0", target_max_budget="1")
     service, http = management(store, worker_identity, lease=redis_lease)
     lock_key = "kubetee:gamma:key-issue-lease:v1:" + HK
     rotated = asyncio.Event()
@@ -548,7 +573,16 @@ async def test_issue_only_after_proven_credit_and_repeat_does_not_rotate(worker_
         hotkey_ss58=HK, token_id=store.row.token, previous_max_budget="0", previous_spend="0",
         previous_checkpoint=cp, expected_checkpoint=settled_checkpoint(cp, settlement),
         settlement=settlement, target_max_budget="1", amount_units=settlement.amount_units))
+    # The credit itself enabled the reserved key; delivery writes nothing.
+    assert store.row.blocked is False
+    updates = []
+    original_update = store.update
+    async def recorded_update(row, **changes):
+        updates.append(changes)
+        return await original_update(row, **changes)
+    store.update = recorded_update
     first = await service.issue(HK, "claim", "a" * 64)
+    assert updates == []
     assert first["status"] == "provisioned" and first["has_positive_chain_settlement"] is True
     assert first["remaining_credit"] == "1"
     assert validate_claimed_result(first, True)["api_key"] == SECRET
@@ -557,6 +591,79 @@ async def test_issue_only_after_proven_credit_and_repeat_does_not_rotate(worker_
     assert (await service.issue(HK, "regenerate", "c" * 64))["api_key"] == ROTATED
     assert store.rotations == 1 and store.row.blocked is False
     assert Decimal(store.row.max_budget) == 1 and Decimal(store.row.spend) == 0
+
+
+@pytest.mark.asyncio
+async def test_top_up_ignores_native_spend_and_budget_stays_the_settled_total():
+    store = SyntheticStore()
+    service = mg.GammaManagement(proxy=store, models=["m"], certificate_fingerprint="3" * 64)
+    cp, first = settlement_intent()
+    await store.reserve(HK, cp, {"models": ["m"], "mcp_servers": None}, SECRET)
+    settled = settled_checkpoint(cp, first)
+    await service.credit(mg.CreditRequest(**scope(store, previous_max_budget="0",
+        previous_checkpoint=cp, expected_checkpoint=settled, settlement=first,
+        target_max_budget="1", amount_units=first.amount_units)))
+    # The key is in service: usage is a moving float, not 1e-9 Gamma units.
+    store.row.spend = 0.30000000000000004
+    observed, intent, second = top_up_intent(settled, 500_000_000, 20)
+    await service.checkpoint(mg.CheckpointRequest(**scope(store, previous_max_budget="1",
+        expected_checkpoint=settled, checkpoint=observed)))
+    await service.checkpoint(mg.CheckpointRequest(**scope(store, previous_max_budget="1",
+        previous_spend="0", expected_checkpoint=observed, checkpoint=intent)))
+    store.row.spend = 0.7000000000000001  # moved again between read and credit
+    topped = settled_checkpoint(intent, second)
+    assert topped["total_settled_units"] == 1_500_000_000
+    result = await service.credit(mg.CreditRequest(**scope(store, previous_max_budget="1",
+        previous_spend="0.30000000000000004", previous_checkpoint=intent,
+        expected_checkpoint=topped, settlement=second, target_max_budget="1.5",
+        amount_units=second.amount_units)))
+    assert Decimal(result["row"]["max_budget"]) == Decimal("1.5")
+    assert mg.settled_total(json.loads(store.row.metadata)["gamma"]) == mg.exact_units(store.row.max_budget)
+    assert store.credit_writes == 2 and store.row.spend == 0.7000000000000001
+    issued = await service.issue(HK, "claim", "a" * 64)
+    assert issued["max_budget"] == "1.5" and issued["spend"] == "0.7000000000000001"
+    assert Decimal(issued["remaining_credit"]) == Decimal("0.7999999999999999")
+    assert validate_claimed_result(issued, True)["api_key"] == SECRET
+
+
+@pytest.mark.asyncio
+async def test_credit_refuses_any_budget_that_is_not_the_settled_total():
+    store = SyntheticStore()
+    service = mg.GammaManagement(proxy=store, models=["m"], certificate_fingerprint="3" * 64)
+    cp, first = settlement_intent()
+    await store.reserve(HK, cp, {"models": ["m"], "mcp_servers": None}, SECRET)
+    settled = settled_checkpoint(cp, first)
+    await service.credit(mg.CreditRequest(**scope(store, previous_max_budget="0",
+        previous_checkpoint=cp, expected_checkpoint=settled, settlement=first,
+        target_max_budget="1", amount_units=first.amount_units)))
+    # Only a credit may move settled totals or receipts.
+    for forged in ({**settled, "total_settled_units": 9_000_000_000},
+                   {**settled, "receipt_ids": []}):
+        with pytest.raises(mg.ManagingConflict, match="only a credit"):
+            await service.checkpoint(mg.CheckpointRequest(**scope(store, previous_max_budget="1",
+                expected_checkpoint=settled, checkpoint=forged)))
+    observed, intent, second = top_up_intent(settled, 500_000_000, 20)
+    for step, target in ((settled, observed), (observed, intent)):
+        await service.checkpoint(mg.CheckpointRequest(**scope(store, previous_max_budget="1",
+            expected_checkpoint=step, checkpoint=target)))
+    # An operator (or a lost write) moved max_budget away from the receipts.
+    store.row.max_budget = "5"
+    with pytest.raises(mg.HTTPException) as refused:
+        await service.credit(mg.CreditRequest(**scope(store, previous_max_budget="5",
+            previous_checkpoint=intent, expected_checkpoint=settled_checkpoint(intent, second),
+            settlement=second, target_max_budget="5.5", amount_units=second.amount_units)))
+    assert refused.value.status_code == 409 and "settled Gamma total" in str(refused.value.detail)
+    assert store.credit_writes == 1 and store.row.max_budget == "5"
+    store.row.max_budget = "1"
+    # An operator block survives a top-up and stops delivery; nothing re-enables it.
+    store.row.blocked = True
+    await service.credit(mg.CreditRequest(**scope(store, previous_max_budget="1",
+        previous_checkpoint=intent, expected_checkpoint=settled_checkpoint(intent, second),
+        settlement=second, target_max_budget="1.5", amount_units=second.amount_units)))
+    assert store.row.blocked is True and store.row.max_budget == "1.5"
+    with pytest.raises(mg.HTTPException) as blocked:
+        await service.issue(HK, "claim", "a" * 64)
+    assert blocked.value.status_code == 409 and store.row.blocked is True
 
 
 @pytest.mark.asyncio

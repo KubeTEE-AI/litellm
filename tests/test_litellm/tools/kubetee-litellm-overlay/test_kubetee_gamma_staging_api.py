@@ -3,7 +3,8 @@
 The default tests use HTTP transport doubles. An explicit staging credential
 and verified hostname additionally opt into the real create/read/update probe.
 All live keys are disabled at creation and forced back to zero budget in
-``finally``. Chain settlement and positive-budget credit are never exercised.
+``finally``. The live probe never exercises chain settlement or a positive
+budget; the credit write is covered against the real adapter with doubles.
 """
 import hashlib
 import json
@@ -153,15 +154,8 @@ async def test_real_management_api_zero_credit_lifecycle():
 
 
 @pytest.mark.asyncio
-async def test_management_api_enterprise_and_atomic_credit_fail_closed():
-    pending = {"reference": {"amount_units": 1_000_000_000}}
-    from types import SimpleNamespace
-    expected = {"pending": pending, "delta_units": 1_000_000_000}
-    row = SimpleNamespace(metadata={"gamma": expected}, max_budget="0", spend="0")
-    class ExactHotkey:
-        async def find_exact_hotkey(self, hotkey):
-            assert hotkey == HK
-            return row
+async def test_native_regenerate_is_enterprise_gated_for_every_caller():
+    """Verified on staging 2026-11-12 with team-key AND master-key auth."""
     async def regenerate(request):
         return httpx.Response(500, request=request, json={"error": {"message":
             "Regenerating Virtual Keys is an Enterprise feature, You must be a LiteLLM Enterprise user"}})
@@ -169,10 +163,114 @@ async def test_management_api_enterprise_and_atomic_credit_fail_closed():
     async with httpx.AsyncClient(base_url="https://gateway.test", transport=transport) as client:
         with pytest.raises(mg.ManagingConflict, match="Enterprise feature.*LiteLLM Enterprise user"):
             await NativeManagementHTTP(client).call("POST", "/key/regenerate", {"key": "test-token"})
-    with pytest.raises(mg.ManagingConflict, match="atomic credit CAS.*activation remains gated"):
-        await mg.NativeKeys.compare_checkpoint(
-            ExactHotkey(), HK, expected, {"pending": None, "delta_units": 0}, "0", "0", target_max_budget="1",
-        )
-    assert row.metadata == {"gamma": expected} and row.max_budget == "0" and row.spend == "0"
-    # Routing through an ordinary /key/update request does not demonstrate that
-    # both fields changed atomically. The worker activation gate remains closed.
+
+
+class RecordingNative:
+    """Real NativeKeys.compare_checkpoint over a recorded native update."""
+    def __init__(self, checkpoint: dict, *, max_budget: object = 0.0, blocked: bool = True,
+                 spend: object = 0.0):
+        from types import SimpleNamespace
+        self.row = SimpleNamespace(token="0" * 64, blocked=blocked, max_budget=max_budget, spend=spend,
+            metadata={"gamma": checkpoint, "gamma_hotkey": HK, "tenant_note": "kept"})
+        self.updates: list[dict] = []
+
+    async def find_exact_hotkey(self, hotkey):
+        assert hotkey == HK
+        return self.row
+
+    async def update(self, row, *, metadata=None, max_budget=None, blocked=None):
+        assert row is self.row
+        self.updates.append({"metadata": metadata, "max_budget": max_budget, "blocked": blocked})
+        row.metadata = metadata
+        if max_budget is not None:
+            row.max_budget = float(max_budget)
+        if blocked is not None:
+            row.blocked = blocked
+        return row
+
+
+def intent(total: int, amount: int, receipts: list | None = None) -> tuple[dict, dict]:
+    receipts = receipts or []
+    pending = {"pending": {"reference": {"amount_units": amount}}, "delta_units": amount,
+               "total_settled_units": total, "receipt_ids": receipts}
+    settled = {"pending": None, "delta_units": 0, "total_settled_units": total + amount,
+               "receipt_ids": [*receipts, {"amount_units": amount}]}
+    return pending, settled
+
+
+@pytest.mark.asyncio
+async def test_credit_is_one_native_update_of_checkpoint_and_budget():
+    pending, settled = intent(0, 1_000_000_000)
+    native = RecordingNative(pending)
+    row = await mg.NativeKeys.compare_checkpoint(native, HK, pending, settled, "0", target_max_budget="1")
+    # One write: receipt, allowance and first-credit enable travel together.
+    assert native.updates == [{"metadata": {"gamma": settled, "gamma_hotkey": HK, "tenant_note": "kept"},
+                               "max_budget": "1", "blocked": False}]
+    assert mg.exact_units(row.max_budget) == mg.settled_total(row.metadata["gamma"]) == 1_000_000_000
+
+    # Top-up: absolute new total, usage ignored, an operator block untouched.
+    pending, topped = intent(1_000_000_000, 500_000_000, settled["receipt_ids"])
+    native = RecordingNative(pending, max_budget=1.0, blocked=True, spend=0.30000000000000004)
+    await mg.NativeKeys.compare_checkpoint(native, HK, pending, topped, "1", target_max_budget="1.5")
+    assert native.updates == [{"metadata": {"gamma": topped, "gamma_hotkey": HK, "tenant_note": "kept"},
+                               "max_budget": "1.5", "blocked": None}]
+    assert native.row.blocked is True and native.row.spend == 0.30000000000000004
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row_budget,claimed_budget,target,settled_after,reason", [
+    (5.0, "5", "5.5", None, "not the settled Gamma total"),            # row edited outside Gamma
+    (1.0, "1", "1.5", 1_400_000_000, "previous total \\+ proven"),      # total != receipts
+    (1.0, "1", "1.6", None, "target max_budget is not the settled"),   # target != total
+    (1.0, "2", "1.5", None, "unchanged version required"),             # stale caller view
+])
+async def test_credit_writes_nothing_unless_budget_is_the_settled_total(
+        row_budget, claimed_budget, target, settled_after, reason):
+    pending, topped = intent(1_000_000_000, 500_000_000)
+    if settled_after is not None:
+        topped["total_settled_units"] = settled_after
+    native = RecordingNative(pending, max_budget=row_budget, blocked=False)
+    with pytest.raises(mg.ManagingConflict, match=reason):
+        await mg.NativeKeys.compare_checkpoint(native, HK, pending, topped, claimed_budget,
+                                               target_max_budget=target)
+    assert native.updates == [] and native.row.max_budget == row_budget
+    assert native.row.metadata["gamma"] == pending
+
+
+@pytest.mark.asyncio
+async def test_credit_refuses_totals_native_float_money_cannot_hold():
+    total = 12_345_678_123_456_789  # 12,345,678.123456789 Gamma: not a float64 round trip
+    pending, topped = intent(total - 1, 1)
+    native = RecordingNative(pending, max_budget="12345678.123456788", blocked=False)
+    with pytest.raises(mg.ManagingConflict, match="not exactly representable"):
+        await mg.NativeKeys.compare_checkpoint(native, HK, pending, topped, "12345678.123456788",
+                                               target_max_budget="12345678.123456789")
+    assert native.updates == []
+    assert mg.native_budget("999999.999999999") == 999999.999999999
+
+
+@pytest.mark.asyncio
+async def test_native_update_sends_one_request_carrying_every_field(monkeypatch):
+    """The adapter's update is a single native update_key_fn call, then a readback."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from litellm.proxy.management_endpoints import key_management_endpoints as native_api
+    pending, settled = intent(0, 1_000_000_000)
+    stored = SimpleNamespace(token="0" * 64, blocked=True, max_budget=0.0, spend=0.0,
+                             metadata={"gamma": pending, "gamma_hotkey": HK})
+    calls = []
+    async def update_key_fn(*, request, data, user_api_key_dict, litellm_changed_by):
+        sent = data.model_dump(exclude_unset=True)
+        calls.append(sent)
+        stored.metadata, stored.max_budget, stored.blocked = sent["metadata"], sent["max_budget"], sent["blocked"]
+    monkeypatch.setattr(native_api, "update_key_fn", update_key_fn)
+    monkeypatch.setattr(mg.NativeKeys, "admin", AsyncMock(return_value=None))
+    async def readback(self, hotkey):
+        assert hotkey == HK
+        return stored
+    monkeypatch.setattr(mg.NativeKeys, "find_exact_hotkey", readback)
+    native = object.__new__(mg.NativeKeys)
+    row = await native.compare_checkpoint(HK, pending, settled, "0", target_max_budget="1")
+    assert calls == [{"key": "0" * 64, "metadata": {"gamma": settled, "gamma_hotkey": HK},
+                      "max_budget": 1.0, "blocked": False}]
+    assert row.blocked is False and row.max_budget == 1.0
