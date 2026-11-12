@@ -212,8 +212,12 @@ jobs:
             5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e packaging-26.2-py3-none-any.whl \
             81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176 pygments-2.20.0-py3-none-any.whl \
             | (cd /tmp/litellm-overlay-test-packet && shasum -a 256 --check --status -)
-          uv pip install --offline --no-deps --target /tmp/litellm-overlay-test-deps \
-            /tmp/litellm-overlay-test-packet/*.whl
+          # Unpack verified wheels byte-for-byte. A host uv resolver may infer
+          # metadata from the working project even with --no-deps --offline.
+          # This is not dependency resolution and cannot select a new version.
+          for wheel in /tmp/litellm-overlay-test-packet/*.whl; do
+            python3 -m zipfile -e "$wheel" /tmp/litellm-overlay-test-deps/
+          done
           test -d /tmp/litellm-overlay-test-deps/pytest_asyncio
           python3 -c 'import sys; sys.path.insert(0,"/tmp/litellm-overlay-test-deps"); import pytest,pytest_asyncio; assert pytest.__version__ == "9.0.3"; assert pytest_asyncio.__version__ == "1.3.0"'
           # Keep wheel metadata: pytest discovers its own supported plugins
