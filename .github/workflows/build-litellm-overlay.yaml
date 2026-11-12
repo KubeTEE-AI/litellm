@@ -150,12 +150,42 @@ jobs:
           echo "BASE_TAG=$BASE_TAG" >> "$GITHUB_ENV"
           echo "Resolved TAG=${TAG} BASE_TAG=${BASE_TAG}"
 
+      - name: Install uv for isolated test tools
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+
+      - name: Prepare actual external signer contract test
+        run: |
+          # btcli is a test-only tool, not a runtime dependency of LiteLLM.
+          # Its uv-installed shebang points at this checkout; invoke its real
+          # console package with the base interpreter instead of editing wheels.
+          uv pip install --target /tmp/gamma-cli \
+            --python-platform linux --python-version 3.13 'bittensor[cli]==11.3.2'
+          mkdir /tmp/gamma-test-bin
+          printf '#!/bin/sh\nexec /app/.venv/bin/python /tmp/gamma-cli/bin/btcli "$@"\n' \
+            > /tmp/gamma-test-bin/btcli
+          chmod 700 /tmp/gamma-test-bin/btcli
+          # Synthetic claim compatibility tests need no network chain endpoint.
+          SUBNET_WORKTREE=$(dirname "$(dirname "$GITHUB_WORKSPACE")")/kubetee-subnet
+          if test -d "$SUBNET_WORKTREE/gamma_funder"; then
+            echo "gamma_worker_source=$SUBNET_WORKTREE" >> "$GITHUB_ENV"
+          else
+            git clone --depth 1 --branch feat/gamma-funder-release \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY_OWNER/kubetee-subnet.git" \
+              /tmp/gamma-worker
+            echo "gamma_worker_source=/tmp/gamma-worker" >> "$GITHUB_ENV"
+          fi
+
       - name: Run overlay tests against supported LiteLLM base
         run: |
           python3 -m pip install --quiet --target /tmp/litellm-overlay-test-deps pytest==9.0.2
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
-            -e PYTHONPATH=/tmp/test-deps \
+            -e PYTHONPATH=/tmp/test-deps:/tmp/gamma-cli:${{ env.gamma_worker_source }} \
+            -e PATH=/tmp/gamma-test-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e KUBETEE_GAMMA_WORKER_ROOT=${{ env.gamma_worker_source }} \
+            -v /tmp/gamma-cli:/tmp/gamma-cli:ro \
+            -v /tmp/gamma-test-bin:/tmp/gamma-test-bin:ro \
+            -v "${{ env.gamma_worker_source }}:${{ env.gamma_worker_source }}:ro" \
             -v /tmp/litellm-overlay-test-deps:/tmp/test-deps:ro \
             -v "$PWD:/workspace:ro" \
             -w /workspace \
@@ -193,7 +223,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py kubetee_gamma_claim.py kubetee_gamma_management.py kubetee_gamma_private_mtls.py kubetee_gamma_scope.py kubetee_gamma_transport.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           test ! -e kubetee_pricing.py
