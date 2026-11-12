@@ -218,8 +218,25 @@ jobs:
             test "${attempt}" -lt 30
             sleep 1
           done
-          docker run --rm --network gamma-overlay-test-net redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
-            redis-cli --pass monitor-secret -p 26379 -h gamma-sentinel sentinel get-master-addr-by-name gamma-master
+          # Docker DNS can briefly lag a listening Sentinel on the isolated
+          # network. Retry the actual monitor contract, not a guessed address.
+          for attempt in $(seq 1 30); do
+            MONITOR_MASTER=$(docker run --rm --network gamma-overlay-test-net \
+              redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+              redis-cli --pass monitor-secret --no-auth-warning -p 26379 -h gamma-sentinel \
+              sentinel get-master-addr-by-name gamma-master || true)
+            if [ "$(printf '%s\n' "$MONITOR_MASTER" | head -1)" = "gamma-data" ]; then
+              printf 'Authenticated Sentinel resolved master: %s\n' "$MONITOR_MASTER"
+              break
+            fi
+            test "${attempt}" -lt 30 || {
+              docker logs gamma-test-sentinel
+              printf 'Sentinel could not resolve gamma-data: %s\n' "$MONITOR_MASTER"
+              exit 1
+            }
+            sleep 1
+          done
+
 
       - name: Run overlay tests against supported LiteLLM base
         run: |
