@@ -14,8 +14,8 @@ on:
   push:
     branches:
       - kubetee-prod
-      # Feature-only review evidence. Publishing remains restricted to the
-      # protected production branch; PR merge runs use the base workflow.
+      # Feature-only review evidence. Automatic publishing remains restricted to
+      # protected production; explicit review-only dispatch signs this branch.
       # This lets the source's own offline test revisions be exercised.
       - gamma-mtls-release
     paths:
@@ -108,7 +108,7 @@ jobs:
       PR_NUMBER: ${{ github.event.number }}
       # Only pushes to protected kubetee-prod may publish. The isolated
       # gamma-mtls-release push is purely read-only review validation.
-      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/kubetee-prod' }}
+      PUBLISH: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/kubetee-prod') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/gamma-mtls-release') }}
     steps:
       - name: Clean root-owned leftovers from prior runs
         run: |
