@@ -457,7 +457,9 @@ jobs:
 
       - name: Save supply-chain evidence
         uses: actions/upload-artifact@v4
-        if: always()
+        # An early config/test failure has no image metadata or scan to upload;
+        # that absence must not obscure the original failed validation.
+        if: always() && hashFiles('/tmp/kubetee-image-metadata.json') != ''
         with:
           name: litellm-1.108.3-kubetee-release
           path: |
