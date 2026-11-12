@@ -29,6 +29,31 @@ async def main() -> None:
     import kubetee_eastwest
 
     await kubetee_eastwest.fetch_eastwest()
+    if __import__("os").environ.get("KUBETEE_GAMMA_ENABLED", "0") in {"1", "true"}:
+        # This modifies only our in-process app, not a live deployment. It is
+        # installed before LiteLLM loads any public routes and executes only
+        # INSIDE ProxyStartupEvent AFTER native Prisma would have initialized.
+        from contextlib import asynccontextmanager
+        from litellm.proxy import proxy_server
+        from kubetee_gamma_private_mtls import connect_public_claims, initialize_private_management
+        # `app` is created with this exact bound function in the base image. Wrap
+        # that bound hook AS WELL AS proxy_server.proxy_startup_event. The public
+        # claim bridge must never be dropped when the bound object differs.
+        router_hook = proxy_server.app.router.lifespan_context
+        @asynccontextmanager
+        async def gamma_lifespan(app):
+            async with router_hook(app) as state:
+                await initialize_private_management(kubetee_eastwest._fetch)
+                await connect_public_claims()
+                try:
+                    yield state if state is not None else {}
+                finally:
+                    await proxy_server.app.state.kubetee_gamma_handler.close()
+        proxy_server.proxy_startup_event = gamma_lifespan
+        proxy_server.app.router.lifespan_context = gamma_lifespan
+        import os
+        os.environ["KUBETEE_EASTWEST_DIR"] = str(__import__("pathlib").Path(
+            os.environ.get("KUBETEE_EASTWEST_DIR", "/run/kubetee-eastwest")))
     print("kubetee bootstrap: east-west material ready", flush=True)
 
 

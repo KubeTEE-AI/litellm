@@ -14,6 +14,10 @@ on:
   push:
     branches:
       - kubetee-prod
+      # Feature-only review evidence. Automatic publishing remains restricted to
+      # protected production; explicit review-only dispatch signs this branch.
+      # This lets the source's own offline test revisions be exercised.
+      - gamma-mtls-release
     paths:
       - "tools/kubetee-litellm-overlay/**"
       - "tests/test_litellm/tools/kubetee-litellm-overlay/**"
@@ -102,7 +106,10 @@ jobs:
       actions: write
     env:
       PR_NUMBER: ${{ github.event.number }}
-      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/kubetee-prod' }}
+      # Production publishes only protected kubetee-prod pushes. An explicit
+      # manual gamma-mtls-release run signs a nonproduction review candidate;
+      # feature pushes and PRs never publish.
+      PUBLISH: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/kubetee-prod') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/gamma-mtls-release') }}
     steps:
       - name: Clean root-owned leftovers from prior runs
         run: |
@@ -115,12 +122,16 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
 
-      - name: Require production source branch for publishing
+      - name: Require authorized source for publishing
         run: |
           if [ "$PUBLISH" = "true" ]; then
-            test "${GITHUB_REF_NAME}" = "kubetee-prod"
+            test "${GITHUB_REF_NAME}" = "kubetee-prod" || {
+              test "${GITHUB_REF_NAME}" = "gamma-mtls-release" &&
+              test "${GITHUB_EVENT_NAME}" = "workflow_dispatch"
+            }
           else
-            test "${GITHUB_EVENT_NAME}" = "pull_request"
+            # Scope test-only events; never publish feature review artifacts.
+            test "${GITHUB_EVENT_NAME}" = "push" || test "${GITHUB_EVENT_NAME}" = "pull_request"
           fi
 
       - name: Resolve tag
@@ -144,18 +155,164 @@ jobs:
               | sed -E 's/.*-kubetee\.([0-9]+)"/\1/' \
               | sort -n | tail -1)
             TAG="${BASE_TAG}-kubetee.$((${MAX_N:-0} + 1))"
+            if [ "${GITHUB_REF_NAME}" = "gamma-mtls-release" ]; then
+              TAG="1.108.3-gamma.0.0.${GITHUB_SHA::10}"
+            fi
           fi
       
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "BASE_TAG=$BASE_TAG" >> "$GITHUB_ENV"
           echo "Resolved TAG=${TAG} BASE_TAG=${BASE_TAG}"
 
+      - name: Select supported test-tool interpreter
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+          check-latest: false
+
+      - name: Install uv for isolated test tools
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
+
+      - name: Prepare actual external signer contract test
+        run: |
+          # btcli is a test-only tool, not a runtime dependency of LiteLLM.
+          # Its uv-installed shebang points at this checkout; invoke its real
+          # console package with the base interpreter instead of editing wheels.
+          uv pip install --target /tmp/gamma-cli \
+            --python-platform linux --python-version 3.13 'bittensor[cli]==11.3.2'
+          mkdir /tmp/gamma-test-bin
+          printf '#!/bin/sh\nexec /app/.venv/bin/python /tmp/gamma-cli/bin/btcli "$@"\n' \
+            > /tmp/gamma-test-bin/btcli
+          chmod 700 /tmp/gamma-test-bin/btcli
+          # Synthetic claim compatibility tests need no network chain endpoint.
+          SUBNET_WORKTREE=$(dirname "$(dirname "$GITHUB_WORKSPACE")")/kubetee-subnet
+          if test -d "$SUBNET_WORKTREE/gamma_funder"; then
+            echo "gamma_worker_source=$SUBNET_WORKTREE/gamma_funder" >> "$GITHUB_ENV"
+          else
+            git clone --depth 1 --branch feat/gamma-funder-release \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY_OWNER/kubetee-subnet.git" \
+              /tmp/gamma-worker
+            echo "gamma_worker_source=/tmp/gamma-worker/gamma_funder" >> "$GITHUB_ENV"
+          fi
+
+      - name: Start disposable authenticated Redis Sentinel pair
+        run: |
+          # Test-only isolated network: never substitute a Sentinel monitor for
+          # its discovered data-server master or run any state against production.
+          docker network create --internal gamma-overlay-test-net
+          docker run --name gamma-test-data -d --network gamma-overlay-test-net \
+            --network-alias gamma-data redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+            redis-server --requirepass data-secret --user data-user on nopass '~*' +@all
+          # This short-lived CI-only monitor has no data/TLS identity. Resolve
+          # the disposable data endpoint once to avoid the Redis image's startup
+          # DNS race. Client discovery still goes through a separate Sentinel at
+          # gamma-sentinel and must NOT treat it as the data server.
+          DATA_IP=$(docker inspect gamma-test-data --format \
+            '{{with index .NetworkSettings.Networks "gamma-overlay-test-net"}}{{.IPAddress}}{{end}}')
+          test -n "$DATA_IP"
+          for attempt in $(seq 1 30); do
+            if docker run --rm --network gamma-overlay-test-net redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+              redis-cli --user data-user --pass data-secret -h gamma-data ping | grep -q PONG; then break; fi
+            test "${attempt}" -lt 30
+            sleep 1
+          done
+          # Sentinel rewrites its configuration: the mounted path must be owned
+          # by the image's unprivileged Redis UID, not root. Only this
+          # disposable config dir receives UID 999; no privilege escalation.
+          CONFIG_DIR=/tmp/gamma-sentinel-config
+          mkdir "$CONFIG_DIR"
+          printf '%s\n' \
+            'port 26379' 'protected-mode yes' 'requirepass monitor-secret' \
+            'resolve-hostnames yes' "sentinel monitor gamma-master $DATA_IP 6379 1" \
+            'sentinel auth-user gamma-master data-user' \
+            'sentinel auth-pass gamma-master data-secret' > "$CONFIG_DIR/sentinel.conf"
+          chmod 700 "$CONFIG_DIR"
+          sudo chown 999:999 "$CONFIG_DIR" "$CONFIG_DIR/sentinel.conf"
+          docker run --name gamma-test-sentinel -d --network gamma-overlay-test-net \
+            --network-alias gamma-sentinel --user 999:999 -e SKIP_FIX_PERMS=1 \
+            -v "$CONFIG_DIR:/etc/redis:rw" \
+            redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+            redis-server /etc/redis/sentinel.conf --sentinel
+
+          # Docker DNS can briefly lag a listening Sentinel on the isolated
+          # network. Retry the actual monitor contract, not a guessed address.
+          for attempt in $(seq 1 30); do
+            MONITOR_MASTER=$(docker run --rm --network gamma-overlay-test-net \
+              redis:8.4.0@sha256:c22af04bb576503bf16b3e34a1fd2fd82de0f765afd866d2e380145e0af30d78 \
+              redis-cli --pass monitor-secret --no-auth-warning -p 26379 -h gamma-sentinel \
+              sentinel get-master-addr-by-name gamma-master || true)
+            if [ "$(printf '%s\n' "$MONITOR_MASTER" | head -1)" = "$DATA_IP" ]; then
+              printf 'Authenticated Sentinel resolved master: %s\n' "$MONITOR_MASTER"
+              break
+            fi
+            test "${attempt}" -lt 30 || {
+              docker logs gamma-test-sentinel
+              printf 'Sentinel could not resolve gamma-data: %s\n' "$MONITOR_MASTER"
+              exit 1
+            }
+            sleep 1
+          done
+
+
       - name: Run overlay tests against supported LiteLLM base
         run: |
-          python3 -m pip install --quiet --target /tmp/litellm-overlay-test-deps pytest==9.0.2
-          docker run --rm \
+          # The omitted pytest-asyncio plugin makes the 13 async Gamma
+          # tests fail-as-unsupported even though the synchronous suite is green.
+          # Pin the complete six-wheel test closure to hashes from uv.lock; do
+          # not rely on the base image's missing/ incompatible seller packet.
+          # Pin both project-pinned wheels and required pytest runtime deps.
+          # No transitive resolution is allowed at install time.
+          # a floating version from a generic runner image. Install only after
+          # the two downloaded wheel digests match, then stage the packet.
+          mkdir -p /tmp/litellm-overlay-test-packet
+          curl --proto '=https' -fsSL --output \
+            /tmp/litellm-overlay-test-packet/pytest-9.0.3-py3-none-any.whl \
+            https://files.pythonhosted.org/packages/d4/24/a372aaf5c9b7208e7112038812994107bc65a84cd00e0354a88c2c77a617/pytest-9.0.3-py3-none-any.whl
+          curl --proto '=https' -fsSL --output \
+            /tmp/litellm-overlay-test-packet/pytest_asyncio-1.3.0-py3-none-any.whl \
+            https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl
+          curl --proto '=https' -fsSL --output \
+            /tmp/litellm-overlay-test-packet/pluggy-1.6.0-py3-none-any.whl \
+            https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl
+          curl --proto '=https' -fsSL --output \
+            /tmp/litellm-overlay-test-packet/iniconfig-2.3.0-py3-none-any.whl \
+            https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl
+          curl --proto '=https' -fsSL --output \
+            /tmp/litellm-overlay-test-packet/packaging-26.2-py3-none-any.whl \
+            https://files.pythonhosted.org/packages/df/b2/87e62e8c3e2f4b32e5fe99e0b86d576da1312593b39f47d8ceef365e95ed/packaging-26.2-py3-none-any.whl
+          curl --proto '=https' -fsSL --output \
+            /tmp/litellm-overlay-test-packet/pygments-2.20.0-py3-none-any.whl \
+            https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl
+          printf '%s  %s\n' \
+            2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9 pytest-9.0.3-py3-none-any.whl \
+            611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5 pytest_asyncio-1.3.0-py3-none-any.whl \
+            e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746 pluggy-1.6.0-py3-none-any.whl \
+            f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12 iniconfig-2.3.0-py3-none-any.whl \
+            5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e packaging-26.2-py3-none-any.whl \
+            81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176 pygments-2.20.0-py3-none-any.whl \
+            | (cd /tmp/litellm-overlay-test-packet && shasum -a 256 --check --status -)
+          # Unpack verified wheels byte-for-byte. A host uv resolver may infer
+          # metadata from the working project even with --no-deps --offline.
+          # This is not dependency resolution and cannot select a new version.
+          for wheel in /tmp/litellm-overlay-test-packet/*.whl; do
+            python3 -m zipfile -e "$wheel" /tmp/litellm-overlay-test-deps/
+          done
+          test -d /tmp/litellm-overlay-test-deps/pytest_asyncio
+          python3 -c 'import sys; sys.path.insert(0,"/tmp/litellm-overlay-test-deps"); import pytest,pytest_asyncio; assert pytest.__version__ == "9.0.3"; assert pytest_asyncio.__version__ == "1.3.0"'
+          # Keep wheel metadata: pytest discovers its own supported plugins
+          # through dist-info entry points, including the asyncio event loop.
+          # Do not also pass -p: it registers that same plugin a second time.
+          rm -rf /tmp/litellm-overlay-test-packet
+          docker run --rm --network gamma-overlay-test-net \
             -e PYTHONDONTWRITEBYTECODE=1 \
-            -e PYTHONPATH=/tmp/test-deps \
+            -e GAMMA_REDIS_TEST_URL=redis://data-user:data-secret@gamma-data:6379/12 \
+            -e GAMMA_REDIS_SENTINEL_TEST_URL='redis+sentinel://data-user:data-secret@gamma-sentinel:26379/?service_name=gamma-master&db=12&sentinel_username=default&sentinel_password=monitor-secret' \
+            -e PYTHONPATH=/tmp/test-deps:/tmp/gamma-cli:${{ env.gamma_worker_source }} \
+            -e PATH=/tmp/gamma-test-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e KUBETEE_GAMMA_WORKER_ROOT=${{ env.gamma_worker_source }} \
+            -v /tmp/gamma-cli:/tmp/gamma-cli:ro \
+            -v /tmp/gamma-test-bin:/tmp/gamma-test-bin:ro \
+            -v "${{ env.gamma_worker_source }}:${{ env.gamma_worker_source }}:ro" \
             -v /tmp/litellm-overlay-test-deps:/tmp/test-deps:ro \
             -v "$PWD:/workspace:ro" \
             -w /workspace \
@@ -193,7 +350,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py kubetee_gamma_claim.py kubetee_gamma_management.py kubetee_gamma_private_mtls.py kubetee_gamma_scope.py kubetee_gamma_tls.py kubetee_gamma_transport.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           test ! -e kubetee_pricing.py
@@ -299,7 +456,7 @@ jobs:
           print('overlay modules import OK against base', '${BASE_TAG}')
           "
 
-      - name: Build and push overlay image (publish only from kubetee-prod)
+      - name: Build and push overlay image (authorized production or explicit review dispatch)
         run: |
           cd tools/kubetee-litellm-overlay
           if [ "$PUBLISH" = "true" ]; then
@@ -370,7 +527,9 @@ jobs:
 
       - name: Save supply-chain evidence
         uses: actions/upload-artifact@v4
-        if: always()
+        # An early config/test failure has no image metadata or scan to upload;
+        # that absence must not obscure the original failed validation.
+        if: always() && hashFiles('/tmp/kubetee-image-metadata.json') != ''
         with:
           name: litellm-1.108.3-kubetee-release
           path: |
@@ -388,13 +547,13 @@ jobs:
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, sitecustomize, kubetee_glm_effort, kubetee_mcp_trust, kubetee_health_latest; print('verify: import OK')"
+            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, sitecustomize, kubetee_gamma_tls, kubetee_glm_effort, kubetee_mcp_trust, kubetee_health_latest; print('verify: import OK')"
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
             -c "
           from pathlib import Path
           p = Path('/app/.venv/lib/python3.13/site-packages')
-          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'kubetee_ear.py', 'kubetee_eastwest.py', 'kubetee_bootstrap.py', 'sitecustomize.py', 'kubetee_glm_effort.py', 'kubetee_mcp_trust.py', 'kubetee_health_latest.py'):
+          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'kubetee_ear.py', 'kubetee_eastwest.py', 'kubetee_bootstrap.py', 'sitecustomize.py', 'kubetee_gamma_tls.py', 'kubetee_glm_effort.py', 'kubetee_mcp_trust.py', 'kubetee_health_latest.py'):
               f = p / m
               assert f.is_file(), f'MISSING {m}'
               print(m, f.stat().st_size, 'bytes')
