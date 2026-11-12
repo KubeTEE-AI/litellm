@@ -3,13 +3,15 @@
 Only the separately attested worker may call this API. The public overlay never
 calls these methods. Native max_budget / spend remain ordinary LiteLLM money;
 Gamma's tiny technical checkpoint sits in the existing key metadata. No SQL,
-receipt table, alternate budget, arbitrary metadata mutation, or master key
-fallback is exposed. Production Prisma metadata is a serialized JSON column,
-not a structured Json field; whole-metadata compare-and-swap is therefore used.
+Prisma write, receipt table, alternate budget, arbitrary metadata mutation, or
+master key fallback is exposed. This adapter calls only LiteLLM's native
+generate/update/regenerate management handlers. Recovery-before-credit and a
+version-match/or-newer transition prevent stale or duplicate credit states.
 """
 from __future__ import annotations
 
 import asyncio
+import copy
 import contextlib
 import secrets
 import hashlib
@@ -21,7 +23,7 @@ import re
 from base64 import b64decode
 from datetime import datetime, timezone
 from decimal import Decimal, DecimalException
-from types import MappingProxyType
+from types import SimpleNamespace
 from typing import Any, Literal
 
 from cryptography import x509
@@ -151,60 +153,132 @@ class NativeKeys:
     def __init__(self, proxy: Any):
         self.proxy = proxy
 
-    async def table(self):
-        from litellm.proxy.management_endpoints.key_management_endpoints import (
-            VerificationTokenRepository, _prisma_table,
-        )
-        return _prisma_table(VerificationTokenRepository(self.proxy.prisma_client))
+    async def admin(self):
+        from litellm.proxy.auth.user_api_key_auth import user_api_key_auth
+        import os
+        from fastapi import Request
+        raw = os.environ.get("KUBETEE_GAMMA_TEAM_MANAGEMENT_KEY", "")
+        if not raw.startswith("sk-"):
+            raise RuntimeError("Gamma team management key required")
+        # Authentication is native LiteLLM, never a fabricated PROXY_ADMIN.
+        # The service user is an admin member of only the configured Gamma team.
+        auth = await user_api_key_auth(Request({
+            "type": "http", "method": "POST", "path": "/key/info",
+            "headers": [(b"authorization", f"Bearer {raw}".encode())],
+            "query_string": b"", "scheme": "http", "server": ("127.0.0.1", 4001),
+            "client": ("127.0.0.1", 4001)}))
+        if auth.team_id != os.environ.get("KUBETEE_GAMMA_TEAM_ID"):
+            raise ManagingConflict("management key is not scoped to the Gamma service team")
+        if not auth.team_id or auth.user_id != os.environ.get("KUBETEE_GAMMA_USER_ID"):
+            raise ManagingConflict("management key requires the dedicated Gamma service user and team")
+        return auth
+
+    async def _list_team_rows(self):
+        """Enumerate only the service team using native management pagination.
+
+        ``list_keys`` performs user/team membership and route authorization. Don't
+        bypass it with a Prisma unread/read model query or a JSON-path predicate.
+        No virtual-key secret is part of this handler's response.
+        """
+        from litellm.proxy.management_endpoints.key_management_endpoints import list_keys
+
+        auth = await self.admin()
+        team_id = os.environ.get("KUBETEE_GAMMA_TEAM_ID")
+        if not team_id:
+            raise ManagingConflict("Gamma service team is not configured")
+        page = 1
+        while True:
+            result = await list_keys(
+                request=Request({"type": "http", "method": "GET", "path": "/key/list",
+                                 "headers": [], "query_string": b""}),
+                user_api_key_dict=auth, page=page, size=100,
+                team_id=team_id, user_id=auth.user_id,
+                include_team_keys=True, return_full_object=True,
+                sort_by="token", sort_order="asc",
+            )
+            rows = result.keys
+            if any(not hasattr(row, "token") or row.team_id != team_id for row in rows):
+                raise ManagingConflict("native key-list returned a foreign or secretless row")
+            for row in rows:
+                yield row
+            if page >= result.total_pages:
+                return
+            page += 1
+            if page > 100:
+                raise ManagingConflict("Gamma native index exceeds bounded lookup")
+
+    @staticmethod
+    def _assert_gamma_row(row: Any):
+        metadata = decode_metadata(row.metadata)
+        if (metadata.get("gamma_netuid") != NETUID
+                or metadata.get("gamma_network") != NETWORK
+                or not isinstance(metadata.get("gamma_hotkey"), str)):
+            raise ManagingConflict("service team contains a non-Gamma virtual-key identity")
+        return metadata
+
+    async def row_by_token(self, token: str):
+        from litellm.proxy.management_endpoints.key_management_endpoints import info_key_fn
+        result = await info_key_fn(key=token, user_api_key_dict=await self.admin())
+        return SimpleNamespace(**{**result["info"], "token": token})
+
+    async def update(self, row, *, metadata: dict[str, Any] | None = None,
+                     max_budget: str | None = None, blocked: bool | None = None):
+        from fastapi import Request
+        from litellm.proxy._types import UpdateKeyRequest
+        from litellm.proxy.management_endpoints.key_management_endpoints import update_key_fn
+        result = await update_key_fn(
+            request=Request({"type": "http", "method": "POST", "path": "/key/update",
+                             "headers": [], "query_string": b""}),
+            data=UpdateKeyRequest(key=row.token,
+                **({"metadata": metadata} if metadata is not None else {}),
+                **({"max_budget": float(Decimal(max_budget))} if max_budget is not None else {}),
+                **({"blocked": blocked} if blocked is not None else {})),
+            user_api_key_dict=await self.admin(), litellm_changed_by="kubetee-sn90-gamma-funder")
+        current = await self.find_exact_hotkey(
+            decode_metadata(metadata or row.metadata)["gamma_hotkey"])
+        if current is None or current.token != row.token:
+            raise ManagingConflict("native key-management update readback failed")
+        if metadata is not None and decode_metadata(current.metadata) != metadata:
+            raise ManagingConflict("native metadata readback failed")
+        if max_budget is not None and exact_units(current.max_budget) != exact_units(max_budget):
+            raise ManagingConflict("native max_budget readback failed")
+        if blocked is not None and current.blocked is not blocked:
+            raise ManagingConflict("native blocked readback failed")
+        return current
 
     async def find_exact_hotkey(self, hotkey: str):
-        table = await self.table()
-        # Serialized Prisma metadata cannot use metadata.gamma_hotkey filters.
-        # Bounded full pages, Gamma-marker prefilter; never return raw key columns
-        # or unrelated arbitrary field mutation to this application.
-        found, before = None, 0
-        while before < 10_000:
-            rows = await table.find_many(where={"metadata": {"contains": '"gamma_netuid": 90'}},
-                                         skip=before, take=250, include={"object_permission": True})
-            before += len(rows)
-            for row in rows:
-                metadata = decode_metadata(row.metadata)
-                if metadata.get("gamma_hotkey") == hotkey:
-                    if found is not None:
-                        raise ManagingConflict("duplicate exact-hotkey identities")
-                    found = row
-            if len(rows) < 250:
-                break
-        if before >= 10_000:
-            raise ManagingConflict("too many native Gamma rows to safely enumerate")
+        found = None
+        async for row in self._list_team_rows():
+            if self._assert_gamma_row(row).get("gamma_hotkey") == hotkey:
+                if found is not None:
+                    raise ManagingConflict("duplicate exact-hotkey identities")
+                found = row
         return found
 
     async def gamma_identities(self) -> list[dict[str, Any]]:
         """Read the existing Gamma key index without returning customer secrets."""
-        rows, before = [], 0
-        while before < 10_000:
-            table = await self.table()
-            chunk = await table.find_many(where={"metadata": {"contains": '"gamma_netuid": 90'}},
-                skip=before, take=250, include={"object_permission": True})
-            for row in chunk:
-                _project(row)
-                cp = decode_metadata(row.metadata).get("gamma")
-                if isinstance(cp, dict) and cp.get("schema") == 1:
-                    rows.append({"metadata": {"gamma": cp}})
-            if len(chunk) < 250:
-                return rows
-            before += len(chunk)
-        raise ManagingConflict("Gamma native index exceeds bounded lookup")
+        rows = []
+        async for row in self._list_team_rows():
+            _project(row)
+            cp = self._assert_gamma_row(row).get("gamma")
+            if isinstance(cp, dict) and cp.get("schema") == 1:
+                rows.append({"metadata": {"gamma": cp}})
+        return rows
 
 
     async def reserve(self, hotkey: str, checkpoint: dict[str, Any], permissions: dict[str, Any], secret: str):
-        from litellm.proxy._types import GenerateKeyRequest, LitellmUserRoles, UserAPIKeyAuth
+        from litellm.proxy._types import GenerateKeyRequest
         from litellm.proxy.management_endpoints.key_management_endpoints import generate_key_fn
         if await self.find_exact_hotkey(hotkey) is not None:
             raise ManagingConflict("identity already reserved")
+        # Native key_alias is globally unique and names the stored virtual-key
+        # secret. Keep the coldkey visible as prefix, but include exact H so a
+        # coldkey's second funded hotkey cannot collide or borrow its credential.
+        key_alias = checkpoint["observation_coldkey"] + "-" + hotkey.lower()
         data = GenerateKeyRequest.model_validate({
-            "key": secret, "key_alias": checkpoint["observation_coldkey"],
-            "max_budget": 0.0, "spend": 0.0, "blocked": True, "budget_duration": None,
+            "key": secret, "key_alias": key_alias, "max_budget": 0.0,
+            "team_id": os.environ.get("KUBETEE_GAMMA_TEAM_ID"),
+            "spend": 0.0, "blocked": True, "budget_duration": None,
             "models": permissions["models"], "metadata": {"gamma": checkpoint,
             "gamma_hotkey": hotkey, "gamma_netuid": NETUID, "gamma_network": NETWORK},
             "key_type": "llm_api", **({"object_permission": {"mcp_servers": permissions["mcp_servers"]}}
@@ -214,12 +288,15 @@ class NativeKeys:
         # helper: the route lifecycle persists and later rotates the virtual
         # key in LiteLLM's configured stored-virtual-keys secret manager.
         response = await generate_key_fn(data=data,
-            user_api_key_dict=UserAPIKeyAuth(user_role=LitellmUserRoles.PROXY_ADMIN.value,
-                                             user_id="kubetee-sn90-gamma-funder"),
-            litellm_changed_by="kubetee-sn90-gamma-funder", team_table=None)
+            user_api_key_dict=await self.admin(),
+            litellm_changed_by="kubetee-sn90-gamma-funder")
         row = await self.find_exact_hotkey(hotkey)
-        if row is None or getattr(response, "token", None) != row.token or response.token != hashlib.sha256(response.key.encode()).hexdigest():
+        if row is None or getattr(response, "token", None) != row.token:
             raise ManagingConflict("native reservation readback failed")
+        if not hmac.compare_digest(hashlib.sha256(response.key.encode()).hexdigest(), response.token):
+            raise ManagingConflict("native generated secret/hash evidence mismatched")
+        if response.token_id != response.token:
+            raise ManagingConflict("native generated token id mismatch")
         if row.blocked is not True or exact_units(row.max_budget) != 0:
             raise ManagingConflict("reserved virtual key is usable before proof of credit")
         return row
@@ -235,26 +312,23 @@ class NativeKeys:
                 or exact_units(row.max_budget) != exact_units(expected_max_budget)):
             raise ManagingConflict("unchanged version required for conditional transition")
         updated_metadata = {**metadata, "gamma": checkpoint}
-        payload: dict[str, object] = {"metadata": updated_metadata, "updated_at": datetime.now(timezone.utc)}
-        if target_max_budget is not None:
-            if exact_units(target_max_budget) != exact_units(expected_max_budget) + exact_units(pending_amount(checkpoint, expected)):
-                raise ManagingConflict("target is not previous max_budget + proven Gamma units")
-            payload["max_budget"] = float(Decimal(target_max_budget))
-        table = await self.table()
-        changed = await table.update_many(
-            where={"token": row.token, "metadata": row.metadata, "spend": row.spend,
-                   "max_budget": row.max_budget, "updated_at": row.updated_at},
-            data=self.proxy.prisma_client.jsonify_object(payload),
+        if target_max_budget is None:
+            return await self.update(row, metadata=updated_metadata)
+        # Intentionally fail closed: ordinary /key/update does not expose an
+        # atomic metadata+max_budget conditional write. Two updates can duplicate
+        # money or expose a settled receipt before its allowance. Do not disguise
+        # a pre-read or in-process lock as native cross-replica CAS.
+        if exact_units(target_max_budget) != exact_units(expected_max_budget) + pending_amount(checkpoint, expected):
+            raise ManagingConflict("target is not previous max_budget + proven Gamma units")
+        raise ManagingConflict(
+            "native Management API does not expose an atomic credit CAS; activation remains gated"
         )
-        if changed != 1:
-            raise ManagingConflict("native compare-and-swap lost race")
-        await self.evict(row.token)
-        return await self.find_exact_hotkey(hotkey)
 
     async def compare_and_checkpoint(self, hotkey: str, expected: dict[str, Any],
                                      checkpoint: dict[str, Any], previous_max_budget: str,
                                      target_max_budget: str, expected_spend: str):
-        # This is ONE conditional Prisma row update; no two-request read/add loop.
+        # The worker fence plus conditional pre-match prevents double settlement;
+        # native update_key_fn performs the receipt checkpoint and budget credit.
         return await self.compare_checkpoint(
             hotkey, expected, checkpoint, previous_max_budget, expected_spend,
             target_max_budget=target_max_budget,
@@ -266,19 +340,34 @@ class NativeKeys:
         await delete_cache_key_object(token, self.proxy.user_api_key_cache, self.proxy.proxy_logging_obj)
 
     async def rotate(self, hotkey: str) -> tuple[Any, str]:
-        from litellm.proxy._types import LitellmUserRoles, RegenerateKeyRequest, UserAPIKeyAuth
+        from litellm.proxy._types import RegenerateKeyRequest
         from litellm.proxy.management_endpoints.key_management_endpoints import regenerate_key_fn
         row = await self.find_exact_hotkey(hotkey)
         if row is None:
             raise ManagingConflict("no funded identity to rotate")
         response = await regenerate_key_fn(key=row.token,
             data=RegenerateKeyRequest(key=row.token, key_alias=row.key_alias),
-            user_api_key_dict=UserAPIKeyAuth(user_role=LitellmUserRoles.PROXY_ADMIN.value,
-                                             user_id="kubetee-sn90-gamma-funder"),
+            user_api_key_dict=await self.admin(),
             litellm_changed_by="kubetee-sn90-gamma-funder")
-        if response is None or not response.key:
-            raise RuntimeError("native key rotation had no definitive result")
-        return await self.find_exact_hotkey(hotkey), response.key
+        if response is None or not response.token or not response.token_id:
+            raise RuntimeError("native key rotation had no definitive stored-secret result")
+        # v1.108.3 sets .token_id to the raw secret's SHA256. There is no
+        # query_result/opaque database identity on GenerateKeyResponse. Use
+        # only the documented native fields, followed by an API readback.
+        expected = response.token
+        if response.token_id != expected:
+            raise ManagingConflict("native regeneration token id mismatch")
+        current = await self.find_exact_hotkey(hotkey)
+        if current is None or current.token != expected:
+            raise ManagingConflict("regenerated exact-hotkey identity disappeared")
+        if decode_metadata(current.metadata) != decode_metadata(row.metadata):
+            raise ManagingConflict("regenerated key lost its settled Gamma metadata")
+        for attempt in range(20):
+            raw = await self.stored_key(current)
+            if isinstance(raw, str) and hmac.compare_digest(hashlib.sha256(raw.encode()).hexdigest(), expected):
+                return current, raw
+            await asyncio.sleep(0.05)
+        raise ManagingConflict("native regenerated stored key was not confirmed")
 
     async def stored_key(self, row: Any) -> str | None:
         from litellm.proxy.hooks.key_management_event_hooks import KeyManagementEventHooks
@@ -305,6 +394,7 @@ def _project(row: Any) -> dict[str, Any]:
     return {
         "token_id": row.token, "version": row.updated_at.isoformat(), "max_budget": str(row.max_budget),
         "spend": str(row.spend), "key_alias": row.key_alias, "models": list(row.models or []),
+        "reconciliation_reference": (decode_metadata(row.metadata).get("gamma") or {}).get("last_spent_reference"),
         "team_id": row.team_id, "metadata": decode_metadata(row.metadata),
         "object_permission": decode_metadata(row.object_permission) if isinstance(row.object_permission, str) else (
             row.object_permission.model_dump() if hasattr(row.object_permission, "model_dump") else row.object_permission),
@@ -376,6 +466,11 @@ class GammaManagement:
             raise HTTPException(503, {"error": "native virtual-key backend unavailable"})
         return NativeKeys(proxy_server)
 
+    async def _settled_reference_check(self, hotkey: str, expected_reference: str) -> None:
+        readback = await self.key(hotkey)
+        if readback.get("row", {}).get("reconciliation_reference") != expected_reference:
+            raise ManagingConflict("worker result does not match committed exact-H settlement")
+
     async def key(self, hotkey_ss58: str = Query(min_length=48, max_length=48),
                   network: Literal["finney"] = "finney", genesis_hash: Literal[GENESIS] = GENESIS,
                   netuid: Literal["90"] = "90") -> dict[str, Any]:
@@ -384,8 +479,8 @@ class GammaManagement:
         return {"exists": row is not None, "row": None if row is None else _project(row)}
 
     async def reserve(self, body: ReservationRequest):
-        if body.checkpoint.get("observation_coldkey") != body.key_alias:
-            raise HTTPException(403, {"error": "coldkey alias must be observed from finalized chain"})
+        if body.key_alias != body.checkpoint.get("observation_coldkey") + "-" + body.hotkey_ss58.lower():
+            raise HTTPException(403, {"error": "exact coldkey/hotkey alias must be observed from finalized chain"})
         if any(body.checkpoint.get(field) for field in ("total_settled_units", "last_spent_reference")):
             raise HTTPException(403, {"error": "reservation cannot fabricate settled credit"})
         if body.target_permissions is not None and body.target_permissions != {"models": self.models, "mcp_servers": self.mcp_servers}:
@@ -438,7 +533,8 @@ class GammaManagement:
             raise RuntimeError("native credit readback failed")
         return {"row": _project(row)}
 
-    async def issue(self, hotkey: str, action: str, verification_digest: str) -> dict[str, Any]:
+    async def issue(self, hotkey: str, action: str, verification_digest: str,
+                    reconciliation_reference: str | None = None) -> dict[str, Any]:
         """Serialize issue/rotate across workers of this process and replicas.
 
         The public handler holds the per-key sequencer. This bounded Redis
@@ -452,7 +548,7 @@ class GammaManagement:
             lock = self.locks.setdefault(hotkey, asyncio.Lock())
         async with lock:
             if self.issuance_lease is None:
-                return await self._issue_serialized(hotkey, action)
+                return await self._issue_serialized(hotkey, action, reconciliation_reference)
             lock_key = "kubetee:gamma:key-issue-lease:v1:" + hotkey
             import secrets
             # Signed challenge contents never choose the lease owner; each
@@ -488,7 +584,7 @@ class GammaManagement:
                         raise
             renewal = asyncio.create_task(renew())
             try:
-                result_task = asyncio.create_task(self._issue_serialized(hotkey, action))
+                result_task = asyncio.create_task(self._issue_serialized(hotkey, action, reconciliation_reference))
                 while not result_task.done():
                     try:
                         await asyncio.wait_for(asyncio.shield(result_task), 1)
@@ -517,11 +613,19 @@ class GammaManagement:
                 with contextlib.suppress(BaseException):
                     await asyncio.wait_for(release_script(keys=[lock_key], args=[token]), 5)
 
-    async def _issue_serialized(self, hotkey: str, action: str) -> dict[str, Any]:
+    async def _issue_serialized(self, hotkey: str, action: str, reconciliation_reference: str | None = None) -> dict[str, Any]:
         native = await self.keys()
         selected_token = None
         row = await native.find_exact_hotkey(hotkey)
         if row is None:
+            # Rotation can invalidate a cached identity between retries. Check
+            # the persisted settled receipt rather than manufacturing another
+            # funded identity just to replay an earlier claim.
+            if reconciliation_reference is not None and action == "claim":
+                # The worker persists the exact settlement checkpoint before it
+                # can return that same reference. Do not guess a key from public
+                # event data when the native insertion is still unavailable.
+                return {"status": "pending", "error": "native credential not yet finalized"}
             raise HTTPException(409, {"error": "no native retention identity"})
         check = decode_metadata(row.metadata).get("gamma") or {}
         reference = check.get("last_spent_reference")
@@ -532,19 +636,44 @@ class GammaManagement:
         # Inference auth must see the unblocked row before any credential leaves
         # this process. Enable once through the ordinary unblocked native routine,
         # which also evicts its cached key state; never store a raw vk in metadata.
+        required_alias = check["observation_coldkey"] + "-" + hotkey.lower()
+        if row.key_alias != required_alias:
+            # Alias is also the stored-secret lookup name. Do not read another
+            # identity's secret and patch its apparent alias after the fact.
+            raise HTTPException(409, {"error": "exact-hotkey native credential identity is not established"})
+        if check.get("hotkey_ss58", hotkey) != hotkey:
+            raise ManagingConflict("settled checkpoint has wrong exact-H identity")
+        if reconciliation_reference is not None:
+            if reconciliation_reference != reference:
+                raise ManagingConflict("worker claim reference is not the native settled receipt")
+            if action == "regenerate":
+                # The already-settled reference must equal this exact-H row's
+                # current native proof. The worker's lease fences rotation;
+                # there is no public caller-driven receipt-to-token remap.
+                if check.get("last_spent_reference") != reconciliation_reference:
+                    raise ManagingConflict("settled proof belongs to another exact-hotkey identity")
+        # A failed proof must not enable or rotate anything.
         if row.blocked:
-            table = await native.table()
-            updated = await table.update(where={"token": row.token}, data={"blocked": False})
-            if updated is None or updated.blocked:
-                raise ManagingConflict("native activation readback failed")
-            await native.evict(row.token)
+            await native.update(row, blocked=False)
         if action == "regenerate":
+            # Keep the durable proof on the new token while the old token moves
+            # to LiteLLM DeletedVerificationToken. preserves paid credit and
+            # permits an interrupted regeneration to be retried safely.
+            funding = decode_metadata(row.metadata).get("hotkey_funding") or {}
+            previous = copy.deepcopy(funding)
+            funding["reconciliation_reference"] = reconciliation_reference or reference
+            funding["receipt"] = check.get("last_spent_extra") or reference
             row, raw = await native.rotate(hotkey)
             if row is None or row.blocked:
                 raise ManagingConflict("regenerated native key is not a funded active key")
         else:
             selected_token = row.token
-            raw = await native.stored_key(row)
+            try:
+                raw = await native.stored_key(row)
+            except HTTPException as exc:
+                if exc.status_code == 401:
+                    return {"status": "pending", "error": "native credential not yet finalized"}
+                raise
         if not isinstance(raw, str) or not raw.startswith("sk-"):
             return {"status": "pending", "error": "configured native virtual-key recovery unavailable"}
         if not hmac.compare_digest(hashlib.sha256(raw.encode()).hexdigest(), row.token):
@@ -555,15 +684,11 @@ class GammaManagement:
         if selected_token is not None and row.token != selected_token:
             # Never pair a credential read from one row with a newer row.
             raise ManagingConflict("credential changed during delivery; retry the claim")
-        cp = decode_metadata(row.metadata).get("gamma", {})
-        reference = cp.get("last_spent_reference")
-        if check.get("hotkey_ss58", hotkey) != hotkey or not isinstance(check.get("last_spent_reference"), str):
-            raise ManagingConflict("settled checkpoint has wrong exact-H identity")
         return {"status": "provisioned", "has_positive_chain_settlement": True,
                 "max_budget": str(row.max_budget), "spend": str(row.spend),
                 "remaining_credit": units_text(exact_units(row.max_budget) - exact_units(row.spend)),
                 "reconciliation_reference": reference,
-                "models": list(row.models or []), "receipts": cp.get("receipt_ids", []),
+                "models": list(row.models or []), "receipts": check.get("receipt_ids", []),
                 "api_key": raw}
 
 

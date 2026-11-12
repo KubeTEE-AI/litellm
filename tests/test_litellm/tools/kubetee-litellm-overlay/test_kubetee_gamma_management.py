@@ -27,10 +27,14 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[4]
 import os
-SUBNET = Path(os.environ["KUBETEE_GAMMA_WORKER_ROOT"]).resolve()
+SUBNET = Path(os.environ.get(
+    "KUBETEE_GAMMA_WORKER_ROOT",
+    ROOT.parent.parent / "kubetee-subnet/gamma-funder-release/gamma_funder",
+)).resolve()
 assert (SUBNET / "tests/fixtures.py").is_file(), "untrusted/incomplete worker source fixture"
 sys.path.insert(0, str(ROOT / "tools/kubetee-litellm-overlay"))
 sys.path.insert(0, str(SUBNET))
@@ -117,7 +121,7 @@ class SyntheticStore:
             raise mg.ManagingConflict("already reserved")
         self.row = SimpleNamespace(
             token=hashlib.sha256(secret.encode()).hexdigest(),
-            key_alias=COLD, metadata=json.dumps({"gamma_hotkey": HK, "gamma_netuid": 90,
+            key_alias=COLD + "-" + HK.lower(), metadata=json.dumps({"gamma_hotkey": HK, "gamma_netuid": 90,
                 "gamma_network": "finney", "gamma": checkpoint}),
             updated_at=datetime.now(timezone.utc), max_budget="0", spend="0",
             blocked=True, models=permissions["models"], team_id=None,
@@ -149,6 +153,16 @@ class SyntheticStore:
     async def stored_key(self, row):
         return self.secret if row.token == hashlib.sha256(self.secret.encode()).hexdigest() else None
 
+    async def update(self, row, **changes):
+        assert row.token == self.row.token
+        if "metadata" in changes:
+            self.row.metadata = json.dumps(changes["metadata"])
+        if "max_budget" in changes:
+            self.credit_writes += 1
+        self.row.max_budget = changes.get("max_budget", self.row.max_budget)
+        self.row.blocked = changes.get("blocked", self.row.blocked)
+        return self.row
+
     async def evict(self, token):
         assert isinstance(token, str) and len(token) == 64
 
@@ -163,8 +177,7 @@ class SyntheticStore:
         store = self
         class Table:
             async def update(self, *, where, data):
-                assert where == {"token": store.row.token} and data == {"blocked": False}
-                store.row.blocked = False
+                raise RuntimeError("native update must be routed through the Management API")
                 return store.row
         return Table()
 
@@ -209,6 +222,32 @@ def management(store, identity, lease=None):
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_native_management_requires_authenticated_team_service_identity(monkeypatch):
+    from litellm.proxy._types import UserAPIKeyAuth
+    native = object.__new__(mg.NativeKeys)
+    authenticated = UserAPIKeyAuth(token="0" * 64, user_id="gamma@kubetee.ai",
+        team_id="00000000-0000-4000-8000-000000000090", user_role="internal_user")
+    calls = []
+    async def authenticate(request):
+        calls.append(request.headers["authorization"])
+        return authenticated
+    monkeypatch.setattr("litellm.proxy.auth.user_api_key_auth.user_api_key_auth", authenticate)
+    with mock.patch.dict(os.environ, {
+        "KUBETEE_GAMMA_TEAM_MANAGEMENT_KEY": "sk-synthetic-management-context-only",
+        "KUBETEE_GAMMA_USER_ID": "gamma@kubetee.ai",
+        "KUBETEE_GAMMA_TEAM_ID": "00000000-0000-4000-8000-000000000090",
+    }):
+        assert await native.admin() is authenticated
+        authenticated = UserAPIKeyAuth(token="1" * 64, user_id="gamma@kubetee.ai",
+            team_id="00000000-0000-4000-8000-000000000090", user_role="internal_user")
+        authenticated.team_id = "different-team"
+        with pytest.raises(mg.ManagingConflict):
+            await native.admin()
+        assert calls == ["Bearer sk-synthetic-management-context-only"] * 2
+
+
+@pytest.mark.asyncio
 async def test_native_serialized_index_and_no_external_issue_endpoint(worker_identity):
     store = SyntheticStore()
     await store.reserve(HK, fresh_checkpoint(), {"models": ["m"], "mcp_servers": None}, SECRET)
@@ -222,6 +261,42 @@ async def test_native_serialized_index_and_no_external_issue_endpoint(worker_ide
             "network": "finney", "genesis_hash": mg.GENESIS, "netuid": 90,
             "hotkey_ss58": HK, "action": "claim", "verification_digest": "a" * 64})
         assert issue.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_native_regenerate_routes_api_and_checks_hash_id_and_stored_secret(monkeypatch):
+    from litellm.proxy._types import GenerateKeyResponse
+    # v1.108.3 puts hash_token(new_token) in BOTH token_id and the remapped
+    # token field. It has no query_result/opaque database id field.
+    opaque = "native-database-id-not-in-response"
+    new_sha = hashlib.sha256(ROTATED.encode()).hexdigest()
+    assert opaque != new_sha
+    row = SimpleNamespace(token="0" * 64, key_alias=COLD + "-" + HK.lower(), metadata={"gamma_hotkey": HK})
+    replaced = SimpleNamespace(token=new_sha, key_alias=row.key_alias, metadata=row.metadata)
+    native = object.__new__(mg.NativeKeys)
+    calls = []
+    from litellm.proxy.management_endpoints import key_management_endpoints as native_api
+    async def regenerate(**kwargs):
+        calls.append(kwargs)
+        assert kwargs["data"].key_alias == row.key_alias
+        return GenerateKeyResponse.model_validate({
+            "token": new_sha, "token_id": new_sha, "key": ROTATED,
+            "metadata": row.metadata, "max_budget": 1,
+        })
+    monkeypatch.setattr(native_api, "regenerate_key_fn", regenerate)
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(mg.NativeKeys, "admin", AsyncMock(return_value=None))
+    async def readback(self, hotkey):
+        return replaced if calls else row
+    monkeypatch.setattr(mg.NativeKeys, "find_exact_hotkey", readback)
+    monkeypatch.setattr(mg.NativeKeys, "stored_key", AsyncMock(return_value=ROTATED))
+    current, returned = await native.rotate(HK)
+    assert current is replaced and returned == ROTATED
+    assert len(calls) == 1 and calls[0]["key"] == row.token
+    with monkeypatch.context() as different:
+        different.setattr(mg.NativeKeys, "stored_key", AsyncMock(return_value="sk-wrong"))
+        with pytest.raises(mg.ManagingConflict, match="stored key"):
+            await native.rotate(HK)
 
 
 @pytest.mark.asyncio
@@ -277,7 +352,7 @@ async def test_checkpoint_read_before_and_after_credit_with_replay_rejection(wor
         assert await worker.info(HK) is None
         cp, settlement = settlement_intent()
         row = await worker.reserve(HK, cp["pending"]["expected_checkpoint"])
-        assert row["key_alias"] == COLD and Decimal(row["max_budget"]) == 0
+        assert row["key_alias"] == COLD + "-" + HK.lower() and Decimal(row["max_budget"]) == 0
         row = await worker.conditional_transition(HK, row, cp)
         result = await worker.credit_and_checkpoint(HK, row, settlement, settlement.amount_units, settled_checkpoint(cp, settlement))
         assert Decimal(result["spend"]) == 0
@@ -424,15 +499,24 @@ async def test_lost_issuance_lease_never_discloses_a_rotated_secret(worker_ident
 
 @pytest_asyncio.fixture(loop_scope="function")
 async def redis_lease():
-    """Opt-in real Redis; only an explicitly supplied disposable test DB."""
+    """Explicit staging URL, test DB 15; no shared customer-key flush."""
     if not os.environ.get("GAMMA_REDIS_TEST_URL"):
         pytest.skip("explicit Redis integration requires GAMMA_REDIS_TEST_URL")
     import redis.asyncio
     client = redis.asyncio.from_url(os.environ["GAMMA_REDIS_TEST_URL"])
+    from urllib.parse import urlsplit
+    if urlsplit(os.environ["GAMMA_REDIS_TEST_URL"]).path != "/15":
+        pytest.skip("real Redis integration is restricted to test database /15")
+    prefix = "kubetee:gamma:key-issue-lease:v1:" + HK
+    found = []
     try:
-        await client.flushdb()
         yield client
     finally:
+        async for key in client.scan_iter(match=prefix, count=16):
+            await client.delete(key)
+            found.append(key)
+        assert len(found) <= 2
+        assert client.connection_pool.connection_kwargs["db"] == 15
         await client.aclose()
 
 

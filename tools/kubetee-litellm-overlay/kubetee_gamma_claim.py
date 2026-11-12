@@ -39,6 +39,10 @@ NETUID = 90
 MAX_TTL = 300
 RETRY_SECONDS = 6
 MAX_WAIT_SECONDS = 45
+# Native in-process client callbacks run on LiteLLM's main event loop. The
+# worker-facing mTLS listener only reads the key map; raw-key delivery is not
+# executed in that private transport thread.
+DEFAULT_WAIT_SECONDS = 45
 MAX_CHALLENGES = 4096
 ACTIONS = {"claim", "regenerate", "status"}
 PENDING_REASONS = {
@@ -144,6 +148,7 @@ class PrivateWorkerResponse:
         try:
             issued = await self.native_http.issue(
                 body["hotkey_ss58"], body["action"], body["verified_challenge_digest"],
+                reconciliation_reference=result.get("reconciliation_reference"),
             )
         except Exception:
             # Funding is retained in LiteLLM. It is safer to return bounded

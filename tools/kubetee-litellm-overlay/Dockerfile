@@ -60,7 +60,7 @@ FROM ghcr.io/berriai/litellm-database@${BASE_DIGEST}
 # kubetee_bootstrap.py + kubetee-entrypoint.sh: run the east-west fetch
 #   before the base entrypoint — fail-closed. Client-facing TLS stays
 #   cert-manager (the ACME per-boot path was cut 2026-10-24).
-COPY kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee_gamma_claim.py kubetee_gamma_management.py kubetee_gamma_private_mtls.py kubetee_gamma_scope.py kubetee_gamma_transport.py sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py /app/.venv/lib/python3.13/site-packages/
+COPY kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee_gamma_claim.py kubetee_gamma_management.py kubetee_gamma_private_mtls.py kubetee_gamma_scope.py kubetee_gamma_tls.py kubetee_gamma_transport.py sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py /app/.venv/lib/python3.13/site-packages/
 COPY kubetee-entrypoint.sh /app/docker/kubetee-entrypoint.sh
 RUN chmod 0755 /app/docker/kubetee-entrypoint.sh
 

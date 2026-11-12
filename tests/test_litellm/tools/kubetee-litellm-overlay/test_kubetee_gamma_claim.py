@@ -130,7 +130,6 @@ async def test_real_redis_nonce_is_unique_and_challenge_is_atomically_single_use
              "used": False}
     signature = hotkey.sign(message.encode()).hex()
     try:
-        await client.flushdb()
         assert await authority.insert_nonce(hotkey.ss58_address, nonce, 3600)
         assert not await authority.insert_nonce(hotkey.ss58_address, nonce, 3600)
         nonce_key = "kubetee:gamma:nonce:v1:" + claim._nonce_digest(hotkey.ss58_address, nonce)
@@ -161,31 +160,37 @@ async def test_native_sentinel_monitor_and_data_identities_are_distinct():
     if not uri:
         pytest.skip("explicit Sentinel integration requires GAMMA_REDIS_SENTINEL_TEST_URL")
     from kubetee_gamma_transport import native_async_redis, redis_production_settings
-    client = native_async_redis(redis_production_settings(uri))
+    settings = redis_production_settings(uri)
+    from urllib.parse import urlsplit
+    service = settings["service_name"]
+    client = native_async_redis(settings)
+    manager = client.connection_pool.sentinel_manager
+    monitor = urlsplit(uri)
+    master_before = await manager.discover_master(service)
     try:
-        await client.flushdb()
+        authority = claim.RedisAuthority(client)
         authority = claim.RedisAuthority(client)
         hotkey = new_hotkey()
-        assert await authority.insert_nonce(hotkey.ss58_address, "disposable-nonce", 60)
-        assert not await authority.insert_nonce(hotkey.ss58_address, "disposable-nonce", 60)
+        nonce = "disposable-nonce-60"
+        nonce_key = "kubetee:gamma:nonce:v1:" + claim._nonce_digest(hotkey.ss58_address, nonce)
+        monitor = urlsplit(uri)
+        assert await authority.insert_nonce(hotkey.ss58_address, nonce, 60)
+        assert not await authority.insert_nonce(hotkey.ss58_address, nonce, 60)
         assert await client.ping()
         connection = await client.connection_pool.get_connection()
-        try:
-            from urllib.parse import urlsplit
-            monitor = urlsplit(uri)
-            assert (connection.host, connection.port) != (monitor.hostname, monitor.port)
-            monitor_client = client.connection_pool.sentinel_manager.sentinels[0]
-            assert monitor_client.connection_pool.connection_kwargs["password"] == "monitor-secret"
-            assert client.connection_pool.connection_kwargs["db"] == 12
-            assert client.connection_pool.connection_kwargs["username"] == "data-user"
-        finally:
-            await client.connection_pool.release(connection)
+        assert (connection.host, connection.port) != (monitor.hostname, monitor.port)
+        assert master_before == (connection.host, connection.port)
+        assert client.connection_pool.service_name == service
+        assert client.connection_pool.connection_kwargs["db"] == 15
+        assert await manager.discover_master(service) == master_before
+        await client.connection_pool.release(connection)
     finally:
-        await client.flushdb()
+        if "client" in locals() and "nonce_key" in locals():
+            await client.delete(nonce_key)
         await client.aclose()
-        managers = client.connection_pool.sentinel_manager.sentinels
-        for monitor in managers:
-            await monitor.aclose()
+        for monitor_client in manager.sentinels:
+            await monitor_client.aclose()
+    # No FLUSHDB, monitor/data rewrite, or master-state change on staging.
 
 
 @pytest.mark.asyncio

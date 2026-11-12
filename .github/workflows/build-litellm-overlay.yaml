@@ -350,7 +350,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py kubetee_gamma_claim.py kubetee_gamma_management.py kubetee_gamma_private_mtls.py kubetee_gamma_scope.py kubetee_gamma_transport.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py kubetee_gamma_claim.py kubetee_gamma_management.py kubetee_gamma_private_mtls.py kubetee_gamma_scope.py kubetee_gamma_tls.py kubetee_gamma_transport.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           test ! -e kubetee_pricing.py
@@ -547,13 +547,13 @@ jobs:
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, sitecustomize, kubetee_glm_effort, kubetee_mcp_trust, kubetee_health_latest; print('verify: import OK')"
+            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, sitecustomize, kubetee_gamma_tls, kubetee_glm_effort, kubetee_mcp_trust, kubetee_health_latest; print('verify: import OK')"
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
             -c "
           from pathlib import Path
           p = Path('/app/.venv/lib/python3.13/site-packages')
-          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'kubetee_ear.py', 'kubetee_eastwest.py', 'kubetee_bootstrap.py', 'sitecustomize.py', 'kubetee_glm_effort.py', 'kubetee_mcp_trust.py', 'kubetee_health_latest.py'):
+          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'kubetee_ear.py', 'kubetee_eastwest.py', 'kubetee_bootstrap.py', 'sitecustomize.py', 'kubetee_gamma_tls.py', 'kubetee_glm_effort.py', 'kubetee_mcp_trust.py', 'kubetee_health_latest.py'):
               f = p / m
               assert f.is_file(), f'MISSING {m}'
               print(m, f.stat().st_size, 'bytes')

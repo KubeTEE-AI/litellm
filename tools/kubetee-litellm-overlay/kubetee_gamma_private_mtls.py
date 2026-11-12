@@ -32,6 +32,36 @@ async def reject(scope, receive, send, code=403):
                              status_code=code)(scope, receive, send)
 
 
+class NativeLoopDispatcher:
+    """Prisma and LiteLLM Redis belong to the pre-server/main event loop.
+
+    The production LiteLLM server is Granian, not Uvicorn. its lifespan loop
+    therefore cannot be found by inspecting the private Uvicorn thread. Record
+    LiteLLM's own running loop during initialization and return the entire
+    private ASGI operation to it; no native client is moved between loops.
+    """
+    def __init__(self, app, service):
+        self.app = app
+        self.service = service
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in {"http", "websocket"}:
+            return await self.app(scope, receive, send)
+        owner = getattr(self.service, "owner_loop", None)
+        if owner is None or owner is asyncio.get_running_loop():
+            return await self.app(scope, receive, send)
+        if owner.is_closed():
+            raise RuntimeError("LiteLLM native owning event loop is closed")
+        operation = asyncio.run_coroutine_threadsafe(
+            self.app(scope, receive, send), owner
+        )
+        try:
+            return await asyncio.wrap_future(operation)
+        except BaseException:
+            operation.cancel()
+            raise
+
+
 class DelegatingPeerMiddleware:
     """Identity comes from the verified TLS socket, never an external proof header."""
     def __init__(self, app):
@@ -86,8 +116,10 @@ class InProcessIssueClient:
             raise TypeError("native Gamma management service required")
         self.management = management
 
-    async def issue(self, hotkey: str, action: str, verification_digest: str):
-        return await self.management.issue(hotkey, action, verification_digest)
+    async def issue(self, hotkey: str, action: str, verification_digest: str,
+                    reconciliation_reference: str | None = None):
+        return await self.management.issue(hotkey, action, verification_digest,
+                                           reconciliation_reference=reconciliation_reference)
 
 
 def create_private_application(service) -> FastAPI:
@@ -118,7 +150,7 @@ def create_private_listener(settings: dict[str, str] | None = None):
     paths = [env.get("KUBETEE_GAMMA_MTLS_" + name, "") for name in names]
     if any(not Path(path).is_file() for path in paths):
         raise RuntimeError("private mTLS certificate files required")
-    with open(paths[1], "rb") as cert:
+    with open(paths[1], "r", encoding="utf-8") as cert:
         der = ssl.PEM_cert_to_DER_cert(cert.read())
     if hashlib.sha256(der).hexdigest() != env.get("KUBETEE_GAMMA_MTLS_CERT_SHA256", ""):
         raise RuntimeError("private gateway TLS fingerprint mismatch")
@@ -136,9 +168,10 @@ def create_private_listener(settings: dict[str, str] | None = None):
         raise RuntimeError("invalid public address")
     app.state.kubetee_gamma_private_management = service
     app.state.kubetee_gamma_mtls_material = paths
+    private_app = NativeLoopDispatcher(app, service)
     from litellm.proxy.proxy_server import app as public_app
     public_app.state.kubetee_gamma_private_management = service
-    configuration = Config(app, host="0.0.0.0", port=int(env.get("KUBETEE_GAMMA_MTLS_PORT", "4001")),
+    configuration = Config(private_app, host="0.0.0.0", port=int(env.get("KUBETEE_GAMMA_MTLS_PORT", "4001")),
         http="kubetee_gamma_private_mtls:PrivateTransportProtocol", timeout_keep_alive=5,
         log_level="info", ssl_ca_certs=paths[0], ssl_certfile=paths[1], ssl_keyfile=paths[2],
         ssl_cert_reqs=ssl.CERT_REQUIRED)
@@ -161,6 +194,7 @@ def create_private_listener(settings: dict[str, str] | None = None):
 def start_private_listener(settings: dict[str, str] | None = None):
     thread = create_private_listener(settings)
     if thread is not None:
+        thread._gamma_service.owner_loop = asyncio.get_running_loop()
         thread.start()
     return thread
 
@@ -168,7 +202,6 @@ def start_private_listener(settings: dict[str, str] | None = None):
 async def connect_public_claims():
     """After Prisma: TLS-pin both private hops; expose ONLY public customer claims."""
     import httpx
-    import socket
     from litellm.proxy import proxy_server
     import kubetee_gamma_claim as claim
     if os.environ.get("KUBETEE_GAMMA_PRIVATE_MANAGEMENT_READY") != "1":
@@ -179,19 +212,35 @@ async def connect_public_claims():
     client_cert = os.environ.get("KUBETEE_GAMMA_MTLS_CLIENT_CERT", os.path.join(root, "client.pem"))
     client_key = os.environ.get("KUBETEE_GAMMA_MTLS_CLIENT_KEY", os.path.join(root, "client.key"))
     trust.load_cert_chain(client_cert, client_key)
-    with socket.create_connection((worker_hostname, 8443), timeout=20) as raw:
-        with trust.wrap_socket(raw, server_hostname="gamma-funder.kubetee-ops.svc.cluster.local") as tls:
-            certificate = tls.getpeercert(True)
-    if hashlib.sha256(certificate).hexdigest() != os.environ["KUBETEE_GAMMA_WORKER_CERT_SHA256"]:
-        raise RuntimeError("worker TLS certificate pin mismatch")
-    service = getattr(proxy_server.app.state, "kubetee_gamma_private_management", None)    # Worker-to-gateway control uses four independently pinned mTLS leaves.
+    service = getattr(proxy_server.app.state, "kubetee_gamma_private_management", None)
     # Credential delivery belongs only to the in-process narrow issue wrapper,
     # never through the separately attested worker's external HTTP API.
     service = getattr(proxy_server.app.state, "kubetee_gamma_private_management", None)
     if service is None:
         raise RuntimeError("native private management identity missing at claim bridge setup")
     native_delivery = InProcessIssueClient(service)
-    worker_http = httpx.AsyncClient(verify=trust, base_url=os.environ["KUBETEE_GAMMA_WORKER_URL"], timeout=60)
+    # This client is captured by the long-lived claim handler. A one-time
+    # pre-connect cannot pin a later pooled TLS connection: put peer evidence
+    # on every actual HTTP response instead. The KubeTEE worker Server leaf is
+    # the fourth, directional certificate (not the private listener client).
+    # It is delivered to this container only after independent KBS policy
+    # approval, and never compared to a public key or header assertion.
+    from urllib.parse import urlsplit
+    worker_url = os.environ["KUBETEE_GAMMA_WORKER_URL"]
+    worker_pin = os.environ.get("KUBETEE_GAMMA_WORKER_CERT_SHA256", "")
+    if len(worker_pin) != 64 or any(c not in "0123456789abcdef" for c in worker_pin):
+        raise RuntimeError("verified worker server leaf pin required")
+    from kubetee_gamma_tls import PinningAsyncTransport
+
+    worker_http = httpx.AsyncClient(
+        transport=PinningAsyncTransport(
+            httpx.AsyncHTTPTransport(verify=trust),
+            hostname=urlsplit(worker_url).hostname,
+            fingerprint=worker_pin,
+        ),
+        base_url=worker_url,
+        timeout=60,
+    )
     from kubetee_gamma_transport import redis_production_settings
     redis_config = redis_production_settings(os.environ.get("KUBETEE_GAMMA_REDIS_URL", ""))
     from kubetee_gamma_transport import native_async_redis
@@ -206,8 +255,9 @@ async def connect_public_claims():
         raise RuntimeError("native private management identity missing at claim bridge setup")
     service.issuance_lease = issuance_lease
     bridge = claim.PrivateWorkerResponse(worker_http, native_delivery)
+    # KubeTEEGammaClaimHandler closes the transport and RedisAuthority.cache.
     handler = claim.KubeTEEGammaClaimHandler(bridge, authority=authority,
-        wait_seconds=float(os.environ.get("KUBETEE_GAMMA_WAIT_SECONDS", "55")))
+        wait_seconds=float(os.environ.get("KUBETEE_GAMMA_WAIT_SECONDS", str(claim.DEFAULT_WAIT_SECONDS))))
     handler.register(proxy_server.app)
 
 
@@ -231,6 +281,9 @@ async def initialize_private_management(fetch, client_class=None):
         "gamma-gateway-client.key": "default/gamma-gateway-client/tls.key",
         "gamma-gateway-private.pem": "default/gamma-gateway-private/tls.crt",
         "gamma-gateway-private.key": "default/gamma-gateway-private/tls.key",
+        # Public worker server DER, no worker private key enters this guest.
+        "gamma-worker-server.crt": os.environ.setdefault(
+            "KUBETEE_GAMMA_KBS_WORKER_SERVER_CERT", "default/gamma-worker-server/tls.crt"),
     }
     async with client_class(timeout=30) as client:
         for name, remote in resources.items():
