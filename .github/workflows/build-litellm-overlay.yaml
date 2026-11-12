@@ -167,12 +167,12 @@ jobs:
           # Synthetic claim compatibility tests need no network chain endpoint.
           SUBNET_WORKTREE=$(dirname "$(dirname "$GITHUB_WORKSPACE")")/kubetee-subnet
           if test -d "$SUBNET_WORKTREE/gamma_funder"; then
-            echo "gamma_worker_source=$SUBNET_WORKTREE" >> "$GITHUB_ENV"
+            echo "gamma_worker_source=$SUBNET_WORKTREE/gamma_funder" >> "$GITHUB_ENV"
           else
             git clone --depth 1 --branch feat/gamma-funder-release \
               "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY_OWNER/kubetee-subnet.git" \
               /tmp/gamma-worker
-            echo "gamma_worker_source=/tmp/gamma-worker" >> "$GITHUB_ENV"
+            echo "gamma_worker_source=/tmp/gamma-worker/gamma_funder" >> "$GITHUB_ENV"
           fi
 
       - name: Run overlay tests against supported LiteLLM base
