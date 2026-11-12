@@ -226,8 +226,8 @@ jobs:
             'resolve-hostnames yes' "sentinel monitor gamma-master $DATA_IP 6379 1" \
             'sentinel auth-user gamma-master data-user' \
             'sentinel auth-pass gamma-master data-secret' > "$CONFIG_DIR/sentinel.conf"
-          sudo chown 999:999 "$CONFIG_DIR" "$CONFIG_DIR/sentinel.conf"
           chmod 700 "$CONFIG_DIR"
+          sudo chown 999:999 "$CONFIG_DIR" "$CONFIG_DIR/sentinel.conf"
           docker run --name gamma-test-sentinel -d --network gamma-overlay-test-net \
             --network-alias gamma-sentinel --user 999:999 -e SKIP_FIX_PERMS=1 \
             -v "$CONFIG_DIR:/etc/redis:rw" \
