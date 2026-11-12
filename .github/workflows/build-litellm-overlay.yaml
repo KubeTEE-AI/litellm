@@ -126,7 +126,8 @@ jobs:
           if [ "$PUBLISH" = "true" ]; then
             test "${GITHUB_REF_NAME}" = "kubetee-prod"
           else
-            test "${GITHUB_EVENT_NAME}" = "pull_request"
+            # Scope test-only events; never publish feature review artifacts.
+            test "${GITHUB_EVENT_NAME}" = "push" || test "${GITHUB_EVENT_NAME}" = "pull_request"
           fi
 
       - name: Resolve tag
