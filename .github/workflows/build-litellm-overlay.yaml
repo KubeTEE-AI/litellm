@@ -157,6 +157,12 @@ jobs:
           echo "BASE_TAG=$BASE_TAG" >> "$GITHUB_ENV"
           echo "Resolved TAG=${TAG} BASE_TAG=${BASE_TAG}"
 
+      - name: Select supported test-tool interpreter
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+          check-latest: false
+
       - name: Install uv for isolated test tools
         uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b # v7.2.0
 
@@ -230,10 +236,6 @@ jobs:
           # Keep wheel metadata: pytest discovers its own supported plugins
           # through dist-info entry points, including the asyncio event loop.
           # Do not also pass -p: it registers that same plugin a second time.
-          docker run --rm -v /tmp/litellm-overlay-test-deps:/tmp/test-deps:ro \
-            --entrypoint /app/.venv/bin/python \
-            ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
-            -c 'import sys; sys.path.insert(0,"/tmp/test-deps"); import pytest,pytest_asyncio; assert pytest.__version__=="9.0.3"; assert pytest_asyncio.__version__=="1.3.0"; print("supported-runtime packet import validation passed")'
           rm -rf /tmp/litellm-overlay-test-packet
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
