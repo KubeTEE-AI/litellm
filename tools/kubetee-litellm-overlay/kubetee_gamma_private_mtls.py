@@ -207,7 +207,6 @@ async def connect_public_claims():
     if os.environ.get("KUBETEE_GAMMA_PRIVATE_MANAGEMENT_READY") != "1":
         raise RuntimeError("private mtls is required before any key bridges")
     root = str(Path(os.environ["KUBETEE_GAMMA_MTLS_CA"]).parent)
-    worker_hostname = os.environ.get("KUBETEE_GAMMA_WORKER_HOSTNAME", "gamma-funder.kubetee-ops.svc.cluster.local")
     trust = ssl.create_default_context(cafile=os.path.join(root, "ca.pem"))
     client_cert = os.environ.get("KUBETEE_GAMMA_MTLS_CLIENT_CERT", os.path.join(root, "client.pem"))
     client_key = os.environ.get("KUBETEE_GAMMA_MTLS_CLIENT_KEY", os.path.join(root, "client.key"))

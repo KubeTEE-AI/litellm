@@ -51,7 +51,7 @@ class NativeManagementHTTP:
         result = await self.call("POST", "/key/generate", {
             "key": raw, "key_alias": checkpoint["observation_coldkey"] + "-" + hotkey.lower(),
             "team_id": os.environ["KUBETEE_GAMMA_STAGING_TEAM_ID"],
-            "max_budget": 0.0, "spend": 0.0, "blocked": True,
+            "max_budget": 0.0, "blocked": True,
             "models": ["z-ai/glm-5.3"],
             "metadata": {"gamma": checkpoint, "gamma_hotkey": hotkey,
                          "gamma_netuid": mg.NETUID, "gamma_network": mg.NETWORK},

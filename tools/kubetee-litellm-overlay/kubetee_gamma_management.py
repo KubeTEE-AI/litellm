@@ -316,7 +316,7 @@ class NativeKeys:
         data = GenerateKeyRequest.model_validate({
             "key": secret, "key_alias": key_alias, "max_budget": 0.0,
             "team_id": os.environ.get("KUBETEE_GAMMA_TEAM_ID"),
-            "spend": 0.0, "blocked": True, "budget_duration": None,
+            "blocked": True, "budget_duration": None,
             "models": permissions["models"], "metadata": {"gamma": checkpoint,
             "gamma_hotkey": hotkey, "gamma_netuid": NETUID, "gamma_network": NETWORK},
             "key_type": "llm_api", **({"object_permission": {"mcp_servers": permissions["mcp_servers"]}}

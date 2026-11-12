@@ -288,6 +288,31 @@ async def test_native_serialized_index_and_no_external_issue_endpoint(worker_ide
 
 
 @pytest.mark.asyncio
+async def test_native_reservation_never_sends_spend(monkeypatch):
+    """max_budget is the only money field Gamma writes; spend is LiteLLM's own meter."""
+    sha = hashlib.sha256(SECRET.encode()).hexdigest()
+    alias = COLD + "-" + HK.lower()
+    created = SimpleNamespace(token=sha, key_alias=alias, blocked=True, max_budget=0.0)
+    native = object.__new__(mg.NativeKeys)
+    calls = []
+    from litellm.proxy.management_endpoints import key_management_endpoints as native_api
+    async def generate(**kwargs):
+        calls.append(kwargs["data"])
+        return SimpleNamespace(token=sha, token_id=sha, key=SECRET)
+    monkeypatch.setattr(native_api, "generate_key_fn", generate)
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(mg.NativeKeys, "admin", AsyncMock(return_value=None))
+    async def readback(self, hotkey):
+        return created if calls else None
+    monkeypatch.setattr(mg.NativeKeys, "find_exact_hotkey", readback)
+    row = await native.reserve(HK, fresh_checkpoint(), {"models": ["m"], "mcp_servers": None}, SECRET)
+    assert row is created and len(calls) == 1
+    sent = calls[0].model_dump(exclude_unset=True)
+    assert "spend" not in sent
+    assert sent["max_budget"] == 0.0 and sent["blocked"] is True and sent["key_alias"] == alias
+
+
+@pytest.mark.asyncio
 async def test_native_regenerate_routes_api_and_checks_hash_id_and_stored_secret(monkeypatch):
     from litellm.proxy._types import GenerateKeyResponse
     # v1.108.3 puts hash_token(new_token) in BOTH token_id and the remapped
