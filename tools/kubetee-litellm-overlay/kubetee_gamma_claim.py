@@ -32,6 +32,8 @@ from starlette.middleware.errors import ServerErrorMiddleware
 from starlette.routing import Mount
 from pydantic import BaseModel, ConfigDict, Field
 
+from kubetee_gamma_scope import ROTATION_UNAVAILABLE, key_rotation_enabled
+
 LOG = logging.getLogger(__name__)
 NETWORK = "finney"
 GENESIS = FINNEY_GENESIS_HASH
@@ -484,6 +486,9 @@ class KubeTEEGammaClaimHandler:
         del request
         if body.action not in ACTIONS or body.netuid != NETUID:
             raise HTTPException(400, {"status": "ineligible", "reason": "unsupported_scope"})
+        if body.action == "regenerate" and not key_rotation_enabled():
+            # Say so before the holder signs anything.
+            raise HTTPException(501, dict(ROTATION_UNAVAILABLE))
         try:
             Keypair(ss58_address=body.hotkey_ss58, crypto_type=bt.CRYPTO_SR25519)
         except Exception as error:
@@ -604,6 +609,9 @@ class KubeTEEGammaClaimHandler:
 
         @gamma_app.post("/v1/gamma/key/regenerate")
         async def public_regenerate(body: SignedChallenge, request: Request):
+            if not key_rotation_enabled():
+                # Nothing is consumed and the worker is never called.
+                return _typed_response(501, dict(ROTATION_UNAVAILABLE))
             return await key_response(await self._signed(body, "regenerate", request))
 
         @gamma_app.post("/v1/gamma/status")

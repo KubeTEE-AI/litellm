@@ -268,7 +268,45 @@ async def test_three_concurrent_fresh_claims_join_one_key_and_credit(api):
 
 
 @pytest.mark.asyncio
-async def test_signed_credit_status_and_rotation(api):
+async def test_claim_only_v1_rotation_is_unavailable_before_anything_is_signed(api, monkeypatch):
+    monkeypatch.delenv("KUBETEE_GAMMA_KEY_ROTATION", raising=False)
+    hotkey = new_hotkey()
+    unavailable = {"status": "ineligible", "reason": "key_rotation_not_available"}
+    worker = api.state.kubetee_gamma_worker
+    worker.responses = []
+    rotations = []
+    async def rotate(body):
+        rotations.append(body)
+        raise AssertionError("claim-only v1 must never reach the worker for rotation")
+    worker.rotate = rotate
+    async with AsyncClient(transport=ASGITransport(app=api), base_url="http://test") as client:
+        issued = await signed(api, client, hotkey)
+        assert issued.status_code == 200
+        challenge = await client.post("/v1/gamma/challenge", json={
+            "hotkey_ss58": hotkey.ss58_address, "action": "regenerate", "netuid": 90})
+        assert challenge.status_code == 501 and challenge.json() == unavailable
+        # A signed claim challenge cannot be redirected into a rotation either.
+        api.state.kubetee_gamma_handler.challenge_limit.values.clear()
+        fresh = (await client.post("/v1/gamma/challenge", json={
+            "hotkey_ss58": hotkey.ss58_address, "action": "claim", "netuid": 90})).json()
+        body = {"challenge_id": fresh["challenge_id"],
+                "signature": hotkey.sign(fresh["message"].encode()).hex()}
+        refused = await client.post("/v1/gamma/key/regenerate", json=body)
+        assert refused.status_code == 501 and refused.json() == unavailable
+        assert "api_key" not in refused.text and rotations == []
+        # Nothing was consumed: the same signed challenge still claims the same key.
+        api.state.kubetee_gamma_handler.signed_limit.values.clear()
+        again = await client.post("/v1/gamma/key/claim", json=body)
+        assert again.status_code == 200 and again.json()["api_key"] == issued.json()["api_key"]
+    # Any other value, including a truthy one, leaves rotation off.
+    monkeypatch.setenv("KUBETEE_GAMMA_KEY_ROTATION", "true")
+    assert claim.key_rotation_enabled() is False
+
+
+@pytest.mark.asyncio
+async def test_signed_credit_status_and_rotation(api, monkeypatch):
+    # Licensed deployments only: the explicit switch for native regenerate.
+    monkeypatch.setenv("KUBETEE_GAMMA_KEY_ROTATION", "native-enterprise-regenerate")
     hotkey, wrong = new_hotkey(), new_hotkey()
     api.state.kubetee_gamma_worker.responses = []
     async with AsyncClient(transport=ASGITransport(app=api), base_url="http://test") as client:

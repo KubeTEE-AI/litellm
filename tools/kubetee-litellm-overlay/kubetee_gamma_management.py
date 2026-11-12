@@ -37,7 +37,9 @@ from cryptography import x509
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from kubetee_gamma_scope import GENESIS, assert_hotkey, settlement_reference
+from kubetee_gamma_scope import (
+    GENESIS, ROTATION_UNAVAILABLE, assert_hotkey, key_rotation_enabled, settlement_reference,
+)
 
 NETWORK, NETUID, UNITS = "finney", 90, 10**9
 
@@ -603,6 +605,8 @@ class GammaManagement:
         """
         if action not in ("claim", "regenerate") or not re.fullmatch(r"[0-9a-f]{64}", verification_digest):
             raise HTTPException(422, {"error": "key claim requires exact challenge context"})
+        if action == "regenerate" and not key_rotation_enabled():
+            raise HTTPException(501, dict(ROTATION_UNAVAILABLE))
         self.assert_hotkey(hotkey)
         async with self.state_lock:
             lock = self.locks.setdefault(hotkey, asyncio.Lock())

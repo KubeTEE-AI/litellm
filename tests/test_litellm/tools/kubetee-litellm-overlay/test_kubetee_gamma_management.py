@@ -408,7 +408,8 @@ async def test_concurrent_credit_and_pending_intent_only_advance_once(worker_ide
 
 
 @pytest.mark.asyncio
-async def test_redis_fence_excludes_second_replica_and_withholds_lost_credentials(worker_identity, redis_lease):
+async def test_redis_fence_excludes_second_replica_and_withholds_lost_credentials(worker_identity, redis_lease, monkeypatch):
+    monkeypatch.setenv("KUBETEE_GAMMA_KEY_ROTATION", "native-enterprise-regenerate")
     store = SyntheticStore()
     cp, settlement = settlement_intent()
     await store.reserve(HK, cp, {"models": ["m"], "mcp_servers": None}, SECRET)
@@ -470,7 +471,8 @@ async def test_redis_fence_excludes_second_replica_and_withholds_lost_credential
 
 
 @pytest.mark.asyncio
-async def test_lost_issuance_lease_never_discloses_a_rotated_secret(worker_identity, redis_lease):
+async def test_lost_issuance_lease_never_discloses_a_rotated_secret(worker_identity, redis_lease, monkeypatch):
+    monkeypatch.setenv("KUBETEE_GAMMA_KEY_ROTATION", "native-enterprise-regenerate")
     store = SyntheticStore()
     cp, settlement = settlement_intent()
     await store.reserve(HK, cp, {"models": ["m"], "mcp_servers": None}, SECRET)
@@ -559,7 +561,7 @@ async def test_pending_transition_is_a_read_conflict_not_stale_reservation(worke
 
 
 @pytest.mark.asyncio
-async def test_issue_only_after_proven_credit_and_repeat_does_not_rotate(worker_identity):
+async def test_issue_only_after_proven_credit_and_repeat_does_not_rotate(worker_identity, monkeypatch):
     store = SyntheticStore()
     service = mg.GammaManagement(proxy=store, models=["m"], certificate_fingerprint="3" * 64)
     with pytest.raises(mg.HTTPException) as error:
@@ -588,6 +590,16 @@ async def test_issue_only_after_proven_credit_and_repeat_does_not_rotate(worker_
     assert validate_claimed_result(first, True)["api_key"] == SECRET
     assert (await service.issue(HK, "claim", "b" * 64))["api_key"] == SECRET
     assert store.credit_writes == 1 and store.rotations == 0
+    # Claim-only v1: rotation is refused before any lease, read or write.
+    monkeypatch.delenv("KUBETEE_GAMMA_KEY_ROTATION", raising=False)
+    with pytest.raises(mg.HTTPException) as unavailable:
+        await service.issue(HK, "regenerate", "c" * 64)
+    assert unavailable.value.status_code == 501
+    assert unavailable.value.detail == {"status": "ineligible", "reason": "key_rotation_not_available"}
+    assert store.rotations == 0 and updates == []
+    assert (await service.issue(HK, "claim", "d" * 64))["api_key"] == SECRET
+    # With the licensed switch the native rotation path is unchanged.
+    monkeypatch.setenv("KUBETEE_GAMMA_KEY_ROTATION", "native-enterprise-regenerate")
     assert (await service.issue(HK, "regenerate", "c" * 64))["api_key"] == ROTATED
     assert store.rotations == 1 and store.row.blocked is False
     assert Decimal(store.row.max_budget) == 1 and Decimal(store.row.spend) == 0
@@ -725,7 +737,8 @@ async def test_signed_claim_real_worker_then_private_native_key(worker_identity,
 
 
 @pytest.mark.asyncio
-async def test_no_native_secret_response_without_definitive_worker_funding():
+async def test_no_native_secret_response_without_definitive_worker_funding(monkeypatch):
+    monkeypatch.setenv("KUBETEE_GAMMA_KEY_ROTATION", "native-enterprise-regenerate")
     class Response:
         status_code = 503
         def json(self):

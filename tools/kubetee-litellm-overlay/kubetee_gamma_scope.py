@@ -8,6 +8,20 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 GENESIS = "0x2f0555cc76fc2840a25a6ea3b9637146806f1f44b090c175ffde2a7e5ab36c03"
+ROTATION_UNAVAILABLE = {"status": "ineligible", "reason": "key_rotation_not_available"}
+
+
+def key_rotation_enabled() -> bool:
+    """Claim-only v1: key rotation is off unless explicitly switched on.
+
+    LiteLLM's native /key/regenerate is an Enterprise feature for every caller,
+    master key included (confirmed on staging 2026-11-12). Rotation is not
+    rebuilt from generate + delete: that is non-atomic and needs the master
+    key. Set the switch only together with an installed licence, as a measured
+    gateway release.
+    """
+    import os
+    return os.environ.get("KUBETEE_GAMMA_KEY_ROTATION", "") == "native-enterprise-regenerate"
 
 
 def assert_hotkey(value: str) -> None:
