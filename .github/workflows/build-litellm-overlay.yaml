@@ -112,7 +112,9 @@ jobs:
           sudo chown -R $(id -u):$(id -g) . 2>/dev/null || true
 
       - name: Checkout litellm fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
@@ -132,7 +134,7 @@ jobs:
         run: |
           BASE_TAG="$INPUT_BASE_TAG"
           [ -z "$BASE_TAG" ] && BASE_TAG="${DEFAULT_BASE_TAG}"
-      
+
           TAG="$INPUT_TAG"
           if [ -z "$TAG" ] && [ "$PUBLISH" != "true" ]; then
             TAG="pr-${PR_NUMBER}-validation"
@@ -147,29 +149,87 @@ jobs:
               | sort -n | tail -1)
             TAG="${BASE_TAG}-kubetee.$((${MAX_N:-0} + 1))"
           fi
-      
+
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "BASE_TAG=$BASE_TAG" >> "$GITHUB_ENV"
           echo "Resolved TAG=${TAG} BASE_TAG=${BASE_TAG}"
 
-      - name: Run overlay tests against supported LiteLLM base
+      - name: Verify test source matches the upstream base
         run: |
-          python3 -m pip install --quiet --target /tmp/litellm-overlay-test-deps pytest==9.0.2 pytest-socket==0.8.1
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
-            -e PYTHONPATH=/tmp/test-deps \
-            -v /tmp/litellm-overlay-test-deps:/tmp/test-deps:ro \
-            -v "$PWD:/workspace:ro" \
-            -w /workspace \
+            -v "$PWD:/source:ro" \
+            -w /app \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} -c "
+          from pathlib import Path
+          source = Path('/source/litellm')
+          base = Path('/app/litellm')
+          changed = tuple(
+              str(path.relative_to(source))
+              for path in source.rglob('*.py')
+              if (target := base / path.relative_to(source)).is_file()
+              and path.read_bytes() != target.read_bytes()
+          )
+          if changed:
+              raise SystemExit(f'Checkout differs from the packaged v1.108.9 base: {changed}')
+          print('All upstream Python sources match the verified base')
+          "
+
+      - name: Run upstream and overlay regression tests
+        timeout-minutes: 15
+        run: |
+          docker create --name kubetee-test-uv \
+            --entrypoint /uv \
+            ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a
+          docker cp kubetee-test-uv:/uv /tmp/kubetee-test-uv
+          docker rm kubetee-test-uv
+          /tmp/kubetee-test-uv export --format requirements.txt \
+            --no-emit-project --frozen --group dev --group e2e-dev \
+            --no-hashes > /tmp/litellm-test-requirements.txt
+          docker run --rm \
+            -v /tmp/kubetee-test-uv:/usr/local/bin/uv:ro \
+            -v /tmp/litellm-test-requirements.txt:/tmp/requirements.txt:ro \
+            -v /tmp/litellm-overlay-test-deps:/workspace \
+            --entrypoint /usr/local/bin/uv \
+            ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
+            pip install --quiet --target /workspace/test-deps \
+              --python /app/.venv/bin/python \
+              --requirement /tmp/requirements.txt
+          docker run --rm \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e LITELLM_LOCAL_MODEL_COST_MAP=True \
+            -e PYTHONPATH=/workspace/test-deps \
+            -v /tmp/litellm-overlay-test-deps:/workspace:ro \
+            -v "$PWD:/source:ro" \
+            -w /source \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
-            -m pytest -q \
+            -m pytest -q -p no:cacheprovider \
             tests/test_litellm/tools/kubetee-litellm-overlay \
             tests/unit/proxy/auth/test_auth_utils.py \
             tests/unit/proxy/db/test_routing_prisma_wrapper.py \
+            tests/unit/proxy/guardrails/test_tool_permission_streaming.py \
             -k 'azure_entra_credential or secret_reference_in_a_credential or resolved_client_auth_reference_still or routes_to_reader or routes_to_writer or passphrase_returns_none'
+          docker run --rm \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e LITELLM_LOCAL_MODEL_COST_MAP=True \
+            -e PYTHONPATH=/workspace/test-deps \
+            -v /tmp/litellm-overlay-test-deps:/workspace:ro \
+            -v "$PWD:/source:ro" \
+            -w /source \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
+            -m pytest -q -p no:cacheprovider \
+            tests/unit/llms/bedrock/passthrough/test_bedrock_passthrough_transformation.py \
+            tests/unit/proxy/openai_files_endpoint/test_files_common_utils.py \
+            'tests/unit/test_router/test_router.py::test_team_byok_wildcard_is_served_before_a_proxy_wide_wildcard_of_the_same_name' \
+            tests/unit/proxy/common_utils/test_reset_budget_job.py \
+            tests/unit/repositories/test_unit_of_work.py
 
       - name: Verify upstream base with its published Cosign key
+        env:
+          UPSTREAM_IMAGE: ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST}
         run: |
           curl -fsSL --proto '=https' \
             https://raw.githubusercontent.com/BerriAI/litellm/e82a3c646908ba0a6ee0beddc4310d7a6cac4065/cosign.pub \

@@ -14,8 +14,8 @@
 # Applied as a module patch at callback-import time (same pattern as
 # kubetee_mcp_trust): the module ships in site-packages next to litellm, and
 # patching the two SQL constants at import keeps the fork's upstream-tracked
-# file untouched. The fork ALSO carries the source-level fix (dd1874a7411) so a
-# future base bump picks it up natively.
+# file untouched. Upstream v1.108.9 retains the model_id/model_name ordering;
+# this packaged patch therefore remains necessary on that base.
 
 from __future__ import annotations
 
