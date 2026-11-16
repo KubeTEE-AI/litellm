@@ -13,12 +13,15 @@ on:
         type: string
   push:
     branches:
-      - kubetee-overlay
-      - litellm_11083_kubetee_overlay
+      - kubetee-prod
     paths:
       - "tools/kubetee-litellm-overlay/**"
       - "tests/test_litellm/tools/kubetee-litellm-overlay/**"
       - ".github/workflows/build-litellm-overlay.yaml"
+
+  pull_request:
+    branches:
+      - kubetee-prod
 
 env:
   REGISTRY: ghcr.io
@@ -97,6 +100,9 @@ jobs:
       packages: write
       id-token: write
       actions: write
+    env:
+      PR_NUMBER: ${{ github.event.number }}
+      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/kubetee-prod' }}
     steps:
       - name: Clean root-owned leftovers from prior runs
         run: |
@@ -105,6 +111,17 @@ jobs:
 
       - name: Checkout litellm fork
         uses: actions/checkout@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+
+      - name: Require production source branch for publishing
+        run: |
+          if [ "$PUBLISH" = "true" ]; then
+            test "${GITHUB_REF_NAME}" = "kubetee-prod"
+          else
+            test "${GITHUB_EVENT_NAME}" = "pull_request"
+          fi
 
       - name: Resolve tag
         env:
@@ -115,6 +132,9 @@ jobs:
           [ -z "$BASE_TAG" ] && BASE_TAG="${DEFAULT_BASE_TAG}"
       
           TAG="$INPUT_TAG"
+          if [ -z "$TAG" ] && [ "$PUBLISH" != "true" ]; then
+            TAG="pr-${PR_NUMBER}-validation"
+          fi
           if [ -z "$TAG" ]; then
             MAX_N=$(curl -fsSL \
                 -H "Accept: application/vnd.github+json" \
@@ -166,6 +186,7 @@ jobs:
           "
 
       - name: Login to ghcr (authenticated pulls — anonymous is IP-rate-limited)
+        if: ${{ env.PUBLISH == 'true' }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u KubeTEE-AI --password-stdin
 
@@ -177,8 +198,8 @@ jobs:
           done
           test ! -e kubetee_pricing.py
           grep -q 'COPY.*kubetee_health_latest' Dockerfile
-          test "$(BASE_TAG)" = "1.108.3" || { echo 'BASE_TAG override changes this release candidate'; exit 1; }
-          test "$(DEFAULT_BASE_DIGEST)" = "sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26"
+          test "$BASE_TAG" = "1.108.3" || { echo 'BASE_TAG override changes this release candidate'; exit 1; }
+          test "$DEFAULT_BASE_DIGEST" = "sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26"
           # Route guard must block the video list call type.
           grep -q 'avideo_list' kubetee_route_guard.py
           grep -q 'KubeTEERouteGuard' kubetee_route_guard.py
@@ -278,20 +299,26 @@ jobs:
           print('overlay modules import OK against base', '${BASE_TAG}')
           "
 
-      - name: Build and push overlay image
+      - name: Build and push overlay image (publish only from kubetee-prod)
         run: |
           cd tools/kubetee-litellm-overlay
+          if [ "$PUBLISH" = "true" ]; then
+            OUTPUT="--push"
+          else
+            OUTPUT="--load"
+          fi
           docker buildx build --platform linux/amd64 \
             --build-arg BASE_TAG=${BASE_TAG} \
             --build-arg BASE_DIGEST=${DEFAULT_BASE_DIGEST} \
             --metadata-file /tmp/kubetee-image-metadata.json \
             -f Dockerfile \
             -t ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            --push \
+            ${OUTPUT} \
             .
-          echo "Pushed ${REGISTRY}/${IMAGE_NAME}:${TAG}"
+          echo "Built ${REGISTRY}/${IMAGE_NAME}:${TAG} (PUBLISH=${PUBLISH})"
 
       - name: Record and sign immutable digest
+        if: ${{ env.PUBLISH == 'true' }}
         run: |
           IMAGE_DIGEST=$(python3 -c 'import json; print(json.load(open("/tmp/kubetee-image-metadata.json"))["containerimage.digest"])')
           echo "IMAGE_REF=${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
@@ -314,12 +341,32 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
 
+      - name: Resolve local or published scan target
+        id: scan-target
+        run: |
+          if [ "$PUBLISH" = "true" ]; then
+            scan_image="${IMAGE_REF}"
+          else
+            scan_image="${REGISTRY}/${IMAGE_NAME}:${TAG}"
+          fi
+          echo "image=${scan_image}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        with:
+          version: v0.76.2
+          cache: false
+
       - name: Scan release image for actionable high and critical vulnerabilities
         run: |
-          curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/v0.68.2/install.sh | sh -s -- -b /usr/local/bin v0.68.2
-          trivy image --image-src remote --scanners vuln --severity HIGH,CRITICAL \
+          if [ "$PUBLISH" = "true" ]; then
+            IMAGE_SOURCE="remote"
+          else
+            IMAGE_SOURCE="docker"
+          fi
+          trivy image --image-src "${IMAGE_SOURCE}" --scanners vuln --severity HIGH,CRITICAL \
             --ignore-unfixed --format json --output /tmp/kubetee-11083-trivy.json \
-            --exit-code 1 "${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
+            --exit-code 1 "${{ steps.scan-target.outputs.image }}"
 
       - name: Save supply-chain evidence
         uses: actions/upload-artifact@v4
@@ -330,10 +377,14 @@ jobs:
             /tmp/kubetee-image-metadata.json
             /tmp/kubetee-overlay-provenance.json
             /tmp/kubetee-11083-trivy.json
+          if-no-files-found: error
+          retention-days: 90
 
-      - name: Verify published image
+      - name: Verify built image and published registry reference
         run: |
-          docker pull ${REGISTRY}/${IMAGE_NAME}:${TAG}
+          if [ "$PUBLISH" = "true" ]; then
+            docker pull ${REGISTRY}/${IMAGE_NAME}:${TAG}
+          fi
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
