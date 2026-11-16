@@ -16,11 +16,11 @@
 # (/app/.venv/lib/python3.13/site-packages), so behavior is identical to the
 # ConfigMap setup — the modules are just measured image content now.
 #
-# Tags: <upstream>-kubetee.N (e.g. 1.108.3-kubetee.1). Never reuse a tag.
+# Tags: <upstream>-kubetee.N (e.g. 1.108.9-kubetee.1). Never reuse a tag.
 # BASE_DIGEST is the cosign-verified upstream multi-architecture index.
 # The AMD64 build resolves and records the matching child image digest.
-ARG BASE_TAG=1.108.3
-ARG BASE_DIGEST=sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26
+ARG BASE_TAG=1.108.9
+ARG BASE_DIGEST=sha256:9839e334bbeda191491b2709f4bb4a785ce668d545f8bd510884cec2711b0571
 FROM ghcr.io/berriai/litellm-database@${BASE_DIGEST}
 
 # kubetee_route_guard.py: blocks GET /v1/videos (global-store enumeration).
@@ -40,7 +40,7 @@ FROM ghcr.io/berriai/litellm-database@${BASE_DIGEST}
 #   get local issuer certificate"). Modes: certifi (default — measured web
 #   PKI), system (opt-in), explicit CA path, or eastwest (opt-in composite =
 #   measured anchor + certifi). Pinned by tests/.../test_kubetee_mcp_trust.py.
-# kubetee_pricing.py is retired on 1.108.3: FLUX.2 and MiniMax-H3 are not
+# kubetee_pricing.py is retired on 1.108.9: FLUX.2 and MiniMax-H3 are not
 # live gateways lanes. Upstream's cost map remains unmodified.
 # kubetee_glm_effort.py: validates/maps reasoning_effort for GLM models
 #   (Belarel audit item 10). GLM-5.3/Flash are always-on reasoners — the
