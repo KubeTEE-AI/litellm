@@ -175,8 +175,11 @@ def _azure_entra_router(configurable_clientside_auth_params: tuple[str, ...] = (
 
 
 @pytest.mark.parametrize("param", _AZURE_ENTRA_CREDENTIAL_PARAMS)
+@pytest.mark.parametrize("route", ("/v1/chat/completions", "/v1/images/generations", "/v1/audio/speech"))
 @pytest.mark.parametrize("container", (None, "extra_body", "litellm_embedding_config"))
-def test_azure_entra_credential_params_in_request_body_are_rejected(param: str, container: str | None) -> None:
+def test_azure_entra_credential_params_in_request_body_are_rejected(
+    param: str, container: str | None, route: str
+) -> None:
     override: Final = {param: "caller-chosen"}
     with pytest.raises(ValueError, match=f"{param} is not allowed in request body"):
         is_request_body_safe(
@@ -184,7 +187,7 @@ def test_azure_entra_credential_params_in_request_body_are_rejected(param: str, 
             general_settings={},
             llm_router=_azure_entra_router(),
             model="azure-group",
-            route="/v1/chat/completions",
+            route=route,
         )
 
 

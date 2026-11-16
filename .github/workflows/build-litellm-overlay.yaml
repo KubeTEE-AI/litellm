@@ -88,9 +88,11 @@ env:
   # (block GET /v1/videos list — global store, no per-key scoping),
   # kubetee_attestation.py (client-facing TDX attestation), sitecustomize.py
   # (east-west client cert loading).
-  DEFAULT_BASE_TAG: 1.108.3
-  # v1.108.3 multi-architecture index verified with BerriAI's cosign key.
-  DEFAULT_BASE_DIGEST: sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26
+  # Base source: upstream tag v1.108.9, commit 82ae95fa3d7194df7178e9f06e1c497e37611a07.
+  # The image below is the published multi-architecture index, not an amd64 child.
+  DEFAULT_BASE_TAG: 1.108.9
+  # v1.108.9 multi-architecture index verified with BerriAI's cosign key.
+  DEFAULT_BASE_DIGEST: sha256:9839e334bbeda191491b2709f4bb4a785ce668d545f8bd510884cec2711b0571
 
 jobs:
   build-and-push:
@@ -161,7 +163,11 @@ jobs:
             -w /workspace \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
-            -m pytest -q tests/test_litellm/tools/kubetee-litellm-overlay
+            -m pytest -q \
+            tests/test_litellm/tools/kubetee-litellm-overlay \
+            tests/unit/proxy/auth/test_auth_utils.py \
+            tests/unit/proxy/db/test_routing_prisma_wrapper.py \
+            -k 'azure_entra_credential or secret_reference_in_a_credential or resolved_client_auth_reference_still or routes_to_reader or routes_to_writer or passphrase_returns_none'
 
       - name: Verify upstream base with its published Cosign key
         run: |
@@ -198,8 +204,8 @@ jobs:
           done
           test ! -e kubetee_pricing.py
           grep -q 'COPY.*kubetee_health_latest' Dockerfile
-          test "$BASE_TAG" = "1.108.3" || { echo 'BASE_TAG override changes this release candidate'; exit 1; }
-          test "$DEFAULT_BASE_DIGEST" = "sha256:aecfcc459b5af208f04b8e916c9912cc3001798e013b4874be1831c20e4a2c26"
+          test "$BASE_TAG" = "1.108.9" || { echo 'BASE_TAG override changes this release candidate'; exit 1; }
+          test "$DEFAULT_BASE_DIGEST" = "sha256:9839e334bbeda191491b2709f4bb4a785ce668d545f8bd510884cec2711b0571"
           # Route guard must block the video list call type.
           grep -q 'avideo_list' kubetee_route_guard.py
           grep -q 'KubeTEERouteGuard' kubetee_route_guard.py
@@ -372,7 +378,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: litellm-1.108.3-kubetee-release
+          name: litellm-1.108.9-kubetee-release
           path: |
             /tmp/kubetee-image-metadata.json
             /tmp/kubetee-overlay-provenance.json

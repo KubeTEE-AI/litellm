@@ -1,4 +1,4 @@
-"""Retired-video backend protection uses upstream 1.108.3 callback contracts."""
+"""Retired-video backend protection against the current upstream callback contracts."""
 
 from __future__ import annotations
 
