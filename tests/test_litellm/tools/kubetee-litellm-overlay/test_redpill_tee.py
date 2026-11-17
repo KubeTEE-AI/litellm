@@ -177,6 +177,20 @@ def test_router_upsert_uses_real_deployment_metadata(monkeypatch):
     assert dict(router.model_list[0]["model_info"])["tags"] == ["origin=redpill", "tee"]
 
 
+def test_router_get_params_retains_receipt_audit_metadata():
+    redpill_tee.apply_redpill_tee_trust()
+    from litellm.litellm_core_utils.get_litellm_params import get_litellm_params
+    result = get_litellm_params(**redpill_deployment_values(api_key="resolved-secret"))
+    assert result["model_info"]["upstream_tracking"] == "receipt-forwarded-unverified"
+
+
+def test_get_params_without_model_info_preserves_an_untouched_router_result():
+    redpill_tee.apply_redpill_tee_trust()
+    from litellm.litellm_core_utils.get_litellm_params import get_litellm_params
+    result = get_litellm_params(model="openai/other", api_key="unit-key")
+    assert result["model_info"] is None
+
+
 def test_router_upsert_rejects_non_tee_row_before_replacing_live_row():
     from litellm.router import Router
     redpill_tee.apply_redpill_tee_trust()
