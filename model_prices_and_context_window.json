@@ -3447,6 +3447,21 @@
         "source": "https://docs.anyscale.com/preview/endpoints/text-generation/supported-models/mistralai-Mixtral-8x7B-Instruct-v0.1",
         "supports_function_calling": true
     },
+    "openai/qwen/qwen3.8-27b": {
+        "input_cost_per_token": 0.0000002,
+        "litellm_provider": "openai",
+        "max_input_tokens": 1000000,
+        "max_output_tokens": 262144,
+        "max_tokens": 262144,
+        "mode": "chat",
+        "output_cost_per_token": 0.0000025,
+        "cache_read_input_token_cost": 0.00000005,
+        "source": "https://tee.redpill.ai/v1",
+        "supports_function_calling": true,
+        "supports_reasoning": true,
+        "supports_response_schema": true,
+        "supports_vision": true
+    },
     "apac.amazon.nova-lite-v1:0": {
         "cache_read_input_token_cost": 1.575e-08,
         "input_cost_per_token": 6.3e-08,
