@@ -180,7 +180,9 @@ def test_router_upsert_uses_real_deployment_metadata(monkeypatch):
 def test_router_get_params_retains_receipt_audit_metadata():
     redpill_tee.apply_redpill_tee_trust()
     from litellm.litellm_core_utils.get_litellm_params import get_litellm_params
-    result = get_litellm_params(**redpill_deployment_values(api_key="resolved-secret"))
+    arguments = redpill_deployment_values(api_key="resolved-secret")
+    assert get_litellm_params._redpill_original(**arguments)["model_info"] == arguments["model_info"]
+    result = get_litellm_params(**arguments)
     assert result["model_info"]["upstream_tracking"] == "receipt-forwarded-unverified"
 
 

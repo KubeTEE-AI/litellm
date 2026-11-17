@@ -143,6 +143,7 @@ def apply_redpill_tee_trust() -> bool:
                 result["model_info"] = info
             return result
         guarded_get_params._redpill_guard = True
+        guarded_get_params._redpill_original = original_get_params
         get_litellm_params.get_litellm_params = guarded_get_params
 
     original_get_client = OpenAIChatCompletion._get_openai_client
