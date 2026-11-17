@@ -48,3 +48,25 @@ def test_well_formed_video_id_lacks_any_backend_contact():
 
 def test_non_video_callbacks_are_not_intercepted():
     hook({"model": "test"}, "acompletion")
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["native-openai/kimi-k3.1-pro-redpill", "native-openai/kimi-k3-redpill"],
+)
+def test_public_chat_call_to_redpill_kimi_backup_is_rejected_for_every_key(model: str):
+    """Without this guard, an admin key must also remain non-routable directly."""
+    with pytest.raises(HTTPException) as error:
+        hook({"model": model}, "acompletion")
+    assert error.value.status_code == 403
+
+
+def test_public_streaming_call_to_redpill_kimi_backup_is_rejected():
+    with pytest.raises(HTTPException) as error:
+        hook({"model": "native-openai/kimi-k3.1-pro-redpill", "stream": True}, "acompletion")
+    assert error.value.status_code == 403
+
+
+def test_public_kimi_primary_and_other_redpill_models_are_unchanged():
+    hook({"model": "moonshotai/kimi-k3.1-pro"}, "acompletion")
+    hook({"model": "native-openai-glm-5-3-redpill"}, "acompletion")
