@@ -167,11 +167,12 @@ def test_registration_accepts_explicit_tee_admin_metadata():
     redpill_tee.validate_redpill_deployment({"model": "openai/local", "api_base": "https://internal/v1"})
 
 
-def test_router_upsert_uses_real_deployment_metadata():
+def test_router_upsert_uses_real_deployment_metadata(monkeypatch):
     from litellm.router import Router
     redpill_tee.apply_redpill_tee_trust()
+    monkeypatch.setenv("REDPILL_API_KEY", "resolved-secret")
     router = Router(model_list=[])
-    assert router.upsert_deployment(redpill_deployment()) is not None
+    assert router.upsert_deployment(redpill_deployment(api_key="resolved-secret")) is not None
     assert router.model_list[0]["model_name"] == "qwen/qwen3.8-27b"
     assert dict(router.model_list[0]["model_info"])["tags"] == ["origin=redpill", "tee"]
 
@@ -270,6 +271,7 @@ async def test_router_qwen_request_uses_public_name_and_web_pki(monkeypatch):
     router = Router(model_list=[], enable_pre_call_checks=True)
     router.upsert_deployment(redpill_deployment())
     from litellm.llms.openai.openai import OpenAIChatCompletion
+    monkeypatch.setenv("REDPILL_API_KEY", "resolved-secret")
     captured = []
     seen_clients = []
 
@@ -307,8 +309,9 @@ async def test_router_qwen_request_uses_public_name_and_web_pki(monkeypatch):
 async def test_router_preserves_native_qwen_streaming(monkeypatch):
     from litellm.router import Router
     redpill_tee.apply_redpill_tee_trust()
+    monkeypatch.setenv("REDPILL_API_KEY", "resolved-secret")
     router = Router(model_list=[], enable_pre_call_checks=True)
-    router.upsert_deployment(redpill_deployment())
+    router.upsert_deployment(redpill_deployment(api_key="resolved-secret"))
 
     async def handler(request):
         assert json.loads(request.content)["model"] == "qwen/qwen3.8-27b"
