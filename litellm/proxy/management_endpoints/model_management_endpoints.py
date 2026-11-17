@@ -1066,9 +1066,15 @@ def update_db_model(
     merged_litellm_params: Final = db_model.litellm_params.model_dump(exclude_none=True)
     stored_model_info: Final = _dump_without_none(db_model.model_info)
     echoed_pricing: Final = echoed_cost_map_pricing_fields(stored_model_info)
-    merged_model_info: Final[dict[str, object]] = {
+    merged_model_info: dict[str, object] = {
         k: v for k, v in stored_model_info.items() if k not in echoed_pricing
     }
+
+    import redpill_tee
+    redpill_tee.validate_redpill_deployment(
+        {**_decrypted_litellm_params(db_model.litellm_params), **(_decrypted_litellm_params(updated_patch.litellm_params) if updated_patch.litellm_params else {})},
+        {**merged_model_info, **(_dump_without_none(updated_patch.model_info) if updated_patch.model_info else {})},
+    )
 
     # update litellm params
     if updated_patch.litellm_params:
@@ -1579,6 +1585,9 @@ async def add_model_to_db(
     should_create_model_in_db: bool = True,
     slot: AbstractAsyncContextManager[_ProxyModelTable] | None = None,
 ) -> "_ProxyModelRow | LiteLLM_ProxyModelTable":
+    import redpill_tee
+    redpill_tee.validate_redpill_deployment(model_params.litellm_params, model_params.model_info)
+
     # encrypt litellm params #
     _litellm_params_dict: Final = TypeAdapter(dict[str, object]).validate_python(
         model_params.litellm_params.model_dump(exclude_none=True)

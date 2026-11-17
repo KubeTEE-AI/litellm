@@ -137,6 +137,10 @@ def encrypt_value_helper(value: str, new_encryption_key: str | None = None):
 
     try:
         if isinstance(value, str):
+            # API updates may round-trip a sensitive value already encrypted by
+            # this deployment; preserve it rather than double-encrypting it.
+            if (decrypt_if_encrypted_with(value, signing_key=cast(str, signing_key)) is not None):
+                return value
             if _get_encryption_algorithm() == ALGO_AES_GCM:
                 # AES path: the v2:gcm: output is already a base64url string, so it
                 # is returned directly with no extra base64 wrapper.
