@@ -137,11 +137,13 @@ def apply_redpill_tee_trust() -> bool:
         def guarded_get_params(**kwargs: Any) -> dict:
             result = original_get_params(**kwargs)
             metadata = kwargs.get("litellm_metadata") or kwargs.get("metadata") or {}
-            info = metadata.get("model_info") or {}
+            # Router helpers pass model_info directly, not inside metadata.
+            info = kwargs.get("model_info") or metadata.get("model_info") or {}
             if info:
                 result["model_info"] = info
             return result
         guarded_get_params._redpill_guard = True
+        guarded_get_params._redpill_original = original_get_params
         get_litellm_params.get_litellm_params = guarded_get_params
 
     original_get_client = OpenAIChatCompletion._get_openai_client
