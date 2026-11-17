@@ -6,6 +6,7 @@ CA and client certificate remain on all other OpenAI clients.
 """
 from __future__ import annotations
 
+import os
 import ssl
 from collections.abc import Mapping
 from typing import Any, Final
@@ -96,7 +97,19 @@ def validate_redpill_deployment(params: Mapping | Any, model_info: Mapping | Any
     model = values.get("model")
     if not isinstance(model, str) or not model.startswith("openai/") or not model.removeprefix("openai/").strip("/"):
         raise ValueError(f"{ERROR}; internal provider must be native openai/<any-upstream-model>")
-    if values.get("api_key") != "os.environ/REDPILL_API_KEY" or "default" in tags:
+    # The management API persists only os.environ/REDPILL_API_KEY. LiteLLM's
+    # Router resolves that same pointer from the validated environment before
+    # passing its deployment to get_litellm_params. Do not treat it as raw
+    # admin input: after the config/router trust boundary below, the only raw
+    # key accepted is the one from that exact environment variable.
+    api_key = values.get("api_key")
+    credential_source = values.pop("_redpill_credential_source", None)
+    environment_key = os.environ.get("REDPILL_API_KEY")
+    if not environment_key and credential_source == "runtime":
+        raise ValueError(f"{ERROR}; REDPILL_API_KEY must come from pod Secret env")
+    if (api_key not in (("os.environ/REDPILL_API_KEY", environment_key)
+                        if credential_source == "runtime" else ("os.environ/REDPILL_API_KEY",))
+            or "default" in tags):
         raise ValueError(ERROR)
     if values.get("num_retries") != 0:
         raise ValueError(f"{ERROR}; num_retries must be 0: never retry into a non-TEE deployment")
@@ -147,7 +160,9 @@ def apply_redpill_tee_trust() -> bool:
         original = getattr(Router, method_name)
         if not getattr(original, "_redpill_guard", False):
             def guarded(self: Any, deployment: Any, _original: Any = original) -> Any:
-                validate_redpill_deployment(deployment.litellm_params, deployment.model_info or {})
+                values = dict(effective_params(deployment.litellm_params))
+                values["_redpill_credential_source"] = "runtime"
+                validate_redpill_deployment(values, deployment.model_info or {})
                 return _original(self, deployment)
             guarded._redpill_guard = True
             setattr(Router, method_name, guarded)
