@@ -10,15 +10,7 @@
 # What it does
 # ------------
 # Blocks GET /v1/videos (video LIST) for every key, including admin.
-# Also rejects DIRECT requests bearing either RedPill Kimi backup model name
-# for every key, including admin. These groups are reserved for failovers from
-# their KubeTEE primaries, never selectable/billable as public Kimi endpoints.
-# This pre-routing proxy hook runs once on the inbound request. LiteLLM's
-# internal Router fallback recursion does NOT re-enter it, so a configured
-# moonshotai/kimi-k3* -> native-openai/*-redpill hop remains unaffected.
-# /model/block is NOT equivalent: it occurs during inbound auth and prevents
-# fallbacks from being evaluated at all. The existing consumer-facing model
-# names and fallback chains need no change.
+
 #
 # Why: the backend (vllm-omni) serves GET /v1/videos from a GLOBAL in-memory
 # store with no per-key scoping — any authenticated key can enumerate every
@@ -68,14 +60,6 @@ from litellm.integrations.custom_logger import CustomLogger
 # allowlist — new endpoints stay reachable by default.
 _BLOCKED_CALL_TYPES = frozenset({"avideo_list"})
 
-# Public access is denied, including for the admin key. Keep model group names
-# exactly as used by the two RedPill-only fallback chains configured in the DB.
-_FALLBACK_ONLY_MODEL_NAMES = frozenset(
-    {
-        "native-openai/kimi-k3.1-pro-redpill",
-        "native-openai/kimi-k3-redpill",
-    }
-)
 
 # Video poll call_types that fall through to a provider-direct call when the
 # id cannot resolve to a router deployment (route_llm_request: data has no
@@ -129,18 +113,7 @@ class KubeTEERouteGuard(CustomLogger):
         data: dict,
         call_type: Any,
     ) -> None:
-        if data.get("model") in _FALLBACK_ONLY_MODEL_NAMES:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "error": {
-                        "message": "This RedPill model is failover-only and cannot be requested directly",
-                        "type": "invalid_request_error",
-                        "param": "model",
-                        "code": "model_fallback_only",
-                    }
-                },
-            )
+
         if _is_blocked(call_type):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
