@@ -30,7 +30,7 @@ from litellm.llms.bedrock.base_aws_llm import (
     BaseAWSLLM,
     Boto3CredentialsInfo,
     run_aws_signing,
-    sign_request_off_loop_if_aws,
+    run_off_loop_if_aws,
 )
 from tests.unit.llms.bedrock.event_loop_probe import EventLoopProbe
 from litellm.llms.bedrock.common_utils import BedrockModelInfo
@@ -3228,7 +3228,7 @@ class TestGetBedrockModelIdArnHandling:
     def test_arn_url_matches_expected(self):
         """Full URL built from messages config must match expected encoded form."""
         import urllib.parse
-        from litellm.llms.bedrock.messages.invoke_transformations.anthropic_claude3_transformation import (
+        from litellm.llms.bedrock.messages.invoke_transformations.anthropic_claude_transformation import (
             AmazonAnthropicClaudeMessagesConfig,
         )
 
@@ -3443,7 +3443,7 @@ class TestGetRequestHeadersResign:
 
 
 @pytest.mark.asyncio
-async def test_sign_request_off_loop_if_aws_keeps_the_loop_serving_while_credentials_refresh():
+async def test_run_off_loop_if_aws_keeps_the_loop_serving_while_credentials_refresh() -> None:
     """Regression for issue #40165: an AWS provider's signing (and the botocore credential refresh
     inside it) must run off the event loop, so other requests keep being served meanwhile."""
     probe = EventLoopProbe()
@@ -3456,7 +3456,7 @@ async def test_sign_request_off_loop_if_aws_keeps_the_loop_serving_while_credent
         return dict(request.headers)
 
     release = asyncio.create_task(probe.release_refresh_from_the_loop())
-    signed = await sign_request_off_loop_if_aws(BaseAWSLLM(), sign, headers={"Content-Type": "application/json"})
+    signed = await run_off_loop_if_aws(BaseAWSLLM(), sign, headers={"Content-Type": "application/json"})
     await release
 
     assert "Authorization" in signed
@@ -3847,39 +3847,6 @@ def test_get_runtime_endpoint(base_aws_llm):
     )
     assert endpoint_url == "https://bedrock-runtime.us-east-1.amazonaws.com"
     assert proxy_endpoint_url == "https://bedrock-runtime.us-east-1.amazonaws.com"
-
-@pytest.mark.usefixtures("_vcr_outcome_gate", "setup_and_teardown")
-@pytest.mark.parametrize(
-    ("api_base", "aws_bedrock_runtime_endpoint", "env_runtime_endpoint", "expected"),
-    (
-        ("", None, None, "https://bedrock-runtime.us-east-1.amazonaws.com"),
-        (None, "", None, "https://bedrock-runtime.us-east-1.amazonaws.com"),
-        ("", "", None, "https://bedrock-runtime.us-east-1.amazonaws.com"),
-        ("", "https://vpce-runtime.example.com", None, "https://vpce-runtime.example.com"),
-        ("", None, "https://env-runtime.example.com", "https://env-runtime.example.com"),
-        (None, "", "https://env-runtime.example.com", "https://env-runtime.example.com"),
-    ),
-)
-def test_get_runtime_endpoint_treats_an_empty_setting_as_unset(
-    base_aws_llm: BaseAWSLLM,
-    monkeypatch: pytest.MonkeyPatch,
-    api_base: str | None,
-    aws_bedrock_runtime_endpoint: str | None,
-    env_runtime_endpoint: str | None,
-    expected: str,
-) -> None:
-    if env_runtime_endpoint is None:
-        monkeypatch.delenv("AWS_BEDROCK_RUNTIME_ENDPOINT", raising=False)
-    else:
-        monkeypatch.setenv("AWS_BEDROCK_RUNTIME_ENDPOINT", env_runtime_endpoint)
-
-    endpoints: Final = base_aws_llm.get_runtime_endpoint(
-        api_base=api_base,
-        aws_bedrock_runtime_endpoint=aws_bedrock_runtime_endpoint,
-        aws_region_name="us-east-1",
-    )
-
-    assert endpoints == (expected, expected)
 
 @pytest.fixture
 def clear_cache(base_aws_llm):

@@ -18,7 +18,7 @@ import httpx
 from openai.types.batch import BatchRequestCounts
 from openai.types.batch import Errors as BatchErrors
 from openai.types.batch_error import BatchError
-from pydantic import ConfigDict, Field, TypeAdapter
+from pydantic import ConfigDict, Field
 from typing_extensions import ReadOnly, TypedDict
 
 from litellm.litellm_core_utils.url_utils import encode_url_path_segment, join_api_base
@@ -43,7 +43,6 @@ OpenAIBatchStatus: TypeAlias = Literal[
     "validating", "failed", "in_progress", "finalizing", "completed", "expired", "cancelling", "cancelled"
 ]
 
-_API_BASE: Final = TypeAdapter(str)
 GEMINI_BATCH_RESOURCE_PREFIX: Final = "batches/"
 _GEMINI_FILE_RESOURCE_PREFIX: Final = "files/"
 _NO_HEADERS: Final[Mapping[str, str]] = MappingProxyType({})
@@ -232,8 +231,7 @@ class GeminiBatchesConfig(BaseBatchesConfig):
     ) -> str:
         model_segment: Final = encode_url_path_segment(model.removeprefix("models/"), field_name="model")
         return join_api_base(
-            _API_BASE.validate_python(GeminiModelInfo.get_api_base(api_base)),
-            f"v1beta/models/{model_segment}:batchGenerateContent",
+            GeminiModelInfo.get_api_base(api_base), f"v1beta/models/{model_segment}:batchGenerateContent"
         )
 
     def transform_create_batch_request(
@@ -281,9 +279,7 @@ class GeminiBatchesConfig(BaseBatchesConfig):
         request: Final = GeminiPresignedRequest(
             method="GET",
             url=join_api_base(
-                _API_BASE.validate_python(
-                    GeminiModelInfo.get_api_base(api_base if isinstance(api_base, str) else None)
-                ),
+                GeminiModelInfo.get_api_base(api_base if isinstance(api_base, str) else None),
                 f"v1beta/{GEMINI_BATCH_RESOURCE_PREFIX}{encoded_batch_id}",
             ),
             headers=_auth_headers(_NO_HEADERS, api_key if isinstance(api_key, str) else None),
