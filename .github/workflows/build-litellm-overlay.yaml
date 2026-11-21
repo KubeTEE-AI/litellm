@@ -206,13 +206,12 @@ jobs:
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} -c \
             'from pathlib import Path; import litellm._internal_context as context; assert Path(context.__file__).resolve().is_relative_to(Path("/app/.venv")), context.__file__; from litellm._internal_context import internal_sub_call; from litellm_enterprise.proxy.hooks.managed_files import _PROXY_LiteLLMManagedFiles; print(Path(context.__file__).resolve())'
+          # Public checkout and exact packaged enterprise share one import source.
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e LITELLM_LOCAL_MODEL_COST_MAP=True \
             -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
             -v /tmp/litellm-overlay-test-deps:/workspace:ro \
-            # The packaged enterprise API can extend the public source. Keep
-            # tests separate so Python imports one complete installed runtime.
             -v "$PWD:/tests:ro" \
             -w /tests \
             --entrypoint /app/.venv/bin/python \
@@ -223,13 +222,12 @@ jobs:
             tests/unit/proxy/db/test_routing_prisma_wrapper.py \
             tests/unit/proxy/guardrails/test_tool_permission_streaming.py \
             -k 'azure_entra_credential or secret_reference_in_a_credential or resolved_client_auth_reference_still or routes_to_reader or routes_to_writer or passphrase_returns_none'
+          # Public checkout and exact packaged enterprise share one import source.
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e LITELLM_LOCAL_MODEL_COST_MAP=True \
             -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
             -v /tmp/litellm-overlay-test-deps:/workspace:ro \
-            # The packaged enterprise API can extend the public source. Keep
-            # tests separate so Python imports one complete installed runtime.
             -v "$PWD:/tests:ro" \
             -w /tests \
             --entrypoint /app/.venv/bin/python \
