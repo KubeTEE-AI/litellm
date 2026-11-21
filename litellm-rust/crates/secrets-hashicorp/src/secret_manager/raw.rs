@@ -4,123 +4,26 @@ use vaultrs::api::kv2::requests::{
     DeleteLatestSecretVersionRequest, ReadSecretRequest, SetSecretRequest,
 };
 
-#[derive(thiserror::Error, veil::Redact)]
+#[derive(veil::Redact)]
 pub enum RawOperationError {
-    #[error(transparent)]
     Local(Error),
-    #[error("HashiCorp Vault authentication failed")]
     Authentication {
         source: Error,
         url: String,
         certificate: bool,
     },
-    #[error("HashiCorp Vault {} request returned HTTP {}", .0.method, .0.status)]
-    Http(HttpFailure),
-    #[error("HashiCorp Vault request failed")]
-    Transport(
-        #[source]
+    Http {
+        method: String,
+        url: String,
+        status: u16,
         #[redact]
-        litellm_http::Error,
-    ),
-    #[error("HashiCorp Vault client failed")]
-    Client(
-        #[source]
-        #[redact]
-        RustifyClientError,
-    ),
-    #[error("HashiCorp Vault {method} request timed out")]
-    Timeout { method: String, elapsed: Duration },
-}
-
-#[derive(veil::Redact)]
-pub struct HttpFailure {
-    pub method: String,
-    pub url: String,
-    pub status: u16,
-    #[redact]
-    pub body: Vec<u8>,
-}
-
-pub struct LoginFailure<'a> {
-    pub source: &'a Error,
-    pub url: &'a str,
-    pub certificate: bool,
-}
-
-impl RawOperationError {
-    pub fn is_unsafe_secret_name(&self) -> bool {
-        match self {
-            Self::Local(error) => error.is_unsafe_secret_name(),
-            Self::Authentication { .. }
-            | Self::Http(_)
-            | Self::Transport(_)
-            | Self::Client(_)
-            | Self::Timeout { .. } => false,
-        }
-    }
-
-    pub fn local(&self) -> Option<&Error> {
-        match self {
-            Self::Local(error) => Some(error),
-            Self::Authentication { .. }
-            | Self::Http(_)
-            | Self::Transport(_)
-            | Self::Client(_)
-            | Self::Timeout { .. } => None,
-        }
-    }
-
-    pub fn authentication(&self) -> Option<LoginFailure<'_>> {
-        match self {
-            Self::Authentication {
-                source,
-                url,
-                certificate,
-            } => Some(LoginFailure {
-                source,
-                url,
-                certificate: *certificate,
-            }),
-            Self::Local(_)
-            | Self::Http(_)
-            | Self::Transport(_)
-            | Self::Client(_)
-            | Self::Timeout { .. } => None,
-        }
-    }
-
-    pub fn http_failure(&self) -> Option<&HttpFailure> {
-        match self {
-            Self::Http(failure) => Some(failure),
-            Self::Local(_)
-            | Self::Authentication { .. }
-            | Self::Transport(_)
-            | Self::Client(_)
-            | Self::Timeout { .. } => None,
-        }
-    }
-
-    pub fn timeout(&self) -> Option<(&str, Duration)> {
-        match self {
-            Self::Timeout { method, elapsed } => Some((method, *elapsed)),
-            Self::Local(_)
-            | Self::Authentication { .. }
-            | Self::Http(_)
-            | Self::Transport(_)
-            | Self::Client(_) => None,
-        }
-    }
-
-    pub fn transport(&self) -> Option<&litellm_http::Error> {
-        match self {
-            Self::Transport(error) => Some(error),
-            Self::Local(_)
-            | Self::Authentication { .. }
-            | Self::Http(_)
-            | Self::Client(_)
-            | Self::Timeout { .. } => None,
-        }
-    }
+        body: Vec<u8>,
+    },
+    Transport(#[redact] RustifyClientError),
+    Timeout {
+        method: String,
+        elapsed: Duration,
+    },
 }
 
 impl HashicorpVault {
@@ -215,7 +118,7 @@ impl HashicorpVault {
         let request = endpoint
             .with_middleware(&client.middle)
             .request(client.http.base())
-            .map_err(RawOperationError::Client)?;
+            .map_err(RawOperationError::Transport)?;
         let method = request.method().to_string();
         let url = format!(
             "{}/v1/{}{}/data/{}",
@@ -238,17 +141,14 @@ impl HashicorpVault {
                 })?,
             None => client.http.send(request).await,
         }
-        .map_err(|error| match crate::error::transport(error) {
-            Ok(error) => RawOperationError::Transport(error),
-            Err(error) => RawOperationError::Client(error),
-        })?;
+        .map_err(RawOperationError::Transport)?;
         if !response.status().is_success() {
-            return Err(RawOperationError::Http(HttpFailure {
+            return Err(RawOperationError::Http {
                 method,
                 url,
                 status: response.status().as_u16(),
                 body: response.into_body(),
-            }));
+            });
         }
         Ok(response.into_body())
     }

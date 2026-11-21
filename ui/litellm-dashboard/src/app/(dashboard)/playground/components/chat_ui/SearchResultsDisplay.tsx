@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { VectorStoreSearchResponse } from "@/components/chat_ui/types";
 import { ChevronDown, ChevronRight, Database, FileText } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -10,7 +9,6 @@ interface SearchResultsDisplayProps {
 }
 
 export function SearchResultsDisplay({ searchResults }: SearchResultsDisplayProps) {
-  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(true);
   const [expandedResults, setExpandedResults] = useState<Record<string, boolean>>({});
 
@@ -42,9 +40,7 @@ export function SearchResultsDisplay({ searchResults }: SearchResultsDisplayProp
           }
         >
           <Database className="size-4" />
-          {isExpanded
-            ? t("playground.chatUi.searchResultsDisplay.hideSources")
-            : t("playground.chatUi.searchResultsDisplay.showSources", { total: totalResults })}
+          {isExpanded ? "Hide sources" : `Show sources (${totalResults})`}
           {isExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         </CollapsibleTrigger>
 
@@ -54,13 +50,11 @@ export function SearchResultsDisplay({ searchResults }: SearchResultsDisplayProp
               {searchResults.map((resultPage, pageIndex) => (
                 <div key={pageIndex}>
                   <div className="text-xs text-muted-foreground mb-2 flex items-center gap-2">
-                    <span className="font-medium">{t("playground.chatUi.searchResultsDisplay.query")}</span>
-                    <span className="italic">
-                      {t("playground.chatUi.searchResultsDisplay.quotedQuery", { query: resultPage.search_query })}
-                    </span>
+                    <span className="font-medium">Query:</span>
+                    <span className="italic">&quot;{resultPage.search_query}&quot;</span>
                     <span className="text-muted-foreground">•</span>
                     <span className="text-muted-foreground">
-                      {t("playground.chatUi.searchResultsDisplay.resultCount", { count: resultPage.data.length })}
+                      {resultPage.data.length} result{resultPage.data.length !== 1 ? "s" : ""}
                     </span>
                   </div>
 
@@ -82,11 +76,7 @@ export function SearchResultsDisplay({ searchResults }: SearchResultsDisplayProp
                               />
                               <FileText className="size-3 shrink-0 text-muted-foreground" />
                               <span className="text-xs font-medium text-foreground truncate">
-                                {result.filename ||
-                                  result.file_id ||
-                                  t("playground.chatUi.searchResultsDisplay.resultFallback", {
-                                    number: resultIndex + 1,
-                                  })}
+                                {result.filename || result.file_id || `Result ${resultIndex + 1}`}
                               </span>
                               <span className="text-xs px-2 py-0.5 rounded-sm bg-info/15 text-info font-mono shrink-0">
                                 {result.score.toFixed(3)}
@@ -107,9 +97,7 @@ export function SearchResultsDisplay({ searchResults }: SearchResultsDisplayProp
 
                                 {result.attributes && Object.keys(result.attributes).length > 0 && (
                                   <div className="mt-2 pt-2 border-t border-border">
-                                    <div className="text-xs text-muted-foreground mb-1 font-medium">
-                                      {t("playground.chatUi.searchResultsDisplay.metadata")}
-                                    </div>
+                                    <div className="text-xs text-muted-foreground mb-1 font-medium">Metadata:</div>
                                     <div className="space-y-1">
                                       {Object.entries(result.attributes).map(([key, value]) => (
                                         <div key={key} className="text-xs flex gap-2">

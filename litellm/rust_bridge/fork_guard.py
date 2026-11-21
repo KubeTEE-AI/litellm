@@ -11,22 +11,32 @@ site, so the runtime can never start there. Workers forked from it are unaffecte
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Final
 
-from litellm.rust_bridge import _native
+from litellm.rust_bridge.loader import get_native_bridge
 
 
 class NativeStateStartedBeforeFork(RuntimeError):
     pass
 
 
-ForkedAfterNativeRuntimeStarted: Final = _native.ForkedAfterNativeRuntimeStarted
-ProcessReservedForForking: Final = _native.ProcessReservedForForking
+class _NeverRaised(RuntimeError):
+    """Stands in for a native exception when the extension is unavailable or predates it."""
 
 
-def reserve_process_for_forking(where: str, reserve: Callable[[], None] = _native.reserve_process_for_forking) -> None:
+_native: Final = get_native_bridge()
+ForkedAfterNativeRuntimeStarted: Final[type[RuntimeError]] = getattr(
+    _native, "ForkedAfterNativeRuntimeStarted", _NeverRaised
+)
+ProcessReservedForForking: Final[type[RuntimeError]] = getattr(_native, "ProcessReservedForForking", _NeverRaised)
+
+
+def reserve_process_for_forking(where: str) -> None:
     """Forbid native routes in this process. Raises if one already ran here."""
+    native: Final = get_native_bridge()
+    reserve: Final = getattr(native, "reserve_process_for_forking", None)
+    if not callable(reserve):
+        return
     try:
         reserve()
     except RuntimeError as error:

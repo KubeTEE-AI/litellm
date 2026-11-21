@@ -1,5 +1,4 @@
 import React from "react";
-import i18n from "@/i18n/i18n";
 import {
   NUMERIC_CELL_CLASS,
   Table,
@@ -35,8 +34,8 @@ export function SimpleTable<T>({
   data,
   columns,
   isLoading = false,
-  loadingMessage = i18n.t("simpleTable.loading"),
-  emptyMessage = i18n.t("simpleTable.empty"),
+  loadingMessage = "Loading...",
+  emptyMessage = "No data",
   getRowKey,
 }: SimpleTableProps<T>) {
   return (

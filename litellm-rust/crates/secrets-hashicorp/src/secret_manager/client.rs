@@ -83,8 +83,10 @@ impl HashicorpVault {
             .ca_certs(Vec::new())
             .verify(true)
             .build()
-            .map_err(Error::ClientSettings)?;
-        VaultClient::new(settings).map_err(Error::from)
+            .map_err(|message| Error::ClientSettings {
+                message: message.to_string(),
+            })?;
+        VaultClient::new(settings).map_err(Error::Client)
     }
 }
 
@@ -92,16 +94,16 @@ fn identity_for(tls: Option<&TlsCertAuth>) -> Result<Option<Identity>, Error> {
     tls.map(|tls| {
         let cert: Vec<u8> = std::fs::read(&tls.cert_path).map_err(|source| Error::TlsIdentity {
             path: tls.cert_path.clone(),
-            source: litellm_error::Source::new(source),
+            message: source.to_string(),
         })?;
         let key: Vec<u8> = std::fs::read(&tls.key_path).map_err(|source| Error::TlsIdentity {
             path: tls.key_path.clone(),
-            source: litellm_error::Source::new(source),
+            message: source.to_string(),
         })?;
         Identity::from_pem(&[cert.as_slice(), key.as_slice()].concat()).map_err(|source| {
             Error::TlsIdentity {
                 path: tls.cert_path.clone(),
-                source: litellm_error::Source::new(source),
+                message: source.to_string(),
             }
         })
     })

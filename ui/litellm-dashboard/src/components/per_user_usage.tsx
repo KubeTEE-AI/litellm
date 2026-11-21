@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import type { ColumnDef, OnChangeFn, PaginationState } from "@tanstack/react-table";
 import { BarChart } from "@/components/shared/charts";
 import { DataTable } from "@/components/shared/DataTable";
@@ -27,12 +26,11 @@ interface PerUserAnalyticsResponse {
 
 interface PerUserUsageProps {
   accessToken: string | null;
-  selectedTags: readonly string[];
+  selectedTags: string[];
   formatAbbreviatedNumber: (value: number, decimalPlaces?: number) => string;
 }
 
 const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, formatAbbreviatedNumber }) => {
-  const { t } = useTranslation();
   // Maximum number of user agent categories to show in charts to prevent color palette overflow
   const MAX_USER_AGENTS = 8;
   const [perUserData, setPerUserData] = useState<PerUserAnalyticsResponse>({
@@ -44,7 +42,7 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
   });
 
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
-  const [pagedTags, setPagedTags] = useState<readonly string[]>(selectedTags);
+  const [pagedTags, setPagedTags] = useState(selectedTags);
 
   if (pagedTags !== selectedTags) {
     setPagedTags(selectedTags);
@@ -59,7 +57,7 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
       accessToken,
       pagination.pageIndex + 1,
       pagination.pageSize,
-      pagedTags.length > 0 ? [...pagedTags] : undefined,
+      pagedTags.length > 0 ? pagedTags : undefined,
     )
       .then((response) => {
         if (stale) return;
@@ -81,40 +79,40 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
 
   const columns: ColumnDef<PerUserMetrics>[] = [
     {
-      header: t("usage.perUser.columns.userId"),
+      header: "User ID",
       accessorKey: "user_id",
       cell: ({ row }) => <span className="font-medium">{row.original.user_id}</span>,
     },
     {
-      header: t("usage.perUser.columns.userEmail"),
+      header: "User Email",
       accessorKey: "user_email",
-      cell: ({ row }) => row.original.user_email || t("usage.perUser.notAvailable"),
+      cell: ({ row }) => row.original.user_email || "N/A",
     },
     {
-      header: t("usage.perUser.columns.userAgent"),
+      header: "User Agent",
       accessorKey: "user_agent",
-      cell: ({ row }) => row.original.user_agent || t("usage.perUser.unknownAgent"),
+      cell: ({ row }) => row.original.user_agent || "Unknown",
     },
     {
-      header: t("usage.perUser.columns.successGenerations"),
+      header: "Success Generations",
       accessorKey: "successful_requests",
       meta: { numeric: true },
       cell: ({ row }) => formatAbbreviatedNumber(row.original.successful_requests),
     },
     {
-      header: t("usage.perUser.columns.totalTokens"),
+      header: "Total Tokens",
       accessorKey: "total_tokens",
       meta: { numeric: true },
       cell: ({ row }) => formatAbbreviatedNumber(row.original.total_tokens),
     },
     {
-      header: t("usage.perUser.columns.failedRequests"),
+      header: "Failed Requests",
       accessorKey: "failed_requests",
       meta: { numeric: true },
       cell: ({ row }) => formatAbbreviatedNumber(row.original.failed_requests),
     },
     {
-      header: t("usage.perUser.columns.totalCost"),
+      header: "Total Cost",
       accessorKey: "spend",
       meta: { numeric: true },
       cell: ({ row }) => `$${formatAbbreviatedNumber(row.original.spend, 4)}`,
@@ -123,16 +121,16 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
 
   return (
     <div className="mb-6">
-      <h3 className="text-lg font-medium text-foreground">{t("usage.perUser.title")}</h3>
-      <p className="text-sm text-muted-foreground">{t("usage.perUser.subtitle")}</p>
+      <h3 className="text-lg font-medium text-foreground">Per User Usage</h3>
+      <p className="text-sm text-muted-foreground">Individual developer usage metrics</p>
 
       <Tabs defaultValue="details">
         <TabsList variant="line" className="mb-6 h-auto w-full justify-start rounded-none border-b p-0">
           <TabsTrigger value="details" className="flex-none rounded-none px-4 py-2">
-            {t("usage.perUser.tabs.details")}
+            User Details
           </TabsTrigger>
           <TabsTrigger value="distribution" className="flex-none rounded-none px-4 py-2">
-            {t("usage.perUser.tabs.distribution")}
+            Usage Distribution
           </TabsTrigger>
         </TabsList>
 
@@ -146,7 +144,7 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
             pagination={pagination}
             onPaginationChange={handlePaginationChange}
             rowCount={perUserData.total_count}
-            noDataMessage={t("usage.perUser.noData")}
+            noDataMessage="No per-user usage data"
             size="compact"
           />
         </TabsContent>
@@ -154,8 +152,8 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
         {/* Tab 2: Usage Distribution Histogram */}
         <TabsContent value="distribution" keepMounted>
           <div className="mb-4">
-            <h4 className="text-lg font-medium text-foreground">{t("usage.perUser.distribution.title")}</h4>
-            <p className="text-sm text-muted-foreground">{t("usage.perUser.distribution.subtitle")}</p>
+            <h4 className="text-lg font-medium text-foreground">User Usage Distribution</h4>
+            <p className="text-sm text-muted-foreground">Number of users by successful request frequency</p>
           </div>
 
           <BarChart
@@ -163,7 +161,7 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
               // Get top user agents by frequency first
               const userAgentCounts = new Map<string, number>();
               perUserData.results.forEach((item: PerUserMetrics) => {
-                const agent = item.user_agent || t("usage.perUser.unknownAgent");
+                const agent = item.user_agent || "Unknown";
                 userAgentCounts.set(agent, (userAgentCounts.get(agent) || 0) + 1);
               });
 
@@ -174,36 +172,18 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
 
               // Categorize users by successful request count and user agent
               const categories = {
-                [t("usage.perUser.distribution.buckets.range1To9")]: {
-                  range: [1, 9],
-                  agents: {} as Record<string, number>,
-                },
-                [t("usage.perUser.distribution.buckets.range10To99")]: {
-                  range: [10, 99],
-                  agents: {} as Record<string, number>,
-                },
-                [t("usage.perUser.distribution.buckets.range100To999")]: {
-                  range: [100, 999],
-                  agents: {} as Record<string, number>,
-                },
-                [t("usage.perUser.distribution.buckets.range1kTo9k")]: {
-                  range: [1000, 9999],
-                  agents: {} as Record<string, number>,
-                },
-                [t("usage.perUser.distribution.buckets.range10kTo99k")]: {
-                  range: [10000, 99999],
-                  agents: {} as Record<string, number>,
-                },
-                [t("usage.perUser.distribution.buckets.range100kPlus")]: {
-                  range: [100000, Infinity],
-                  agents: {} as Record<string, number>,
-                },
+                "1-9 requests": { range: [1, 9], agents: {} as Record<string, number> },
+                "10-99 requests": { range: [10, 99], agents: {} as Record<string, number> },
+                "100-999 requests": { range: [100, 999], agents: {} as Record<string, number> },
+                "1K-9.9K requests": { range: [1000, 9999], agents: {} as Record<string, number> },
+                "10K-99.9K requests": { range: [10000, 99999], agents: {} as Record<string, number> },
+                "100K+ requests": { range: [100000, Infinity], agents: {} as Record<string, number> },
               };
 
               // Count users in each category by user agent (only for top user agents)
               perUserData.results.forEach((item: PerUserMetrics) => {
                 const successCount = item.successful_requests;
-                const userAgent = item.user_agent || t("usage.perUser.unknownAgent");
+                const userAgent = item.user_agent || "Unknown";
 
                 // Only process if this is one of the top user agents
                 if (topUserAgents.includes(userAgent)) {
@@ -235,7 +215,7 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
               // Count user agents by frequency and get top ones
               const userAgentCounts = new Map<string, number>();
               perUserData.results.forEach((item: PerUserMetrics) => {
-                const agent = item.user_agent || t("usage.perUser.unknownAgent");
+                const agent = item.user_agent || "Unknown";
                 userAgentCounts.set(agent, (userAgentCounts.get(agent) || 0) + 1);
               });
 
@@ -246,7 +226,7 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
                 .map(([agent]) => agent);
             })()}
             colors={["blue", "green", "orange", "red", "purple", "yellow", "pink", "indigo"]}
-            valueFormatter={(value: number) => t("usage.perUser.distribution.userCount", { count: value })}
+            valueFormatter={(value: number) => `${value} users`}
             yAxisWidth={80}
             showLegend={true}
             stack={true}

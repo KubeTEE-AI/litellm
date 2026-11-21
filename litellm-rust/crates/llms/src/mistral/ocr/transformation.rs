@@ -171,7 +171,9 @@ impl MistralOcrConfig {
         ApiUrl::parse(base)
             .and_then(|url| url.complete_path(&["v1", "ocr"]))
             .map(|url| url.into_string())
-            .map_err(|error| Error::request_field("api_base", error))
+            .map_err(|_| Error::RequestField {
+                path: "api_base".into(),
+            })
     }
 }
 
@@ -184,7 +186,6 @@ pub fn normalize_response(
         Some(None) => {
             return Err(Error::ResponseField {
                 path: "model".into(),
-                cause: None,
             });
         }
         None => model.to_string(),
@@ -219,7 +220,7 @@ mod tests {
         #[default(vec![])] extra_headers: Vec<(String, String)>,
     ) -> OcrConnection {
         OcrConnection {
-            api_key: api_key.map(litellm_secret_value::SecretValue::new),
+            api_key: api_key.map(litellm_auth::SecretValue::new),
             extra_headers,
             ..OcrConnection::default()
         }
@@ -230,7 +231,7 @@ mod tests {
         let response = serde_json::from_value(json!({"model":null})).unwrap();
         assert!(matches!(
             normalize_response("fallback", response).unwrap_err(),
-            Error::ResponseField { path, .. } if path == "model"
+            Error::ResponseField { path } if path == "model"
         ));
     }
 
@@ -262,7 +263,7 @@ mod tests {
                 .unwrap_err();
         assert!(matches!(
             error,
-            Error::ResponseField { path: actual, .. } if actual == path
+            Error::ResponseField { path: actual } if actual == path
         ));
     }
 

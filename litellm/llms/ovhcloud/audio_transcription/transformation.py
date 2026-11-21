@@ -12,7 +12,6 @@ import httpx
 from pydantic import ConfigDict, TypeAdapter
 
 from litellm.litellm_core_utils.audio_utils.utils import process_audio_file
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.audio_transcription.transformation import (
     AudioTranscriptionRequestData,
     BaseAudioTranscriptionConfig,
@@ -64,8 +63,9 @@ class OVHCloudAudioTranscriptionConfig(BaseAudioTranscriptionConfig):
         litellm_params: dict,
         stream: bool | None = None,
     ) -> str:
-        base_url: Final = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1" if api_base is None else api_base
-        return join_api_base(base_url, "audio/transcriptions")
+        api_base = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1" if api_base is None else api_base.rstrip("/")
+        complete_url: Final = f"{api_base}/audio/transcriptions"
+        return complete_url
 
     def get_error_class(self, error_message: str, status_code: int, headers: dict | httpx.Headers) -> BaseLLMException:
         return OVHCloudException(

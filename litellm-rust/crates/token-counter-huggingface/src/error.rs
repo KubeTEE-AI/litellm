@@ -2,21 +2,10 @@ use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub enum Error {
-    #[error("failed to load tokenizer")]
+    #[error("failed to load tokenizer: {0}")]
     Load(#[source] tokenizers::Error),
-    #[error("invalid encoding JSON")]
-    EncodingJson(#[source] serde_json::Error),
-    #[error("tokenization failed")]
+    #[error("tokenization failed: {0}")]
     Encode(#[source] tokenizers::Error),
-    #[error("token decoding failed")]
+    #[error("token decoding failed: {0}")]
     Decode(#[source] tokenizers::Error),
-}
-
-impl Error {
-    pub fn is_load(&self) -> bool {
-        match self {
-            Self::Load(_) | Self::EncodingJson(_) => true,
-            Self::Encode(_) | Self::Decode(_) => false,
-        }
-    }
 }

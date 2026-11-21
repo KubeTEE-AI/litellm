@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from "react";
-import type { TFunction } from "i18next";
 import { CircleHelp } from "lucide-react";
-import { Trans, useTranslation } from "react-i18next";
 import { z } from "zod";
 import { Policy } from "@/components/policies/types";
 import { teamListCall, keyListCall, modelAvailableCall, estimateAttachmentImpactCall } from "@/components/networking";
@@ -57,23 +55,23 @@ const EMPTY_VALUES: AttachmentFormValues = {
 const INT32_MIN = -2147483648;
 const INT32_MAX = 2147483647;
 
-const buildAttachmentShape = (t: TFunction) => ({
-  policy_names: z.array(z.string()).min(1, t("policies.addAttachmentForm.errors.policyRequired")),
+const attachmentShape = {
+  policy_names: z.array(z.string()).min(1, "Please select at least one policy"),
   teams: z.array(z.string()),
   keys: z.array(z.string()),
   models: z.array(z.string()),
   tags: z.array(z.string()),
   priority: z
-    .number({ error: t("policies.addAttachmentForm.errors.priorityWhole") })
-    .int(t("policies.addAttachmentForm.errors.priorityWhole"))
-    .min(INT32_MIN, t("policies.addAttachmentForm.errors.priorityMin", { min: INT32_MIN }))
-    .max(INT32_MAX, t("policies.addAttachmentForm.errors.priorityMax", { max: INT32_MAX }))
+    .number({ error: "Priority must be a whole number" })
+    .int("Priority must be a whole number")
+    .min(INT32_MIN, `Priority must be at least ${INT32_MIN}`)
+    .max(INT32_MAX, `Priority must be at most ${INT32_MAX}`)
     .nullable(),
   default: z.boolean(),
-});
+};
 
-const buildAttachmentSchema = (scopeType: ScopeType, teamsLoaded: boolean, availableTeams: string[], t: TFunction) =>
-  z.object(buildAttachmentShape(t)).superRefine((values, ctx) => {
+const buildAttachmentSchema = (scopeType: ScopeType, teamsLoaded: boolean, availableTeams: string[]) =>
+  z.object(attachmentShape).superRefine((values, ctx) => {
     if (scopeType !== "specific" || !teamsLoaded) {
       return;
     }
@@ -84,7 +82,9 @@ const buildAttachmentSchema = (scopeType: ScopeType, teamsLoaded: boolean, avail
     ctx.addIssue({
       code: "custom",
       path: ["teams"],
-      message: t("policies.addAttachmentForm.errors.unknownTeams", { teams: invalid.join(", ") }),
+      message:
+        `These teams don't exist: ${invalid.join(", ")}. ` +
+        `Choose an existing team, or use a wildcard like "team-*" to match by prefix.`,
     });
   });
 
@@ -106,7 +106,6 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
   policies,
   createAttachment,
 }) => {
-  const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [scopeType, setScopeType] = useState<ScopeType>("global");
   const [availableTeams, setAvailableTeams] = useState<string[]>([]);
@@ -119,7 +118,7 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
   const [isEstimating, setIsEstimating] = useState(false);
   const [impactResult, setImpactResult] = useState<any>(null);
   const { userId, userRole } = useAuthorized();
-  const form = useZodForm(buildAttachmentSchema(scopeType, teamsLoaded, availableTeams, t), {
+  const form = useZodForm(buildAttachmentSchema(scopeType, teamsLoaded, availableTeams), {
     defaultValues: EMPTY_VALUES,
   });
 
@@ -225,11 +224,11 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
       const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
 
       if (successCount > 0 && failed.length === 0) {
-        toast.success(t("policies.addAttachmentForm.toasts.created", { count: successCount }));
-      } else if (successCount > 0 && failed.length > 0) {
-        toast.fromError(
-          t("policies.addAttachmentForm.toasts.partial", { created: successCount, failed: failed.length }),
+        toast.success(
+          successCount === 1 ? "Attachment created successfully" : `${successCount} attachments created successfully`,
         );
+      } else if (successCount > 0 && failed.length > 0) {
+        toast.fromError(`${successCount} attachments created, ${failed.length} failed`);
       } else {
         throw new Error(failed[0]?.reason instanceof Error ? failed[0].reason.message : "Failed to create attachments");
       }
@@ -239,11 +238,7 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
       onClose();
     } catch (error) {
       console.error("Failed to create attachment:", error);
-      toast.fromError(
-        t("policies.addAttachmentForm.toasts.failed", {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
+      toast.fromError("Failed to create attachment: " + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsSubmitting(false);
     }
@@ -255,16 +250,12 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
     <Dialog open={visible} onOpenChange={(open) => !open && handleClose()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>{t("policies.addAttachmentForm.title")}</DialogTitle>
+          <DialogTitle>Create Policy Attachment</DialogTitle>
         </DialogHeader>
         <TooltipProvider>
           <form onSubmit={(event) => event.preventDefault()} noValidate>
             <FieldGroup>
-              <FormField
-                control={form.control}
-                name="policy_names"
-                label={t("policies.addAttachmentForm.fields.policies")}
-              >
+              <FormField control={form.control} name="policy_names" label="Policies">
                 {({
                   id,
                   value,
@@ -278,9 +269,9 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                     value={value}
                     onValueChange={onChange}
                     onBlur={onBlur}
-                    placeholder={t("policies.addAttachmentForm.fields.policiesPlaceholder")}
+                    placeholder="Select policies to attach"
                     options={policyOptions}
-                    emptyText={t("policies.addAttachmentForm.fields.policiesEmpty")}
+                    emptyText="No matching policies"
                     ariaInvalid={ariaInvalid}
                     ariaDescribedBy={ariaDescribedBy}
                   />
@@ -288,20 +279,20 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
               </FormField>
 
               <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold">{t("policies.addAttachmentForm.fields.scopeSection")}</span>
+                <span className="text-sm font-semibold">Scope</span>
                 <Separator className="flex-1" />
               </div>
 
               <div>
-                <FieldTitle className="mb-2">{t("policies.addAttachmentForm.fields.scopeType")}</FieldTitle>
+                <FieldTitle className="mb-2">Scope Type</FieldTitle>
                 <RadioGroup value={scopeType} onValueChange={(value: unknown) => setScopeType(value as ScopeType)}>
                   <FieldLabel className="font-normal">
                     <RadioGroupItem value="specific" />
-                    {t("policies.addAttachmentForm.scopeTypes.specific")}
+                    Specific (teams, keys, models, or tags)
                   </FieldLabel>
                   <FieldLabel className="font-normal">
                     <RadioGroupItem value="global" />
-                    {t("policies.addAttachmentForm.scopeTypes.global")}
+                    Global (applies to all requests)
                   </FieldLabel>
                 </RadioGroup>
               </div>
@@ -312,8 +303,8 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                     control={form.control}
                     name="teams"
                     label={labelWithHint(
-                      t("policies.addAttachmentForm.fields.teams"),
-                      t("policies.addAttachmentForm.fields.teamsHint"),
+                      "Teams",
+                      "Select team aliases or enter custom patterns. Supports wildcards (e.g., healthcare-*)",
                     )}
                   >
                     {({
@@ -329,15 +320,11 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                         value={value}
                         onValueChange={onChange}
                         onBlur={onBlur}
-                        placeholder={
-                          isLoadingTeams
-                            ? t("policies.addAttachmentForm.fields.teamsLoading")
-                            : t("policies.addAttachmentForm.fields.teamsPlaceholder")
-                        }
+                        placeholder={isLoadingTeams ? "Loading teams..." : "Select or enter team aliases"}
                         options={availableTeams}
                         allowCustomValues
                         tokenSeparators={[","]}
-                        emptyText={t("policies.addAttachmentForm.fields.teamsEmpty")}
+                        emptyText="No matching teams"
                         ariaInvalid={ariaInvalid}
                         ariaDescribedBy={ariaDescribedBy}
                       />
@@ -348,8 +335,8 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                     control={form.control}
                     name="keys"
                     label={labelWithHint(
-                      t("policies.addAttachmentForm.fields.keys"),
-                      t("policies.addAttachmentForm.fields.keysHint"),
+                      "Keys",
+                      "Select key aliases or enter custom patterns. Supports wildcards (e.g., dev-*)",
                     )}
                   >
                     {({
@@ -365,15 +352,11 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                         value={value}
                         onValueChange={onChange}
                         onBlur={onBlur}
-                        placeholder={
-                          isLoadingKeys
-                            ? t("policies.addAttachmentForm.fields.keysLoading")
-                            : t("policies.addAttachmentForm.fields.keysPlaceholder")
-                        }
+                        placeholder={isLoadingKeys ? "Loading keys..." : "Select or enter key aliases"}
                         options={availableKeys}
                         allowCustomValues
                         tokenSeparators={[","]}
-                        emptyText={t("policies.addAttachmentForm.fields.keysEmpty")}
+                        emptyText="No matching keys"
                         ariaInvalid={ariaInvalid}
                         ariaDescribedBy={ariaDescribedBy}
                       />
@@ -384,8 +367,8 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                     control={form.control}
                     name="models"
                     label={labelWithHint(
-                      t("policies.addAttachmentForm.fields.models"),
-                      t("policies.addAttachmentForm.fields.modelsHint"),
+                      "Models",
+                      "Model names this attachment applies to. Supports wildcards (e.g., gpt-4*). Leave empty to apply to all models.",
                     )}
                   >
                     {({
@@ -402,14 +385,12 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                         onValueChange={onChange}
                         onBlur={onBlur}
                         placeholder={
-                          isLoadingModels
-                            ? t("policies.addAttachmentForm.fields.modelsLoading")
-                            : t("policies.addAttachmentForm.fields.modelsPlaceholder")
+                          isLoadingModels ? "Loading models..." : "Select or enter model names (e.g., gpt-4, bedrock/*)"
                         }
                         options={availableModels}
                         allowCustomValues
                         tokenSeparators={[","]}
-                        emptyText={t("policies.addAttachmentForm.fields.modelsEmpty")}
+                        emptyText="No matching models"
                         ariaInvalid={ariaInvalid}
                         ariaDescribedBy={ariaDescribedBy}
                       />
@@ -420,15 +401,14 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                     control={form.control}
                     name="tags"
                     label={labelWithHint(
-                      t("policies.addAttachmentForm.fields.tags"),
-                      t("policies.addAttachmentForm.fields.tagsHint"),
+                      "Tags",
+                      "Match against tags set in key or team metadata. Use exact values (e.g., healthcare) or wildcard patterns (e.g., health-*) where * matches any suffix.",
                     )}
                     description={
                       <span className="text-xs">
-                        <Trans
-                          i18nKey="policies.addAttachmentForm.fields.tagsDescription"
-                          components={{ code: <code /> }}
-                        />
+                        Matches tags from key/team <code>metadata.tags</code> or tags passed dynamically in the request
+                        body. Use <code>*</code> as a suffix wildcard (e.g., <code>prod-*</code> matches{" "}
+                        <code>prod-us</code>, <code>prod-eu</code>).
                       </span>
                     }
                   >
@@ -445,7 +425,7 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                         value={value}
                         onValueChange={onChange}
                         onBlur={onBlur}
-                        placeholder={t("policies.addAttachmentForm.fields.tagsPlaceholder")}
+                        placeholder="Type a tag and press Enter (e.g. healthcare, prod-*)"
                         allowCustomValues
                         tokenSeparators={[",", " "]}
                         ariaInvalid={ariaInvalid}
@@ -460,10 +440,10 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                 control={form.control}
                 name="priority"
                 label={labelWithHint(
-                  t("policies.addAttachmentForm.fields.priority"),
-                  t("policies.addAttachmentForm.fields.priorityHint"),
+                  "Priority",
+                  "Lower numbers run first. Attachments with a priority run before attachments without one.",
                 )}
-                description={t("policies.addAttachmentForm.fields.priorityDescription")}
+                description="Optional. Leave blank to keep the default order: global, then teams, keys, tags, models."
               >
                 {({ ref, value, onChange, ...field }) => (
                   <Input
@@ -472,7 +452,7 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                     type="number"
                     step={1}
                     value={value ?? ""}
-                    placeholder={t("policies.addAttachmentForm.fields.priorityPlaceholder")}
+                    placeholder="e.g. 10"
                     onChange={(event) => onChange(event.target.value === "" ? null : event.target.valueAsNumber)}
                   />
                 )}
@@ -482,10 +462,10 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                 control={form.control}
                 name="default"
                 label={labelWithHint(
-                  t("policies.addAttachmentForm.fields.default"),
-                  t("policies.addAttachmentForm.fields.defaultHint"),
+                  "Default (fallback)",
+                  "A default attachment is applied only when no non-default attachment matches the request.",
                 )}
-                description={t("policies.addAttachmentForm.fields.defaultDescription")}
+                description="Use this for the guardrail everyone gets unless they opt in to another attachment."
               >
                 {({ value, onChange, ref, ...field }) => (
                   <Switch {...field} inputRef={ref} checked={value === true} onCheckedChange={onChange} />
@@ -497,7 +477,7 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
 
             <div className="flex justify-end space-x-2 mt-4">
               <Button type="button" variant="secondary" onClick={handleClose}>
-                {t("policies.addAttachmentForm.buttons.cancel")}
+                Cancel
               </Button>
               {scopeType === "specific" && (
                 <Button
@@ -508,7 +488,7 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                   aria-busy={isEstimating}
                 >
                   {isEstimating && <UiLoadingSpinner className="size-4" />}
-                  {t("policies.addAttachmentForm.buttons.estimate")}
+                  Estimate Impact
                 </Button>
               )}
               <Button
@@ -518,7 +498,7 @@ const AddAttachmentForm: React.FC<AddAttachmentFormProps> = ({
                 aria-busy={isSubmitting}
               >
                 {isSubmitting && <UiLoadingSpinner className="size-4" />}
-                {t("policies.addAttachmentForm.buttons.create")}
+                Create Attachment
               </Button>
             </div>
           </form>

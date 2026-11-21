@@ -1,12 +1,11 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/shared/DataTable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ACTION_ITEMS, SEVERITY_ITEMS, translateOptions } from "./action_options";
+import { ACTION_ITEMS, SEVERITY_ITEMS } from "./action_options";
 
 interface ContentCategory {
   id: string;
@@ -31,12 +30,9 @@ const CategoryTable: React.FC<CategoryTableProps> = ({
   onRemove,
   readOnly = false,
 }) => {
-  const { t } = useTranslation();
-  const actionItems = translateOptions(ACTION_ITEMS, t);
-  const severityItems = translateOptions(SEVERITY_ITEMS, t);
   const columns: ColumnDef<ContentCategory>[] = [
     {
-      header: t("guardrails.contentFilter.categoryTable.columns.category"),
+      header: "Category",
       accessorKey: "display_name",
       cell: ({ row }) => {
         const { category, display_name: displayName } = row.original;
@@ -49,7 +45,7 @@ const CategoryTable: React.FC<CategoryTableProps> = ({
       },
     },
     {
-      header: t("guardrails.contentFilter.categoryTable.columns.severityThreshold"),
+      header: "Severity Threshold",
       accessorKey: "severity_threshold",
       size: 180,
       cell: ({ row }) => {
@@ -59,21 +55,17 @@ const CategoryTable: React.FC<CategoryTableProps> = ({
         }
         return (
           <Select
-            items={severityItems}
+            items={SEVERITY_ITEMS}
             value={severity}
             onValueChange={(value: string | null) =>
               value && onSeverityChange?.(id, value as "high" | "medium" | "low")
             }
           >
-            <SelectTrigger
-              size="sm"
-              className="w-[150px]"
-              aria-label={t("guardrails.contentFilter.categoryTable.columns.severityThreshold")}
-            >
+            <SelectTrigger size="sm" className="w-[150px]" aria-label="Severity Threshold">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {severityItems.map((item) => (
+              {SEVERITY_ITEMS.map((item) => (
                 <SelectItem key={item.value} value={item.value}>
                   {item.label}
                 </SelectItem>
@@ -84,7 +76,7 @@ const CategoryTable: React.FC<CategoryTableProps> = ({
       },
     },
     {
-      header: t("guardrails.contentFilter.categoryTable.columns.action"),
+      header: "Action",
       accessorKey: "action",
       size: 150,
       cell: ({ row }) => {
@@ -94,19 +86,15 @@ const CategoryTable: React.FC<CategoryTableProps> = ({
         }
         return (
           <Select
-            items={actionItems}
+            items={ACTION_ITEMS}
             value={action}
             onValueChange={(value: string | null) => value && onActionChange?.(id, value as "BLOCK" | "MASK")}
           >
-            <SelectTrigger
-              size="sm"
-              className="w-[120px]"
-              aria-label={t("guardrails.contentFilter.categoryTable.columns.action")}
-            >
+            <SelectTrigger size="sm" className="w-[120px]" aria-label="Action">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {actionItems.map((item) => (
+              {ACTION_ITEMS.map((item) => (
                 <SelectItem key={item.value} value={item.value}>
                   {item.label}
                 </SelectItem>
@@ -126,16 +114,14 @@ const CategoryTable: React.FC<CategoryTableProps> = ({
       cell: ({ row }) => (
         <Button variant="ghost" size="sm" onClick={() => onRemove?.(row.original.id)}>
           <Trash2 />
-          {t("guardrails.contentFilter.categoryTable.delete")}
+          Delete
         </Button>
       ),
     });
   }
 
   if (categories.length === 0) {
-    return (
-      <div className="py-10 text-center text-muted-foreground">{t("guardrails.contentFilter.categoryTable.empty")}</div>
-    );
+    return <div className="py-10 text-center text-muted-foreground">No categories configured.</div>;
   }
 
   return <DataTable data={categories} columns={columns} getRowId={(row) => row.id} size="compact" />;

@@ -14,7 +14,6 @@ use litellm_cache_memory::InMemoryCache;
 use litellm_cache_response::{
     CacheOptions, CachePolicy, CacheScope, ResponseCache, ResponseCacheConfig, ResponseCacheService,
 };
-use litellm_core_utils::decline::Decline;
 use litellm_host::{
     call::{CallOutput, OutputOf},
     interceptors::{
@@ -26,7 +25,7 @@ use litellm_host::{
     protocol::Protocol,
 };
 use litellm_inference::{
-    Error,
+    RouteError,
     caching::{Cachable, CacheRequest, StreamCachable, execute_streaming, execute_unary},
 };
 use rstest::{fixture, rstest};
@@ -37,7 +36,7 @@ struct TestRoute;
 impl Protocol for TestRoute {
     type Request = Value;
     type Response = Value;
-    type Error = Error;
+    type Error = RouteError;
     type HostCall = Infallible;
     type Chunk = Bytes;
     type StreamHead = ();
@@ -205,8 +204,7 @@ async fn streamed(
                 .chunks(3)
                 .map(|bytes| Ok(Bytes::copy_from_slice(bytes)))
                 .collect::<Vec<_>>();
-            let ending =
-                fail.then_some(Err(Error::Declined(Decline::new("test transport failure"))));
+            let ending = fail.then_some(Err(RouteError::Unsupported("test transport failure")));
             Ok(CallOutput::Stream {
                 head: (),
                 chunks: stream::iter(chunks.into_iter().chain(ending)).boxed(),
@@ -217,7 +215,7 @@ async fn streamed(
     .unwrap()
 }
 
-async fn consume(output: OutputOf<TestRoute>) -> Result<Vec<u8>, Error> {
+async fn consume(output: OutputOf<TestRoute>) -> Result<Vec<u8>, RouteError> {
     let CallOutput::Stream { chunks, .. } = output else {
         panic!("expected a stream");
     };
@@ -317,7 +315,7 @@ async fn a_provider_failure_never_populates_the_cache(cache: Arc<dyn ResponseCac
         None,
         || async {
             calls.fetch_add(1, Ordering::SeqCst);
-            Err(Error::Declined(Decline::new("test provider failure")))
+            Err(RouteError::Unsupported("test provider failure"))
         },
     )
     .await;
@@ -419,7 +417,7 @@ impl litellm_cache::BaseCache for UnavailableCache {
         _: &str,
         _: &Self::Context,
     ) -> Result<Option<Self::Value>, litellm_cache::Error> {
-        Err(litellm_cache::Error::Unavailable(None))
+        Err(litellm_cache::Error::Unavailable)
     }
 
     fn set_cache(
@@ -428,7 +426,7 @@ impl litellm_cache::BaseCache for UnavailableCache {
         _: Self::Value,
         _: &Self::Context,
     ) -> Result<(), litellm_cache::Error> {
-        Err(litellm_cache::Error::Unavailable(None))
+        Err(litellm_cache::Error::Unavailable)
     }
 }
 
@@ -469,8 +467,8 @@ struct CacheHitAccounting {
     reject: bool,
 }
 
-impl Interceptors<Error> for CacheHitAccounting {
-    async fn result_ready(&self, facts: ExecutionFacts) -> Result<(), Error> {
+impl Interceptors<RouteError> for CacheHitAccounting {
+    async fn result_ready(&self, facts: ExecutionFacts) -> Result<(), RouteError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let ResultSource::Cache { key } = facts.source else {
             panic!("expected cache source")
@@ -484,7 +482,7 @@ impl Interceptors<Error> for CacheHitAccounting {
         );
         self.key.set(key).unwrap();
         if self.reject {
-            return Err(Error::Declined(Decline::new("cache accounting rejected")));
+            return Err(RouteError::Unsupported("cache accounting rejected"));
         }
         Ok(())
     }
@@ -493,11 +491,11 @@ impl Interceptors<Error> for CacheHitAccounting {
         &self,
         wire: WireRequest,
         _: RequestContext,
-    ) -> Result<WireRequest, Error> {
+    ) -> Result<WireRequest, RouteError> {
         Ok(wire)
     }
 
-    async fn after_provider_response(&self, _: RawResponse) -> Result<(), Error> {
+    async fn after_provider_response(&self, _: RawResponse) -> Result<(), RouteError> {
         Ok(())
     }
 }
@@ -571,10 +569,10 @@ async fn cache_hits_notify_accounting_once_and_propagate_its_failure(
         .await
     };
     if reject {
-        assert_eq!(
-            result.unwrap_err().declined(),
-            Some(&Decline::new("cache accounting rejected"))
-        );
+        assert!(matches!(
+            result,
+            Err(RouteError::Unsupported("cache accounting rejected"))
+        ));
     } else {
         assert_eq!(result.unwrap(), expected);
     }
@@ -592,7 +590,7 @@ async fn cache_hits_notify_accounting_once_and_propagate_its_failure(
 impl Protocol for UnaryTestRoute {
     type Request = Value;
     type Response = Value;
-    type Error = Error;
+    type Error = RouteError;
     type HostCall = Infallible;
     type Chunk = Infallible;
     type StreamHead = Infallible;

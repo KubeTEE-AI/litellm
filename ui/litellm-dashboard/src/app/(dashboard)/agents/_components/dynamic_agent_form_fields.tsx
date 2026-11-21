@@ -1,13 +1,10 @@
 import React from "react";
-import type { TFunction } from "i18next";
-import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { FieldGroup } from "@/components/ui/field";
 import { AgentCreateInfo, AgentCredentialFieldMetadata } from "@/components/networking";
 import { PasswordInput } from "@/components/shared/PasswordInput";
-import i18n from "@/i18n/i18n";
 import { AGENT_FORM_CONFIG, applyKillSwitchToPayload } from "./agent_config";
 import CostConfigFields, { COST_FIELD_NAMES } from "./cost_config_fields";
 import KillSwitchFormFields from "./KillSwitchFormFields";
@@ -35,13 +32,12 @@ export const unmountedDynamicFieldNames = (mountedPanels: readonly string[]): re
 // validation rather than throwing during render and taking the whole form down with it.
 const buildValidationPatternRule = (
   field: AgentCredentialFieldMetadata,
-  t: TFunction,
 ): { value: RegExp; message: string } | undefined => {
   if (!field.validation_pattern) return undefined;
   try {
     return {
       value: new RegExp(field.validation_pattern),
-      message: field.validation_message || t("agents.dynamicFields.errors.malformed", { field: field.label }),
+      message: field.validation_message || `${field.label} looks incomplete or malformed`,
     };
   } catch {
     return undefined;
@@ -49,15 +45,14 @@ const buildValidationPatternRule = (
 };
 
 const CredentialField = ({ field }: { field: AgentCredentialFieldMetadata }) => {
-  const { t } = useTranslation();
-  const patternRule = buildValidationPatternRule(field, t);
+  const patternRule = buildValidationPatternRule(field);
   return (
     <AgentFormField
       name={field.key}
       label={field.tooltip ? labelWithHint(field.label, field.tooltip) : field.label}
       defaultValue={field.default_value ?? undefined}
       rules={{
-        ...(field.required ? { required: t("agents.dynamicFields.errors.enterField", { field: field.label }) } : {}),
+        ...(field.required ? { required: `Please enter ${field.label}` } : {}),
         ...(patternRule ? { pattern: patternRule } : {}),
       }}
     >
@@ -113,17 +108,14 @@ const DynamicAgentFormFields: React.FC<DynamicAgentFormFieldsProps> = ({ agentTy
     <FieldGroup className="mb-4">
       <AgentFormField
         name="agent_name"
-        label={labelWithHint(
-          i18n.t("agents.dynamicFields.agentName.label"),
-          i18n.t("agents.dynamicFields.agentName.hint"),
-        )}
-        rules={{ required: i18n.t("agents.dynamicFields.agentName.required") }}
+        label={labelWithHint("Agent Name", "Unique identifier for the agent")}
+        rules={{ required: "Please enter a unique agent name" }}
       >
         {({ value, onChange, ref, ...control }) => (
           <Input
             {...control}
             ref={ref}
-            placeholder={i18n.t("agents.dynamicFields.agentName.placeholder")}
+            placeholder="e.g., my-langgraph-agent"
             value={typeof value === "string" ? value : ""}
             onChange={onChange}
           />
@@ -132,17 +124,14 @@ const DynamicAgentFormFields: React.FC<DynamicAgentFormFieldsProps> = ({ agentTy
 
       <AgentFormField
         name="description"
-        label={labelWithHint(
-          i18n.t("agents.dynamicFields.description.label"),
-          i18n.t("agents.dynamicFields.description.hint"),
-        )}
+        label={labelWithHint("Description", "Brief description of what this agent does")}
       >
         {({ value, onChange, ref, ...control }) => (
           <Textarea
             {...control}
             ref={ref}
             rows={2}
-            placeholder={i18n.t("agents.dynamicFields.description.placeholder")}
+            placeholder="Describe what this agent does..."
             value={typeof value === "string" ? value : ""}
             onChange={onChange}
           />
@@ -155,18 +144,10 @@ const DynamicAgentFormFields: React.FC<DynamicAgentFormFieldsProps> = ({ agentTy
     </FieldGroup>
 
     <div className="mb-4 rounded-md border border-border px-4">
-      <AgentFormPanel
-        panelKey={AGENT_FORM_CONFIG.cost.key}
-        title={i18n.t(AGENT_FORM_CONFIG.cost.titleKey)}
-        panels={panels}
-      >
+      <AgentFormPanel panelKey={AGENT_FORM_CONFIG.cost.key} title={AGENT_FORM_CONFIG.cost.title} panels={panels}>
         <CostConfigFields />
       </AgentFormPanel>
-      <AgentFormPanel
-        panelKey={KILL_SWITCH_PANEL_KEY}
-        title={i18n.t("agents.dynamicFields.killSwitch")}
-        panels={panels}
-      >
+      <AgentFormPanel panelKey={KILL_SWITCH_PANEL_KEY} title="Kill Switch" panels={panels}>
         <KillSwitchFormFields />
       </AgentFormPanel>
     </div>

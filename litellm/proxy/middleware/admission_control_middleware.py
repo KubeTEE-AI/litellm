@@ -10,7 +10,6 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from litellm._logging import verbose_proxy_logger
-from litellm.proxy.common_utils.anthropic_error_payload import route_error_content
 
 ADMISSION_LEASE_SCOPE_KEY: Final = "litellm.admission_lease"
 
@@ -176,7 +175,7 @@ class AdmissionControlMiddleware:
             state.record_admission()
         elif state.get_stats().queued >= settings.max_queued_requests:
             state.record_rejection("queue_full")
-            await _overloaded_response(state, scope)(scope, receive, send)
+            await _overloaded_response(state)(scope, receive, send)
             return
         else:
             state.record_queue()
@@ -188,7 +187,7 @@ class AdmissionControlMiddleware:
             except asyncio.TimeoutError:
                 state.record_dequeue()
                 state.record_rejection("queue_timeout")
-                await _overloaded_response(state, scope)(scope, receive, send)
+                await _overloaded_response(state)(scope, receive, send)
                 return
             except asyncio.CancelledError:
                 state.record_dequeue()
@@ -314,16 +313,18 @@ def get_admission_control_settings(settings: Mapping[str, object]) -> AdmissionC
     )
 
 
-def _overloaded_response(state: AdmissionControlState, scope: Scope) -> JSONResponse:
+def _overloaded_response(state: AdmissionControlState) -> JSONResponse:
     stats: Final = state.get_stats()
-    message: Final = f"Worker at capacity: {stats.admitted} in-flight, {stats.queued} queued requests. Retry later."
     return JSONResponse(
         status_code=503,
         headers={"retry-after": "1"},
-        content=route_error_content(
-            scope,
-            "overloaded_error",
-            message,
-            {"error": {"message": message, "type": "overloaded_error", "code": "503"}},
-        ),
+        content={
+            "error": {
+                "message": (
+                    f"Worker at capacity: {stats.admitted} in-flight, {stats.queued} queued requests. Retry later."
+                ),
+                "type": "overloaded_error",
+                "code": "503",
+            }
+        },
     )

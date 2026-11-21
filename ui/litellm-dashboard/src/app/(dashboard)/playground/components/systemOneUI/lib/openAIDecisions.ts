@@ -1,5 +1,4 @@
 import { z } from "zod";
-import i18n from "@/i18n/i18n";
 
 const contentPart = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("input_text"), text: z.string() }),
@@ -24,7 +23,7 @@ const choiceQuestion = z
   .refine(
     (question) => new Set(question.choices.map((choice) => String(choice.value))).size === question.choices.length,
     {
-      error: () => i18n.t("playground.systemOne.openAIDecisions.uniqueChoices"),
+      message: "Choice values must be unique, including their string representations.",
       path: ["choices"],
     },
   );
@@ -32,9 +31,7 @@ const choiceQuestion = z
 const requestFields = {
   model: z
     .string()
-    .refine((value) => value.trim().length > 0, {
-      error: () => i18n.t("playground.systemOne.openAIDecisions.modelRequired"),
-    })
+    .refine((value) => value.trim().length > 0, "Model must be a non-empty string.")
     .optional(),
   input: z.union([z.string(), z.array(inputMessage)]),
   questions: z
@@ -65,14 +62,14 @@ const choiceAnswerFields = {
   ...answerFields,
   type: z.literal("choice"),
   choice: choiceValue,
-  confidence: probability.nullish(),
+  confidence: probability,
   probabilities: z.array(z.looseObject({ value: choiceValue, probability })),
 };
 const scoreAnswerFields = {
   ...answerFields,
   type: z.literal("score"),
   score: z.number().finite(),
-  confidence: probability.nullish(),
+  confidence: probability,
   probabilities: z.array(z.looseObject({ value: z.number().int(), label: z.string(), probability })),
 };
 const usageFields = {

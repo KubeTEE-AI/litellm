@@ -1,6 +1,5 @@
 from typing import Final
 
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.openai.image_edit.transformation import OpenAIImageEditConfig
 from litellm.secret_managers.main import get_secret_str
 
@@ -40,5 +39,5 @@ class HostedVLLMImageEditConfig(OpenAIImageEditConfig):
             )
         trimmed: Final = resolved_api_base.rstrip("/")
         if trimmed.endswith("/v1"):
-            return join_api_base(trimmed, "images/edits")
-        return join_api_base(trimmed, "v1/images/edits")
+            return f"{trimmed}/images/edits"
+        return f"{trimmed}/v1/images/edits"

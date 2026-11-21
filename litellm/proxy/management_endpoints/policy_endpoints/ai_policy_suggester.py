@@ -6,15 +6,10 @@ based on user-provided attack examples and descriptions.
 import json
 from typing import Final
 
-from pydantic import TypeAdapter
-
 import litellm
 from litellm._logging import verbose_proxy_logger
 from litellm.constants import DEFAULT_COMPETITOR_DISCOVERY_MODEL
-from litellm.litellm_core_utils.core_helpers import decoded_json_object, iter_items
 from litellm.proxy._types import ProxyErrorTypes, ProxyException
-
-_DECODED_JSON: Final = TypeAdapter(object)
 
 SUGGEST_TOOL: Final = {
     "type": "function",
@@ -102,19 +97,14 @@ class AiPolicySuggester:
                     "explanation": "No templates could be matched to your requirements.",
                 }
 
-            decoded: Final = _DECODED_JSON.validate_python(json.loads(tool_calls[0].function.arguments))
+            result: Final = json.loads(tool_calls[0].function.arguments)
 
             valid_ids: Final = {t["id"] for t in templates}
-            result: Final = decoded_json_object(decoded)
-            suggestion: Final = {
-                **result,
-                "selected_templates": [
-                    s
-                    for s in iter_items(result.get("selected_templates", []))
-                    if decoded_json_object(s).get("template_id") in valid_ids
-                ],
-            }
-            return suggestion
+            result["selected_templates"] = [
+                s for s in result.get("selected_templates", []) if s.get("template_id") in valid_ids
+            ]
+
+            return result
         except Exception as e:
             verbose_proxy_logger.error("AI policy suggestion failed: %s", e)
             raise

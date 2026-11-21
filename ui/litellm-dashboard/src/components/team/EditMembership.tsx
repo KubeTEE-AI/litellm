@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
-import type { TFunction } from "i18next";
-import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import NumericalInput from "../shared/numerical_input";
 import BudgetDurationDropdown from "../common_components/budget_duration_dropdown";
@@ -21,14 +19,13 @@ import {
   buildMemberFormValues,
   emptyMemberFormValues,
   isModelMaxBudget,
-  TEMP_BUDGET_PAIR_MESSAGE_KEY,
+  TEMP_BUDGET_PAIR_MESSAGE,
   tempBudgetPairError,
   type MemberAdditionalField,
   type MemberFieldsConfig,
   type MemberFormValues,
 } from "./memberFormValues";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { codeSamples } from "@/i18n/untranslated/codeSamples";
 
 dayjs.extend(utc);
 
@@ -51,6 +48,8 @@ interface MemberModalProps<T extends BaseMember> {
   config: ModalConfig;
 }
 
+const ROLE_REQUIRED_MESSAGE = "Please select a role!";
+
 const isEmailish = (value: string): boolean =>
   value === "" || z.email({ pattern: z.regexes.html5Email }).safeParse(value).success;
 
@@ -60,18 +59,17 @@ const memberFieldSchema = z
   .union([z.string(), z.number(), z.null(), z.array(z.string()), modelMaxBudgetSchema])
   .optional();
 
-const buildMemberSchema = (config: ModalConfig, t: TFunction): z.ZodType<MemberFormValues, MemberFormValues> => {
-  const roleRequired = t("teams.editMembership.errors.roleRequired");
+const buildMemberSchema = (config: ModalConfig): z.ZodType<MemberFormValues, MemberFormValues> => {
   const shape = {
-    user_email: z.string().refine(isEmailish, t("teams.editMembership.errors.invalidEmail")).nullish(),
+    user_email: z.string().refine(isEmailish, "Please enter a valid email!").nullish(),
     user_id: z.string().nullish(),
-    role: z.string({ error: roleRequired }).min(1, roleRequired),
+    role: z.string({ error: ROLE_REQUIRED_MESSAGE }).min(1, ROLE_REQUIRED_MESSAGE),
     ...Object.fromEntries((config.additionalFields ?? []).map((field) => [field.name, memberFieldSchema])),
   };
 
   return z.object(shape).superRefine((values, ctx) => {
     const path = tempBudgetPairError(values);
-    if (path !== null) ctx.addIssue({ code: "custom", path: [path], message: t(TEMP_BUDGET_PAIR_MESSAGE_KEY) });
+    if (path !== null) ctx.addIssue({ code: "custom", path: [path], message: TEMP_BUDGET_PAIR_MESSAGE });
   });
 };
 
@@ -83,8 +81,7 @@ const MemberModal = <T extends BaseMember>({
   mode,
   config,
 }: MemberModalProps<T>) => {
-  const { t } = useTranslation();
-  const schema = useMemo(() => buildMemberSchema(config, t), [config, t]);
+  const schema = useMemo(() => buildMemberSchema(config), [config]);
   const form = useZodForm(schema, { defaultValues: emptyMemberFormValues(config) });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -139,7 +136,7 @@ const MemberModal = <T extends BaseMember>({
                 step={field.step || 1}
                 min={field.min || 0}
                 style={{ width: "100%" }}
-                placeholder={field.placeholder || t("teams.editMembership.numericalPlaceholder")}
+                placeholder={field.placeholder || "Enter a numerical value"}
                 value={value ?? ""}
                 onChange={(event: React.ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
               />
@@ -169,7 +166,7 @@ const MemberModal = <T extends BaseMember>({
                 options={field.options ?? []}
                 value={Array.isArray(value) ? value : []}
                 onValueChange={onChange}
-                placeholder={field.placeholder || t("teams.editMembership.multiSelectPlaceholder")}
+                placeholder={field.placeholder || "Select options"}
               />
             );
           case "budget-duration":
@@ -211,20 +208,17 @@ const MemberModal = <T extends BaseMember>({
     <Dialog open={visible} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[1000px]">
         <DialogHeader>
-          <DialogTitle>
-            {config.title ||
-              (mode === "add" ? t("teams.editMembership.addTitle") : t("teams.editMembership.editTitle"))}
-          </DialogTitle>
+          <DialogTitle>{config.title || (mode === "add" ? "Add Member" : "Edit Member")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={form.handleSubmit(handleSubmit)}>
           <FieldGroup>
             {config.showEmail && (
-              <FormField control={form.control} name="user_email" label={t("teams.editMembership.fields.email")}>
+              <FormField control={form.control} name="user_email" label="Email">
                 {({ ref, value, onChange, ...rest }) => (
                   <Input
                     {...rest}
                     ref={ref}
-                    placeholder={codeSamples.teams.memberEmail}
+                    placeholder="user@example.com"
                     value={typeof value === "string" ? value : ""}
                     onChange={(event) => onChange(event.target.value)}
                   />
@@ -233,11 +227,11 @@ const MemberModal = <T extends BaseMember>({
             )}
 
             {config.showEmail && config.showUserId && (
-              <div className="text-center text-sm text-muted-foreground">{t("teams.editMembership.fields.or")}</div>
+              <div className="text-center text-sm text-muted-foreground">OR</div>
             )}
 
             {config.showUserId && (
-              <FormField control={form.control} name="user_id" label={t("teams.editMembership.fields.userId")}>
+              <FormField control={form.control} name="user_id" label="User ID">
                 {({ ref, value, onChange, ...rest }) => (
                   <Input
                     {...rest}
@@ -255,11 +249,9 @@ const MemberModal = <T extends BaseMember>({
               name="role"
               label={
                 <span className="flex items-center gap-2">
-                  <span>{t("teams.editMembership.fields.role")}</span>
+                  <span>Role</span>
                   {mode === "edit" && initialData && (
-                    <span className="text-sm text-muted-foreground">
-                      {t("teams.editMembership.fields.currentRole", { role: getRoleLabel(initialData.role) })}
-                    </span>
+                    <span className="text-sm text-muted-foreground">(Current: {getRoleLabel(initialData.role)})</span>
                   )}
                 </span>
               }
@@ -289,17 +281,17 @@ const MemberModal = <T extends BaseMember>({
 
           <div className="mt-6 text-right">
             <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting} className="mr-2">
-              {t("teams.editMembership.cancel")}
+              Cancel
             </Button>
             <Button type="submit" variant="outline" disabled={isSubmitting}>
               {isSubmitting && <UiLoadingSpinner className="size-4" />}
               {mode === "add"
                 ? isSubmitting
-                  ? t("teams.editMembership.submit.adding")
-                  : t("teams.editMembership.submit.add")
+                  ? "Adding..."
+                  : "Add Member"
                 : isSubmitting
-                  ? t("teams.editMembership.submit.saving")
-                  : t("teams.editMembership.submit.save")}
+                  ? "Saving..."
+                  : "Save Changes"}
             </Button>
           </div>
         </form>

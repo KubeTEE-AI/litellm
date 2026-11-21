@@ -15,7 +15,6 @@ from typing_extensions import ReadOnly, TypedDict
 import litellm
 from litellm._logging import verbose_logger
 from litellm.integrations.custom_logger import CustomLogger
-from litellm.litellm_core_utils.core_helpers import require_attributes, subscript
 from litellm.litellm_core_utils.prompt_templates.common_utils import (
     convert_content_list_to_str,
     get_content_from_model_response,
@@ -59,10 +58,6 @@ class _JsonResponse(Protocol):
     """An HTTP response read only for whatever JSON body it decodes to."""
 
     def json(self) -> object: ...
-
-
-class _SupportsGet(Protocol):
-    def get(self, key: str, /) -> object: ...
 
 
 def _login_access_token(response: _GalileoLoginResponse) -> str:
@@ -468,13 +463,13 @@ class GalileoObserve(CustomLogger):
             pass
 
     @staticmethod
-    def _build_prompt(kwargs: Mapping[str, object]) -> dict[str, object]:
-        optional_params: Final = require_attributes(kwargs.get("optional_params", {}) or {}, _SupportsGet, "get")
+    def _build_prompt(kwargs: Mapping[str, Any]) -> dict[str, object]:
+        optional_params: Final[Mapping[str, object]] = kwargs.get("optional_params", {}) or {}
         prompt: Final[dict[str, object]] = {"messages": kwargs.get("messages")}
         if optional_params.get("functions") is not None:
-            prompt["functions"] = subscript(optional_params, "functions")
+            prompt["functions"] = optional_params["functions"]
         if optional_params.get("tools") is not None:
-            prompt["tools"] = subscript(optional_params, "tools")
+            prompt["tools"] = optional_params["tools"]
         return prompt
 
     @staticmethod

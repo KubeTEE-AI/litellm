@@ -1,7 +1,7 @@
 # stdlib imports
 import re
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal
@@ -59,10 +59,6 @@ def _get_model_info_obj_from_yaml(model: dict[str, Any]) -> ModelYamlInfo:
         access_groups=access_groups,
         provider=provider,
     )
-
-
-def _str_field(model: Mapping[str, object], key: str, default: str) -> str:
-    return str(model.get(key, default))
 
 
 def format_iso_datetime_str(iso_datetime_str: str | None) -> str:
@@ -146,10 +142,10 @@ def list_models(ctx: click.Context, output_format: Literal["table", "json"]) -> 
                 created = int(created)
 
             table.add_row(
-                _str_field(model, "id", ""),
-                _str_field(model, "object", "model"),
+                str(model.get("id", "")),
+                str(model.get("object", "model")),
                 (format_timestamp(created) if isinstance(created, int) else format_iso_datetime_str(created)),
-                _str_field(model, "owned_by", ""),
+                str(model.get("owned_by", "")),
             )
 
         rich.print(table)

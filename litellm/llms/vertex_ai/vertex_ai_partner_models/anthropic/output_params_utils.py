@@ -2,7 +2,7 @@
 Shared sanitization for ``output_config`` / ``output_format`` on Vertex AI
 Claude. Lives in its own module so both the chat-completion transformation
 (``transformation.py``) and the Messages pass-through transformation
-(``messages/transformation.py``) can import it without
+(``experimental_pass_through/transformation.py``) can import it without
 forming a cycle through the parent module's heavier imports.
 
 CodeQL flagged the ``..transformation`` import path as a potential cyclic
@@ -45,22 +45,11 @@ def _as_output_config(value: object) -> Mapping[str, object] | None:
 
 
 def _fold_output_format_into_output_config(
-    output_config: Mapping[str, object] | None, output_format: object, model: str
+    output_config: Mapping[str, object] | None, output_format: object
 ) -> Mapping[str, object] | None:
     if output_format is None:
         return output_config
-    output_format_object: Final = _as_output_config(output_format)
-    if output_format_object is not None:
-        return {**(output_config or {}), "format": output_format_object}
-    from litellm.exceptions import UnsupportedParamsError
-
-    raise UnsupportedParamsError(
-        message=(
-            f"{model} on vertex_ai needs `output_format` to be a JSON object, got {type(output_format).__name__}. "
-            "To drop it, set `litellm.drop_params=True` or for proxy:\n\n`litellm_settings:\n drop_params: true`\n"
-        ),
-        status_code=400,
-    )
+    return {**(output_config or {}), "format": output_format}
 
 
 def sanitize_vertex_anthropic_output_params(data: dict, model: str) -> None:
@@ -78,16 +67,13 @@ def sanitize_vertex_anthropic_output_params(data: dict, model: str) -> None:
         body has no empty dict.
       * ``output_format`` is moved into ``output_config.format``, because
         Vertex AI Claude rejects the top-level field as deprecated. When both
-        are set, a dict ``output_format`` wins, as it does in the Anthropic
-        adapter. A non-dict ``output_format`` raises a 400
-        ``UnsupportedParamsError``, since the parent config already dropped it
-        under ``drop_params``.
+        are set, ``output_format`` wins, as it does in the Anthropic adapter.
       * Non-dict values for ``output_config`` are dropped to avoid sending
         malformed payloads downstream.
     """
     request: Final[dict[str, object]] = data  # mutable-ok: the caller's request body is sanitized in place
     output_config: Final = _fold_output_format_into_output_config(
-        _as_output_config(request.get("output_config")), request.pop("output_format", None), model
+        _as_output_config(request.get("output_config")), request.pop("output_format", None)
     )
     if output_config is None:
         request.pop("output_config", None)

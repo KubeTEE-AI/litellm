@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use futures_util::TryStreamExt;
-use litellm_inference_responses::types::{ResponsesCall, ResponsesOutput};
+use litellm_inference_responses::{
+    Error,
+    types::{ResponsesCall, ResponsesOutput},
+};
 use litellm_inference_testing::{RecordingSecrets, no_secrets};
 use rstest::{fixture, rstest};
 use serde_json::json;
@@ -105,12 +108,13 @@ async fn a_missing_key_fails_before_transport(call: ResponsesCall) {
             None,
         )
         .await;
-    let Err(error) = result else {
-        panic!("the call fails");
-    };
-    assert!(error.is_missing_credential(), "{error:?}");
-    let report = litellm_error::Report::new(&error).to_string();
-    assert!(report.contains("OpenRouter"), "{report}");
+    assert!(matches!(
+        result,
+        Err(Error::Auth(litellm_auth::Error::MissingApiKey {
+            provider: "OpenRouter",
+            ..
+        }))
+    ));
     assert!(received(&upstream).await.is_empty());
 }
 

@@ -1,7 +1,6 @@
 import types
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Final, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import httpx
 
@@ -41,11 +40,11 @@ class BaseTextToSpeechConfig(ABC):
 
     @classmethod
     def get_config(cls):
-        class_attributes: Final[Mapping[str, object]] = types.MappingProxyType(cls.__dict__)
         return {
             k: v
-            for k, v in class_attributes.items()
-            if not k.startswith("_")
+            for k, v in cls.__dict__.items()
+            if not k.startswith("__")
+            and not k.startswith("_abc")
             and not isinstance(
                 v,
                 (
@@ -133,18 +132,6 @@ class BaseTextToSpeechConfig(ABC):
         """
         Transform provider response to standard format
         """
-
-    async def async_transform_text_to_speech_response(
-        self,
-        model: str,
-        raw_response: httpx.Response,
-        logging_obj: LiteLLMLoggingObj,
-    ) -> "HttpxBinaryResponseContent":
-        return self.transform_text_to_speech_response(
-            model=model,
-            raw_response=raw_response,
-            logging_obj=logging_obj,
-        )
 
     def get_error_class(self, error_message: str, status_code: int, headers: dict) -> BaseLLMException:
         from ..chat.transformation import BaseLLMException

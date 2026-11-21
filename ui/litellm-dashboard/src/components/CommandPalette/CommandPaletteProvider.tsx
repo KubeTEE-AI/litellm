@@ -1,8 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { useHotkeys } from "react-hotkeys-hook";
 import { useStoredValue } from "@/lib/storage";
 import { routeSegmentForPathname } from "@/utils/uiHref";
 import { CommandPalette } from "./CommandPalette";
@@ -16,9 +15,6 @@ interface CommandPaletteContextValue {
 }
 
 const CommandPaletteContext = createContext<CommandPaletteContextValue | null>(null);
-
-const isInsideDialog = (event: KeyboardEvent): boolean =>
-  event.target instanceof Element && event.target.closest("[role='dialog'], [role='alertdialog']") !== null;
 
 export function useCommandPalette(): CommandPaletteContextValue {
   const context = useContext(CommandPaletteContext);
@@ -47,13 +43,17 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({ open, setOpen, toggle }), [open, setOpen, toggle]);
   const shouldShowHint = !hintSeen && !hintDismissedInMemory && !open;
 
-  const hotkeyOptions = {
-    enableOnFormTags: true,
-    preventDefault: true,
-    useKey: true,
-    ignoreEventWhen: (event: KeyboardEvent) => !open && isInsideDialog(event),
-  };
-  useHotkeys("mod+k", toggle, hotkeyOptions);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        toggle();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [toggle]);
 
   return (
     <CommandPaletteContext.Provider value={value}>

@@ -110,7 +110,7 @@ async fn concurrent_misses_share_a_load_and_cancellation_allows_a_retry() {
 }
 
 #[tokio::test]
-async fn refresh_bypasses_cached_values() {
+async fn refresh_bypasses_cached_values_and_errors_and_absence_are_retried() {
     let cache = SecretCache::new(10, Duration::from_secs(60));
     cache.insert("key", "old").await;
     assert_eq!(
@@ -127,21 +127,9 @@ async fn refresh_bypasses_cached_values() {
             .unwrap(),
         Some("fresh")
     );
-}
-
-#[rstest]
-#[case::failure(Err("failure"))]
-#[case::absence(Ok(None))]
-#[tokio::test]
-async fn errors_and_absence_are_retried(#[case] first: Result<Option<&'static str>, &'static str>) {
-    let cache = SecretCache::new(10, Duration::from_secs(60));
-    assert_eq!(cache.read("retry", async { first }).await, first);
-    assert_eq!(
-        cache
-            .read("retry", async { Ok::<_, &str>(Some("recovered")) })
-            .await,
-        Ok(Some("recovered"))
-    );
+    for result in [Err("failure"), Ok(None), Ok(Some("recovered"))] {
+        assert_eq!(cache.read("retry", async { result }).await, result);
+    }
 }
 
 #[tokio::test]

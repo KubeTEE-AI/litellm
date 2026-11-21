@@ -160,10 +160,9 @@ async def create_gemini_agent(
         -H "Authorization: Bearer sk-..." \\
         -H "Content-Type: application/json" \\
         -d '{
-            "id": "my-custom-slides-agent",
-            "base_agent": "antigravity-preview-09-2026",
-            "system_instruction": "You are a helpful assistant that creates slides.",
-            "agent_config": {"type": "antigravity", "model": "gemini-3.8-flash"},
+            "name": "my-custom-slides-agent",
+            "base_agent": "waverunner",
+            "instructions": "You are a helpful assistant that creates slides.",
             "base_environment": {
                 "type": "remote",
                 "sources": [

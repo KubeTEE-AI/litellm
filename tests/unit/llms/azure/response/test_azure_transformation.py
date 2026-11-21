@@ -1,5 +1,4 @@
 import json
-from collections.abc import Callable
 from copy import deepcopy
 from typing import Final
 from unittest.mock import MagicMock, patch
@@ -7,18 +6,15 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 import respx
-from openai.types.responses import ResponseReasoningItem
-from pydantic import JsonValue, TypeAdapter
 
 import litellm
 from litellm.constants import AZURE_DEFAULT_RESPONSES_API_VERSION
 from litellm.litellm_core_utils.get_model_cost_map import get_model_cost_map
+from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from litellm.llms.azure.responses.o_series_transformation import (
     AzureOpenAIOSeriesResponsesAPIConfig,
 )
 from litellm.llms.azure.responses.transformation import AzureOpenAIResponsesAPIConfig
-from litellm.llms.azure_ai.responses.transformation import AzureAIAgentResponsesAPIConfig, AzureAIResponsesAPIConfig
-from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from litellm.llms.openai.responses.transformation import OpenAIResponsesAPIConfig
 from litellm.types.llms.openai import ResponsesAPIOptionalRequestParams
 from litellm.types.router import GenericLiteLLMParams
@@ -152,8 +148,6 @@ def test_explicit_v1_api_base_preserves_the_gateway_prefix_and_query(base_path: 
         ({"api_version": "latest"}, "latest"),
         ({"api_version": "preview"}, "preview"),
         ({"api_version": "2025-04-01-preview"}, "2025-04-01-preview"),
-        ({"api_version": "2024-10-21"}, AZURE_DEFAULT_RESPONSES_API_VERSION),
-        ({"api_version": "2024-10-21", "responses_api_version": "preview"}, "preview"),
     ],
 )
 def test_explicit_v1_api_base_keeps_responses_api_version_selection(
@@ -167,32 +161,114 @@ def test_explicit_v1_api_base_keeps_responses_api_version_selection(
     assert result == f"https://gateway.example.com/foundry/openai/openai/v1/responses?api-version={expected_version}"
 
 
-@pytest.mark.serial
+_FOUNDRY_PROJECT: Final = "https://x.services.ai.azure.com/api/projects/proj"
+
+
 @pytest.mark.parametrize(
-    ("api_base", "api_version", "expected_url"),
+    ("api_base", "litellm_params", "expected_url"),
     [
+        (f"{_FOUNDRY_PROJECT}/openai/v1", {}, f"{_FOUNDRY_PROJECT}/openai/v1/responses"),
+        (f"{_FOUNDRY_PROJECT}/openai/v1/", {"api_version": ""}, f"{_FOUNDRY_PROJECT}/openai/v1/responses"),
+        (f"{_FOUNDRY_PROJECT}/openai/v1", {"api_version": "v1"}, f"{_FOUNDRY_PROJECT}/openai/v1/responses"),
         (
-            "https://x.openai.azure.com",
-            "2025-04-01-preview",
-            "https://x.openai.azure.com/openai/v1/responses/compact",
+            f"{_FOUNDRY_PROJECT}/openai/v1/responses",
+            {"api_version": "2025-04-01-preview"},
+            f"{_FOUNDRY_PROJECT}/openai/v1/responses",
         ),
         (
-            "https://x.openai.azure.com",
-            "preview",
-            "https://x.openai.azure.com/openai/v1/responses/compact?api-version=preview",
+            f"{_FOUNDRY_PROJECT}/openai/v1",
+            {"api_version": "2024-10-21"},
+            f"{_FOUNDRY_PROJECT}/openai/v1/responses",
         ),
         (
-            "https://gw.example.com/foundry/openai/openai/v1?tenant=example",
-            "v1",
-            "https://gw.example.com/foundry/openai/openai/v1/responses/compact?tenant=example&api-version=v1",
+            f"{_FOUNDRY_PROJECT}/openai/v1?tenant=example&api-version=preview",
+            {},
+            f"{_FOUNDRY_PROJECT}/openai/v1/responses?tenant=example",
+        ),
+        (_FOUNDRY_PROJECT, {}, f"{_FOUNDRY_PROJECT}/openai/v1/responses"),
+        (
+            "https://gw.example.com/foundry/api/projects/proj/openai/v1",
+            {"api_version": "preview"},
+            "https://gw.example.com/foundry/api/projects/proj/openai/v1/responses",
+        ),
+        (
+            _FOUNDRY_PROJECT,
+            {"api_version": "2025-11-15-preview"},
+            f"{_FOUNDRY_PROJECT}/openai/responses?api-version=2025-11-15-preview",
+        ),
+        (
+            "https://x.services.ai.azure.com/openai/v1",
+            {},
+            f"https://x.services.ai.azure.com/openai/v1/responses?api-version={AZURE_DEFAULT_RESPONSES_API_VERSION}",
         ),
     ],
 )
-def test_compact_reaches_the_v1_route_and_drops_only_a_dated_api_version(
+def test_foundry_project_v1_responses_url_never_carries_an_api_version(
+    api_base: str, litellm_params: dict[str, str], expected_url: str
+) -> None:
+    config: Final = AzureOpenAIResponsesAPIConfig()
+    responses_url: Final = config.get_complete_url(api_base=api_base, litellm_params=litellm_params)
+    get_url, _ = config.transform_get_response_api_request(
+        response_id="resp_1", api_base=responses_url, litellm_params=GenericLiteLLMParams(), headers={}
+    )
+
+    assert responses_url == expected_url
+    assert httpx.URL(get_url).params == httpx.URL(expected_url).params
+
+
+@pytest.mark.parametrize(
+    ("api_base", "api_version", "expected_url"),
+    [
+        ("https://apim.example.com/my-foundry/openai/v1", "none", "https://apim.example.com/my-foundry/openai/v1/responses"),
+        ("https://apim.example.com/my-foundry", "None", "https://apim.example.com/my-foundry/openai/v1/responses"),
+        ("https://x.openai.azure.com/openai/responses", "none", "https://x.openai.azure.com/openai/v1/responses"),
+        ("https://x.openai.azure.com/openai", "none", "https://x.openai.azure.com/openai/v1/responses"),
+        (
+            "https://apim.example.com/my-foundry/openai/v1?tenant=example&api-version=preview",
+            "none",
+            "https://apim.example.com/my-foundry/openai/v1/responses?tenant=example",
+        ),
+    ],
+)
+def test_api_version_none_sends_responses_and_lifecycle_calls_with_no_api_version(
     api_base: str, api_version: str, expected_url: str
 ) -> None:
     config: Final = AzureOpenAIResponsesAPIConfig()
     responses_url: Final = config.get_complete_url(api_base=api_base, litellm_params={"api_version": api_version})
+    get_url, _ = config.transform_get_response_api_request(
+        response_id="resp_1", api_base=responses_url, litellm_params=GenericLiteLLMParams(), headers={}
+    )
+
+    assert responses_url == expected_url
+    assert "api-version" not in httpx.URL(get_url).params
+
+
+def test_gateway_v1_base_without_the_opt_out_keeps_its_api_version() -> None:
+    responses_url: Final = AzureOpenAIResponsesAPIConfig().get_complete_url(
+        api_base="https://apim.example.com/my-foundry/openai/v1", litellm_params={"api_version": "preview"}
+    )
+
+    assert httpx.URL(responses_url).params.get("api-version") == "preview"
+
+
+@pytest.mark.parametrize(
+    ("api_base", "expected_url"),
+    [
+        (f"{_FOUNDRY_PROJECT}/openai/v1", "wss://x.services.ai.azure.com/api/projects/proj/openai/v1/responses"),
+        (f"{_FOUNDRY_PROJECT}/openai/v1/", "wss://x.services.ai.azure.com/api/projects/proj/openai/v1/responses"),
+        ("https://x.services.ai.azure.com/openai/v1", "wss://x.services.ai.azure.com/openai/v1/responses"),
+    ],
+)
+def test_websocket_url_on_an_openai_v1_base_dials_v1_responses_once(api_base: str, expected_url: str) -> None:
+    assert AzureOpenAIResponsesAPIConfig().get_websocket_url(api_base=api_base, litellm_params={}) == expected_url
+
+
+@pytest.mark.serial
+def test_compact_on_a_foundry_project_v1_base_sends_no_api_version() -> None:
+    config: Final = AzureOpenAIResponsesAPIConfig()
+    responses_url: Final = config.get_complete_url(
+        api_base=f"{_FOUNDRY_PROJECT}/openai/v1", litellm_params={"api_version": "preview"}
+    )
 
     url, _ = config.transform_compact_response_api_request(
         model="gpt-5.4-mini",
@@ -203,9 +279,10 @@ def test_compact_reaches_the_v1_route_and_drops_only_a_dated_api_version(
         headers={},
     )
 
-    assert url == expected_url
+    assert url == f"{_FOUNDRY_PROJECT}/openai/v1/responses/compact"
 
 
+@pytest.mark.serial
 def test_response_id_path_requests_encode_response_id():
     config = AzureOpenAIResponsesAPIConfig()
     api_base = (
@@ -391,24 +468,15 @@ class TestAzureResponsesAPIConfig:
             == "https://litellm8397336933.openai.azure.com/openai/v1/responses?api-version=latest"
         )
 
-        result_dated_preview = self.config.get_complete_url(
+        # Test with date-based version - should use openai/responses
+        result_date = self.config.get_complete_url(
             api_base=base_url,
-            litellm_params={"api_version": "2025-04-01-preview"},
+            litellm_params={"api_version": "2025-01-01"},
         )
         assert (
-            result_dated_preview
-            == "https://litellm8397336933.openai.azure.com/openai/responses?api-version=2025-04-01-preview"
+            result_date
+            == "https://litellm8397336933.openai.azure.com/openai/responses?api-version=2025-01-01"
         )
-
-    @pytest.mark.parametrize("api_version", ["2024-10-21", "2024-06-01", "2025-01-01"])
-    def test_dated_ga_api_version_routes_responses_like_an_unset_one(self, api_version: str):
-        base_url: Final = "https://litellm8397336933.openai.azure.com"
-
-        dated: Final = self.config.get_complete_url(api_base=base_url, litellm_params={"api_version": api_version})
-        unset: Final = self.config.get_complete_url(api_base=base_url, litellm_params={})
-
-        assert dated == unset
-        assert httpx.URL(dated).params["api-version"] == AZURE_DEFAULT_RESPONSES_API_VERSION
 
     def test_azure_get_complete_url_with_default_api_version(self):
         """Test Azure get_complete_url uses default API version when none is provided"""
@@ -437,64 +505,6 @@ class TestAzureResponsesAPIConfig:
             litellm_params={"api_version": None},
         )
         assert result_none_version == expected_url
-
-    @pytest.mark.parametrize(
-        ("api_version", "responses_api_version", "expected_path"),
-        [
-            ("2024-10-21", "2025-04-01-preview", "/openai/responses?api-version=2025-04-01-preview"),
-            ("2025-04-01-preview", "v1", "/openai/v1/responses?api-version=v1"),
-            (None, "2025-04-01-preview", "/openai/responses?api-version=2025-04-01-preview"),
-        ],
-    )
-    def test_responses_api_version_wins_over_api_version(
-        self, api_version: str | None, responses_api_version: str, expected_path: str
-    ):
-        base_url: Final = "https://litellm8397336933.openai.azure.com"
-
-        url: Final = self.config.get_complete_url(
-            api_base=base_url,
-            litellm_params={"api_version": api_version, "responses_api_version": responses_api_version},
-        )
-
-        assert url == f"{base_url}{expected_path}"
-
-    @pytest.mark.parametrize("responses_api_version", [None, "v1"])
-    def test_api_version_in_api_base_query_wins_over_a_dated_ga_api_version(self, responses_api_version: str | None):
-        api_base: Final = "https://litellm8397336933.openai.azure.com/openai/responses?api-version=2025-04-01-preview"
-
-        url: Final = self.config.get_complete_url(
-            api_base=api_base,
-            litellm_params={"api_version": "2024-10-21", "responses_api_version": responses_api_version},
-        )
-
-        assert url == api_base
-
-    def test_api_version_in_env_api_base_query_wins_over_a_dated_ga_api_version(self, monkeypatch: pytest.MonkeyPatch):
-        env_api_base: Final = (
-            "https://litellm8397336933.openai.azure.com/openai/responses?api-version=2025-04-01-preview"
-        )
-        monkeypatch.setattr(litellm, "api_base", None)
-        monkeypatch.setenv("AZURE_API_BASE", env_api_base)
-
-        url: Final = self.config.get_complete_url(api_base=None, litellm_params={"api_version": "2024-10-21"})
-
-        assert url == env_api_base
-
-    @pytest.mark.parametrize(
-        ("api_base", "expected_path"),
-        [
-            ("https://apim.example.com/openai-gw/team", "/openai-gw/team/openai/v1/responses"),
-            ("https://apim.example.com/openai/team-a", "/openai/team-a/openai/v1/responses"),
-        ],
-    )
-    @pytest.mark.parametrize("litellm_params", [{"api_version": "2024-10-21"}, {"responses_api_version": "v1"}])
-    def test_v1_route_only_rewrites_the_responses_route_segment_of_a_gateway_api_base(
-        self, api_base: str, expected_path: str, litellm_params: dict[str, str]
-    ):
-        url: Final = httpx.URL(self.config.get_complete_url(api_base=api_base, litellm_params=litellm_params))
-
-        assert url.host == "apim.example.com"
-        assert url.path == expected_path
 
     def test_azure_cancel_response_api_request(self):
         """Test Azure cancel response API request transformation"""
@@ -975,320 +985,6 @@ def test_azure_responses_prefixed_name_reads_the_foundry_row_not_the_azure_twin(
     assert bare["reasoning"] == {"effort": "low"}
 
 
-_COMPLETED_RESPONSE: Final = {
-    "id": "resp_dated_chat_deployment",
-    "object": "response",
-    "created_at": 1734366691,
-    "status": "completed",
-    "model": "gpt-5.4-nano",
-    "output": [
-        {
-            "type": "message",
-            "id": "msg_1",
-            "status": "completed",
-            "role": "assistant",
-            "content": [{"type": "output_text", "text": "Done.", "annotations": []}],
-        }
-    ],
-    "parallel_tool_calls": True,
-    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
-    "error": None,
-    "incomplete_details": None,
-    "instructions": None,
-    "metadata": None,
-    "temperature": None,
-    "tool_choice": "auto",
-    "tools": [],
-    "top_p": None,
-    "max_output_tokens": None,
-    "previous_response_id": None,
-    "reasoning": None,
-    "truncation": None,
-    "user": None,
-}
-
-
-_AZURE_RESOURCE: Final = "https://example-resource.openai.azure.com"
-
-
-def _unset_api_version_responses_url() -> httpx.URL:
-    return httpx.URL(AzureOpenAIResponsesAPIConfig().get_complete_url(api_base=_AZURE_RESOURCE, litellm_params={}))
-
-
-def _azure_responses_create(api_version: str) -> str | None:
-    response: Final = litellm.responses(
-        model="azure/gpt-5.4-nano",
-        input="hi",
-        api_base=_AZURE_RESOURCE,
-        api_key="azure-test-key",
-        api_version=api_version,
-    )
-    return response.output[0].content[0].text
-
-
-def _azure_chat_bridged_to_responses(api_version: str) -> str | None:
-    response: Final = litellm.completion(
-        model="azure/responses/gpt-5.4-nano",
-        messages=[{"role": "user", "content": "hi"}],
-        api_base=_AZURE_RESOURCE,
-        api_key="azure-test-key",
-        api_version=api_version,
-    )
-    return response.choices[0].message.content
-
-
-@pytest.mark.parametrize("call_responses", [_azure_responses_create, _azure_chat_bridged_to_responses])
-def test_dated_ga_api_version_sends_responses_to_the_unset_api_version_url(
-    respx_mock: respx.MockRouter, call_responses: Callable[[str], str | None]
-) -> None:
-    route: Final = respx_mock.post(host="example-resource.openai.azure.com").mock(
-        return_value=httpx.Response(200, json=_COMPLETED_RESPONSE)
-    )
-
-    text: Final = call_responses("2024-10-21")
-
-    assert text == "Done."
-    assert route.call_count == 1
-    assert route.calls[0].request.url == _unset_api_version_responses_url()
-
-
-_COMPLETED_RESPONSE_SSE: Final = "".join(
-    f"data: {json.dumps(event)}\n\n"
-    for event in (
-        {
-            "type": "response.output_text.delta",
-            "sequence_number": 0,
-            "item_id": "msg_1",
-            "output_index": 0,
-            "content_index": 0,
-            "delta": "Done.",
-        },
-        {"type": "response.completed", "sequence_number": 1, "response": _COMPLETED_RESPONSE},
-    )
-)
-
-
-@pytest.fixture
-def gateway_responses(respx_mock: respx.MockRouter, stream: bool) -> respx.Route:
-    body: Final = _COMPLETED_RESPONSE_SSE if stream else json.dumps(_COMPLETED_RESPONSE)
-    content_type: Final = "text/event-stream" if stream else "application/json"
-    return respx_mock.post(
-        "https://gateway.example.com/foundry/openai/openai/v1/responses?api-version=v1"
-    ).mock(return_value=httpx.Response(200, text=body, headers={"content-type": content_type}))
-
-
-@pytest.mark.parametrize("stream", [False, True])
-def test_explicit_v1_base_sends_responses_to_the_gateway(gateway_responses: respx.Route, stream: bool) -> None:
-    response: Final = litellm.responses(
-        model="azure/gpt-6.1-sol",
-        input="hi",
-        api_base="https://gateway.example.com/foundry/openai/openai/v1",
-        api_key="azure-test-key",
-        api_version="v1",
-        stream=stream,
-    )
-    text: Final = (
-        "".join(event.delta for event in response if event.type == "response.output_text.delta")
-        if stream
-        else response.output[0].content[0].text
-    )
-
-    assert text == "Done."
-    assert gateway_responses.call_count == 1
-
-
-@pytest.mark.parametrize("stream", [False, True])
-def test_explicit_v1_base_sends_bridged_chat_to_the_gateway(gateway_responses: respx.Route, stream: bool) -> None:
-    response: Final = litellm.completion(
-        model="azure/responses/gpt-6.1-sol",
-        messages=[{"role": "user", "content": "hi"}],
-        api_base="https://gateway.example.com/foundry/openai/openai/v1",
-        api_key="azure-test-key",
-        api_version="v1",
-        stream=stream,
-    )
-    text: Final = (
-        "".join(chunk.choices[0].delta.content or "" for chunk in response)
-        if stream
-        else response.choices[0].message.content
-    )
-
-    assert text == "Done."
-    assert gateway_responses.call_count == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.usefixtures(httpx_transport.__name__)
-@pytest.mark.parametrize("stream", [False, True])
-async def test_explicit_v1_base_sends_async_responses_to_the_gateway(
-    gateway_responses: respx.Route, stream: bool
-) -> None:
-    response: Final = await litellm.aresponses(
-        model="azure/gpt-6.1-sol",
-        input="hi",
-        api_base="https://gateway.example.com/foundry/openai/openai/v1",
-        api_key="azure-test-key",
-        api_version="v1",
-        stream=stream,
-    )
-    text: Final = (
-        "".join([event.delta async for event in response if event.type == "response.output_text.delta"])
-        if stream
-        else response.output[0].content[0].text
-    )
-
-    assert text == "Done."
-    assert gateway_responses.call_count == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.usefixtures(httpx_transport.__name__)
-@pytest.mark.parametrize("stream", [False, True])
-async def test_explicit_v1_base_sends_async_bridged_chat_to_the_gateway(
-    gateway_responses: respx.Route, stream: bool
-) -> None:
-    response: Final = await litellm.acompletion(
-        model="azure/responses/gpt-6.1-sol",
-        messages=[{"role": "user", "content": "hi"}],
-        api_base="https://gateway.example.com/foundry/openai/openai/v1",
-        api_key="azure-test-key",
-        api_version="v1",
-        stream=stream,
-    )
-    text: Final = (
-        "".join([chunk.choices[0].delta.content or "" async for chunk in response])
-        if stream
-        else response.choices[0].message.content
-    )
-
-    assert text == "Done."
-    assert gateway_responses.call_count == 1
-
-
-_LIFECYCLE_BODIES: Final = {
-    "get": _COMPLETED_RESPONSE,
-    "delete": {"id": "resp_dated", "object": "response", "deleted": True},
-    "cancel": {**_COMPLETED_RESPONSE, "status": "cancelled"},
-    "input_items": {"object": "list", "data": [], "first_id": None, "last_id": None, "has_more": False},
-}
-
-
-def _call_lifecycle(operation: str) -> object:
-    kwargs: Final = {
-        "response_id": "resp_dated",
-        "custom_llm_provider": "azure",
-        "api_base": _AZURE_RESOURCE,
-        "api_key": "azure-test-key",
-        "api_version": "2024-10-21",
-    }
-    match operation:
-        case "get":
-            return litellm.get_responses(**kwargs)
-        case "delete":
-            return litellm.delete_responses(**kwargs)
-        case "cancel":
-            return litellm.cancel_responses(**kwargs)
-        case _:
-            return litellm.list_input_items(**kwargs)
-
-
-@pytest.mark.parametrize(
-    ("operation", "path_suffix"),
-    [("get", ""), ("delete", ""), ("cancel", "/cancel"), ("input_items", "/input_items")],
-)
-def test_dated_ga_api_version_sends_response_lifecycle_calls_to_the_unset_api_version_route(
-    respx_mock: respx.MockRouter, operation: str, path_suffix: str
-) -> None:
-    route: Final = respx_mock.route(host="example-resource.openai.azure.com").mock(
-        return_value=httpx.Response(200, json=_LIFECYCLE_BODIES[operation])
-    )
-
-    _call_lifecycle(operation)
-
-    unset_url: Final = _unset_api_version_responses_url()
-    sent_url: Final = route.calls[0].request.url
-    assert route.call_count == 1
-    assert sent_url.path == f"{unset_url.path}/resp_dated{path_suffix}"
-    assert sent_url.params["api-version"] == unset_url.params["api-version"]
-
-
-def test_chat_completion_keeps_the_dated_ga_api_version(respx_mock: respx.MockRouter) -> None:
-    route: Final = respx_mock.post(
-        f"{_AZURE_RESOURCE}/openai/deployments/gpt-5.4-nano/chat/completions", params={"api-version": "2024-10-21"}
-    ).mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "id": "chatcmpl-dated",
-                "object": "chat.completion",
-                "created": 1734366691,
-                "model": "gpt-5.4-nano",
-                "choices": [{"index": 0, "message": {"role": "assistant", "content": "Done."}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 9, "completion_tokens": 1, "total_tokens": 10},
-            },
-        )
-    )
-
-    response: Final = litellm.completion(
-        model="azure/gpt-5.4-nano",
-        messages=[{"role": "user", "content": "hi"}],
-        api_base=_AZURE_RESOURCE,
-        api_key="azure-test-key",
-        api_version="2024-10-21",
-    )
-
-    assert response.choices[0].message.content == "Done."
-    assert route.call_count == 1
-
-
-@pytest.mark.respx(assert_all_called=True)
-def test_responses_api_version_routes_a_dated_chat_deployment_to_its_own_responses_version(
-    respx_mock: respx.MockRouter,
-) -> None:
-    route: Final = respx_mock.post(
-        "https://example-resource.openai.azure.com/openai/responses", params={"api-version": "2025-04-01-preview"}
-    ).mock(return_value=httpx.Response(200, json=_COMPLETED_RESPONSE))
-
-    response: Final = litellm.responses(
-        model="azure/gpt-5.4-nano",
-        input="hi",
-        api_base="https://example-resource.openai.azure.com",
-        api_key="azure-test-key",
-        api_version="2024-10-21",
-        responses_api_version="2025-04-01-preview",
-    )
-    request_body: Final = json.loads(route.calls[0].request.content)
-
-    assert route.call_count == 1
-    assert response.output[0].content[0].text == "Done."
-    assert request_body["model"] == "gpt-5.4-nano"
-    assert "responses_api_version" not in request_body
-    assert "api_version" not in request_body
-
-
-@pytest.mark.respx(assert_all_called=True)
-def test_responses_api_version_reaches_the_url_when_chat_completion_bridges_to_responses(
-    respx_mock: respx.MockRouter,
-) -> None:
-    route: Final = respx_mock.post(
-        "https://example-resource.openai.azure.com/openai/v1/responses", params={"api-version": "v1"}
-    ).mock(return_value=httpx.Response(200, json=_COMPLETED_RESPONSE))
-
-    response: Final = litellm.completion(
-        model="azure/responses/gpt-5.4-nano",
-        messages=[{"role": "user", "content": "hi"}],
-        api_base="https://example-resource.openai.azure.com",
-        api_key="azure-test-key",
-        api_version="2024-10-21",
-        responses_api_version="v1",
-    )
-    request_body: Final = json.loads(route.calls[0].request.content)
-
-    assert route.call_count == 1
-    assert response.choices[0].message.content == "Done."
-    assert "responses_api_version" not in request_body
-
-
 def test_azure_responses_sends_the_deployment_name_when_azure_ai_prefix_survives_provider_remap():
     request = AzureOpenAIResponsesAPIConfig().transform_responses_api_request(
         model="azure_ai/gpt-5.4-nano",
@@ -1552,265 +1248,147 @@ def test_openai_gpt5_resolves_to_responses_config_with_temperature() -> None:
     assert "temperature" in config.get_supported_openai_params("gpt-5")
 
 
-@pytest.mark.parametrize(
-    ("config", "model"),
-    [
-        (AzureOpenAIResponsesAPIConfig(), "gpt-6.1-sol"),
-        (AzureOpenAIOSeriesResponsesAPIConfig(), "gpt-6.1-sol"),
-        (AzureAIResponsesAPIConfig(), "gpt-6.1-sol"),
-        (AzureAIAgentResponsesAPIConfig(), "agents/replay-test"),
+_COMPLETED_RESPONSE: Final = {
+    "id": "resp_dated_chat_deployment",
+    "object": "response",
+    "created_at": 1734366691,
+    "status": "completed",
+    "model": "gpt-5.4-nano",
+    "output": [
+        {
+            "type": "message",
+            "id": "msg_1",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Done.", "annotations": []}],
+        }
     ],
-    ids=["azure", "o_series", "azure_ai", "azure_ai_agent"],
+    "parallel_tool_calls": True,
+    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    "error": None,
+    "incomplete_details": None,
+    "instructions": None,
+    "metadata": None,
+    "temperature": None,
+    "tool_choice": "auto",
+    "tools": [],
+    "top_p": None,
+    "max_output_tokens": None,
+    "previous_response_id": None,
+    "reasoning": None,
+    "truncation": None,
+    "user": None,
+}
+
+
+_COMPLETED_RESPONSE_SSE: Final = "".join(
+    f"data: {json.dumps(event)}\n\n"
+    for event in (
+        {
+            "type": "response.output_text.delta",
+            "sequence_number": 0,
+            "item_id": "msg_1",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": "Done.",
+        },
+        {"type": "response.completed", "sequence_number": 1, "response": _COMPLETED_RESPONSE},
+    )
 )
-@pytest.mark.parametrize("as_model", [False, True], ids=["dict", "pydantic"])
-@pytest.mark.parametrize("drop_params", [True, False], ids=["drop-params", "no-drop-params"])
-def test_azure_reasoning_replay_removes_output_content_only_under_drop_params_without_changing_history(
-    config: AzureOpenAIResponsesAPIConfig, model: str, as_model: bool, drop_params: bool
-) -> None:
-    replayable_reasoning: Final = {
-        "id": "rs_saved_reasoning",
-        "type": "reasoning",
-        "summary": [{"type": "summary_text", "text": "Check the file before changing it."}],
-        "encrypted_content": "opaque-saved-reasoning",
-    }
-    saved_reasoning: Final = {
-        **replayable_reasoning,
-        "content": [{"type": "reasoning_text", "text": "I should inspect the file first."}],
-    }
-    tool_call: Final = {
-        "type": "function_call",
-        "id": "fc_read",
-        "call_id": "call_read",
-        "name": "read_file",
-        "arguments": '{"path":"main.py"}',
-    }
-    tool_result: Final = {"type": "function_call_output", "call_id": "call_read", "output": "print(1)"}
-    answer: Final = {
-        "type": "message",
-        "role": "assistant",
-        "content": [{"type": "output_text", "text": "The file prints 1.", "annotations": []}],
-    }
-    prompt: Final = {"role": "user", "content": "Continue."}
-    history: Final = [
-        ResponseReasoningItem.model_validate(saved_reasoning) if as_model else saved_reasoning,
-        tool_call,
-        tool_result,
-        answer,
-        prompt,
-    ]
-    original: Final = deepcopy(history)
 
-    request: Final = config.transform_responses_api_request(
-        model=model,
-        input=history,
-        response_api_optional_request_params={},
-        litellm_params=GenericLiteLLMParams(drop_params=drop_params),
-        headers={},
+
+@pytest.fixture
+def gateway_responses(respx_mock: respx.MockRouter, stream: bool) -> respx.Route:
+    body: Final = _COMPLETED_RESPONSE_SSE if stream else json.dumps(_COMPLETED_RESPONSE)
+    content_type: Final = "text/event-stream" if stream else "application/json"
+    return respx_mock.post(
+        "https://gateway.example.com/foundry/openai/openai/v1/responses?api-version=v1"
+    ).mock(return_value=httpx.Response(200, text=body, headers={"content-type": content_type}))
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_explicit_v1_base_sends_responses_to_the_gateway(gateway_responses: respx.Route, stream: bool) -> None:
+    response: Final = litellm.responses(
+        model="azure/gpt-6.1-sol",
+        input="hi",
+        api_base="https://gateway.example.com/foundry/openai/openai/v1",
+        api_key="azure-test-key",
+        api_version="v1",
+        stream=stream,
+    )
+    text: Final = (
+        "".join(event.delta for event in response if event.type == "response.output_text.delta")
+        if stream
+        else response.output[0].content[0].text
     )
 
-    sent_reasoning: Final = replayable_reasoning if drop_params else saved_reasoning
-    assert request["input"] == [sent_reasoning, tool_call, tool_result, answer, prompt]
-    assert history == original
+    assert text == "Done."
+    assert gateway_responses.call_count == 1
 
 
-@pytest.mark.parametrize("as_model", [False, True], ids=["dict", "pydantic"])
-def test_openai_replay_without_drop_params_keeps_reasoning_content_and_message_status(as_model: bool) -> None:
-    saved_reasoning: Final = {
-        "id": "rs_saved_reasoning",
-        "type": "reasoning",
-        "summary": [],
-        "content": [{"type": "reasoning_text", "text": "Inspect the file."}],
-        "encrypted_content": "opaque-saved-reasoning",
-    }
-    saved_message: Final = {
-        "type": "message",
-        "role": "assistant",
-        "status": "completed",
-        "content": [{"type": "output_text", "text": "The file is ready.", "annotations": []}],
-    }
-    history: Final = [
-        ResponseReasoningItem.model_validate(saved_reasoning) if as_model else saved_reasoning,
-        saved_message,
-    ]
-    original: Final = deepcopy(history)
-
-    request: Final = OpenAIResponsesAPIConfig().transform_responses_api_request(
-        model="gpt-6.1-sol",
-        input=history,
-        response_api_optional_request_params={},
-        litellm_params=GenericLiteLLMParams(),
-        headers={},
+@pytest.mark.parametrize("stream", [False, True])
+def test_explicit_v1_base_sends_bridged_chat_to_the_gateway(gateway_responses: respx.Route, stream: bool) -> None:
+    response: Final = litellm.completion(
+        model="azure/responses/gpt-6.1-sol",
+        messages=[{"role": "user", "content": "hi"}],
+        api_base="https://gateway.example.com/foundry/openai/openai/v1",
+        api_key="azure-test-key",
+        api_version="v1",
+        stream=stream,
+    )
+    text: Final = (
+        "".join(chunk.choices[0].delta.content or "" for chunk in response)
+        if stream
+        else response.choices[0].message.content
     )
 
-    assert request["input"] == [saved_reasoning, saved_message]
-    assert history == original
-
-
-@pytest.mark.parametrize(
-    "config",
-    [AzureOpenAIResponsesAPIConfig(), AzureOpenAIOSeriesResponsesAPIConfig(), AzureAIResponsesAPIConfig()],
-    ids=["azure", "o_series", "azure_ai"],
-)
-def test_azure_family_forwards_input_items_that_are_not_objects_for_the_provider_to_judge(
-    config: AzureOpenAIResponsesAPIConfig,
-) -> None:
-    saved_reasoning: Final = {"type": "reasoning", "summary": [], "status": "completed", "encrypted_content": "opaque"}
-
-    request: Final = config.transform_responses_api_request(
-        model="gpt-6.1-sol",
-        input=["Continue.", saved_reasoning, ["nested"]],
-        response_api_optional_request_params={},
-        litellm_params=GenericLiteLLMParams(),
-        headers={},
-    )
-
-    assert request["input"] == [
-        "Continue.",
-        {"type": "reasoning", "summary": [], "encrypted_content": "opaque"},
-        ["nested"],
-    ]
+    assert text == "Done."
+    assert gateway_responses.call_count == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures(httpx_transport.__name__)
-@pytest.mark.parametrize("async_call", [False, True], ids=["sync", "async"])
 @pytest.mark.parametrize("stream", [False, True])
-@pytest.mark.parametrize(("reasoning_index", "include_id"), [(51, True), (10, False)], ids=["with-id", "without-id"])
-async def test_azure_responses_replays_reasoning_history_without_fields_azure_rejects(
-    respx_mock: respx.MockRouter, stream: bool, async_call: bool, reasoning_index: int, include_id: bool
+async def test_explicit_v1_base_sends_async_responses_to_the_gateway(
+    gateway_responses: respx.Route, stream: bool
 ) -> None:
-    prefix: Final = [{"role": "user", "content": f"Earlier context {index}."} for index in range(reasoning_index)]
-    replayable_reasoning: Final = {
-        "type": "reasoning",
-        "summary": [],
-        "encrypted_content": "opaque-saved-reasoning",
-        **({"id": "rs_saved_reasoning"} if include_id else {}),
-    }
-    saved_reasoning: Final = {
-        **replayable_reasoning,
-        "status": "completed",
-        "content": [{"type": "reasoning_text", "text": "Inspect the file before editing."}],
-    }
-    answer: Final = {
-        "type": "message",
-        "role": "assistant",
-        "content": [{"type": "output_text", "text": "Ready to continue.", "annotations": []}],
-    }
-    prompt: Final = {"role": "user", "content": "Continue."}
-    replayable_followup: Final = {
-        "type": "reasoning",
-        "summary": [],
-        "encrypted_content": "opaque-followup-reasoning",
-        **({"id": "rs_followup_reasoning"} if include_id else {}),
-    }
-    saved_followup: Final = {
-        **replayable_followup,
-        "status": "completed",
-        "content": [{"type": "reasoning_text", "text": "Check the next file."}],
-    }
-    history: Final = [*prefix, saved_reasoning, answer, saved_followup, prompt]
-    original: Final = deepcopy(history)
-
-    def respond(request: httpx.Request) -> httpx.Response:
-        body: Final = TypeAdapter(dict[str, JsonValue]).validate_json(request.content)
-        items: Final = body["input"]
-        assert isinstance(items, list)
-        reasoning: Final = items[reasoning_index]
-        assert isinstance(reasoning, dict)
-        if "status" in reasoning:
-            return httpx.Response(
-                400,
-                json={
-                    "error": {
-                        "message": f"Unknown parameter: 'input[{reasoning_index}].status'.",
-                        "type": "invalid_request_error",
-                        "param": f"input[{reasoning_index}].status",
-                        "code": "unknown_parameter",
-                    }
-                },
-            )
-        if reasoning.get("content"):
-            return httpx.Response(
-                400,
-                json={
-                    "error": {
-                        "message": f"Invalid 'input[{reasoning_index}].content': array too long. "
-                        "Expected an array with maximum length 0, "
-                        "but got an array with length 1 instead.",
-                        "type": "invalid_request_error",
-                        "param": f"input[{reasoning_index}].content",
-                        "code": "array_above_max_length",
-                    }
-                },
-            )
-        return httpx.Response(
-            200,
-            text=_COMPLETED_RESPONSE_SSE if stream else json.dumps(_COMPLETED_RESPONSE),
-            headers={"content-type": "text/event-stream" if stream else "application/json"},
-        )
-
-    route: Final = respx_mock.post(host="example-resource.openai.azure.com").mock(side_effect=respond)
-    request_params: Final = {
-        "model": "azure/gpt-6.1-sol",
-        "input": history,
-        "api_base": _AZURE_RESOURCE,
-        "api_key": "azure-test-key",
-        "stream": stream,
-        "store": False,
-        "include": ["reasoning.encrypted_content"],
-        "drop_params": True,
-    }
-    response: Final = await litellm.aresponses(**request_params) if async_call else litellm.responses(**request_params)
-    deltas: Final = (
-        (
-            [event.delta async for event in response if event.type == "response.output_text.delta"]
-            if async_call
-            else [event.delta for event in response if event.type == "response.output_text.delta"]
-        )
-        if stream
-        else []
+    response: Final = await litellm.aresponses(
+        model="azure/gpt-6.1-sol",
+        input="hi",
+        api_base="https://gateway.example.com/foundry/openai/openai/v1",
+        api_key="azure-test-key",
+        api_version="v1",
+        stream=stream,
     )
-    text: Final = "".join(deltas) if stream else response.output[0].content[0].text
+    text: Final = (
+        "".join([event.delta async for event in response if event.type == "response.output_text.delta"])
+        if stream
+        else response.output[0].content[0].text
+    )
 
     assert text == "Done."
-    assert route.call_count == 1
-    assert TypeAdapter(dict[str, JsonValue]).validate_json(route.calls[0].request.content)["input"] == [
-        *prefix,
-        replayable_reasoning,
-        answer,
-        replayable_followup,
-        prompt,
-    ]
-    assert history == original
+    assert gateway_responses.call_count == 1
 
 
-@pytest.mark.parametrize(
-    ("as_model", "include_id"),
-    [(False, True), (False, False), (True, True)],
-    ids=["dictionary-with-id", "dictionary-without-id", "pydantic"],
-)
-@pytest.mark.parametrize("drop_params", [True, False], ids=["drop-params", "no-drop-params"])
-def test_azure_reasoning_replay_drops_status_always_and_content_under_drop_params(
-    as_model: bool, include_id: bool, drop_params: bool
+@pytest.mark.asyncio
+@pytest.mark.usefixtures(httpx_transport.__name__)
+@pytest.mark.parametrize("stream", [False, True])
+async def test_explicit_v1_base_sends_async_bridged_chat_to_the_gateway(
+    gateway_responses: respx.Route, stream: bool
 ) -> None:
-    replayable: Final = {
-        "type": "reasoning",
-        "summary": [],
-        "encrypted_content": "opaque-saved-reasoning",
-        **({"id": "rs_saved_reasoning"} if include_id else {}),
-    }
-    saved_content: Final = [{"type": "reasoning_text", "text": "Inspect the file first."}]
-    saved_reasoning: Final = {**replayable, "status": "completed", "content": saved_content}
-    history: Final = [ResponseReasoningItem.model_validate(saved_reasoning) if as_model else saved_reasoning]
-    original: Final = deepcopy(history)
-
-    request: Final = AzureOpenAIResponsesAPIConfig().transform_responses_api_request(
-        model="gpt-6.1-sol",
-        input=history,
-        response_api_optional_request_params={},
-        litellm_params=GenericLiteLLMParams(drop_params=drop_params),
-        headers={},
+    response: Final = await litellm.acompletion(
+        model="azure/responses/gpt-6.1-sol",
+        messages=[{"role": "user", "content": "hi"}],
+        api_base="https://gateway.example.com/foundry/openai/openai/v1",
+        api_key="azure-test-key",
+        api_version="v1",
+        stream=stream,
+    )
+    text: Final = (
+        "".join([chunk.choices[0].delta.content or "" async for chunk in response])
+        if stream
+        else response.choices[0].message.content
     )
 
-    assert request["input"] == [replayable if drop_params else {**replayable, "content": saved_content}]
-    assert history == original
+    assert text == "Done."
+    assert gateway_responses.call_count == 1

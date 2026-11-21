@@ -43,8 +43,6 @@ from tests.integration.cost_calculation.cost_tracking_case import (
     SseResponse,
 )
 
-pytestmark: Final = pytest.mark.shares_worker_state
-
 _Route = tuple[str, str, tuple[str, ...], dict[str, JsonValue], str]
 _EVAL_DATA_SOURCE_CONFIG: Final[dict[str, JsonValue]] = {
     "type": "custom",
@@ -254,13 +252,8 @@ _ROUTES: Final[dict[str, _Route]] = {
     "acreate_agent": (
         "/v1beta/agents",
         "/v1beta/agents",
-        ("id",),
-        {
-            "id": "agent",
-            "base_agent": "antigravity-preview-09-2026",
-            "system_instruction": "You are a helpful assistant.",
-            "agent_config": {"type": "antigravity", "model": "gemini-3.8-flash"},
-        },
+        ("name",),
+        {"name": "agent", "base_agent": "waverunner", "instructions": "You are a helpful assistant."},
         "gemini/gemini-2.5-flash",
     ),
     "acreate_interaction": (
@@ -646,7 +639,7 @@ class _Observations:
             )
         requests: Final = payload.get("requests")
         assert isinstance(requests, list)
-        self.items = tuple(object_value(item) for item in requests if isinstance(item, dict))
+        self.items = (*self.items, *(object_value(item) for item in requests if isinstance(item, dict)))
         return self.items
 
     def for_scenario(self, identity: str) -> tuple[dict[str, JsonValue], ...]:
@@ -1199,7 +1192,7 @@ def test_anthropic_messages_explicit_null_reaches_upstream(gateway: Gateway) -> 
             "anthropic_messages",
             deployment_params={"max_tokens": 32},
             provider_model="openai/gpt-4o-mini",
-            response_route="aresponses",
+            response_route="acompletion",
         )
         response: Final = _post(
             gateway,
@@ -1255,7 +1248,11 @@ def test_valid_agent_creation_reaches_upstream(gateway: Gateway) -> None:
         _assert_scripted_response("acreate_agent", caller)
         matches: Final = _observed(_Observations(gateway.upstream_url), identity)
         outbound: Final = object_value(matches[0]["body"])
-        assert outbound == body, matches
+        assert outbound == {
+            "name": "agent",
+            "base_agent": "waverunner",
+            "instructions": "You are a helpful assistant.",
+        }, matches
 
 
 def test_valid_speech_returns_binary_audio_and_reaches_upstream(gateway: Gateway) -> None:

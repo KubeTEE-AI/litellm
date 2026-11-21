@@ -1,7 +1,5 @@
-import { useTerminology } from "@/contexts/TerminologyContext";
 import { Play } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { fetchAvailableModels, type ModelGroup } from "@/components/llm_calls/fetch_models";
 import { SearchSelect } from "@/components/shared/SearchSelect";
 import { Button } from "@/components/ui/button";
@@ -14,7 +12,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { codeSamples } from "@/i18n/untranslated/codeSamples";
 
 const DEFAULT_PROMPT = `Evaluate whether this guardrail's decision was correct.
 Analyze the user input, the guardrail action taken, and determine if it was appropriate.
@@ -50,8 +47,6 @@ export function EvaluationSettingsModal({
   accessToken,
   onRunEvaluation,
 }: EvaluationSettingsModalProps) {
-  const { t } = useTranslation();
-  const term = useTerminology();
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [schema, setSchema] = useState(DEFAULT_SCHEMA);
   const [model, setModel] = useState<string | null>(null);
@@ -97,11 +92,11 @@ export function EvaluationSettingsModal({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[640px]">
         <DialogHeader>
-          <DialogTitle>{t("guardrailsMonitor.evaluationSettings.title")}</DialogTitle>
+          <DialogTitle>Evaluation Settings</DialogTitle>
           <DialogDescription>
             {guardrailName
-              ? `${term(t("guardrailsMonitor.evaluationSettings.descriptionPrefix"))} ${guardrailName}`
-              : term(t("guardrailsMonitor.evaluationSettings.descriptionGeneric"))}
+              ? `Configure AI evaluation for ${guardrailName}`
+              : "Configure AI evaluation for re-running on logs"}
           </DialogDescription>
         </DialogHeader>
 
@@ -109,10 +104,10 @@ export function EvaluationSettingsModal({
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <label htmlFor="evaluation-prompt" className="text-sm font-medium text-foreground">
-                {t("guardrailsMonitor.evaluationSettings.prompt.label")}
+                Evaluation Prompt
               </label>
               <Button variant="link" size="xs" onClick={handleResetPrompt}>
-                {t("guardrailsMonitor.evaluationSettings.prompt.reset")}
+                Reset to default
               </Button>
             </div>
             <Textarea
@@ -123,15 +118,15 @@ export function EvaluationSettingsModal({
               className="field-sizing-fixed font-mono text-sm"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              {t("guardrailsMonitor.evaluationSettings.prompt.help")}
+              System prompt sent to the evaluation model. Output is structured via response_format.
             </p>
           </div>
 
           <div>
             <label htmlFor="evaluation-schema" className="mb-1.5 block text-sm font-medium text-foreground">
-              {t("guardrailsMonitor.evaluationSettings.schema.label")}
+              Response Schema
             </label>
-            <p className="mb-1 text-xs text-muted-foreground">{codeSamples.guardrails.evaluationResponseFormat}</p>
+            <p className="mb-1 text-xs text-muted-foreground">response_format: json_schema</p>
             <Textarea
               id="evaluation-schema"
               value={schema}
@@ -142,34 +137,24 @@ export function EvaluationSettingsModal({
           </div>
 
           <div>
-            <p className="mb-1.5 text-sm font-medium text-foreground">
-              {t("guardrailsMonitor.evaluationSettings.model.label")}
-            </p>
+            <p className="mb-1.5 text-sm font-medium text-foreground">Model</p>
             <SearchSelect
               options={modelSelectOptions}
               value={model ?? undefined}
               onValueChange={(value) => setModel(value || null)}
-              placeholder={
-                loadingModels
-                  ? t("guardrailsMonitor.evaluationSettings.model.loading")
-                  : t("guardrailsMonitor.evaluationSettings.model.placeholder")
-              }
-              emptyText={
-                !accessToken
-                  ? t("guardrailsMonitor.evaluationSettings.model.signedOut")
-                  : t("guardrailsMonitor.evaluationSettings.model.empty")
-              }
+              placeholder={loadingModels ? "Loading models…" : "Select a model"}
+              emptyText={!accessToken ? "Sign in to see models" : "No models available"}
             />
           </div>
         </div>
 
         <DialogFooter className="border-t border-border pt-4">
           <Button variant="outline" onClick={onClose}>
-            {t("guardrailsMonitor.evaluationSettings.cancel")}
+            Cancel
           </Button>
           <Button onClick={handleRun} disabled={!model}>
             <Play className="size-4" />
-            {t("guardrailsMonitor.evaluationSettings.run")}
+            Run Evaluation
           </Button>
         </DialogFooter>
       </DialogContent>

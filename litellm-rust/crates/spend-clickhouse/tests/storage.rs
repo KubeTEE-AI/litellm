@@ -77,7 +77,7 @@ async fn database() -> Database {
             7,
         )
         .unwrap(),
-        client: Client::for_test(),
+        client: Client::no_redirect_for_test(),
     }
 }
 

@@ -134,16 +134,13 @@ describe("BudgetTable", () => {
     }
   });
 
-  it("should request duration sorting from the server", async () => {
+  it("should not make the reset column sortable", async () => {
     const user = userEvent.setup();
-    const onSortingChange = vi.fn();
-    renderWithProviders(<BudgetTable {...defaultProps} list={makeList({ onSortingChange })} />);
+    renderWithProviders(<BudgetTable {...defaultProps} list={makeList()} />);
     await showColumn(user, "budget_duration");
     const headers = screen.getAllByRole("columnheader").map((header) => header.textContent);
     expect(headers).toContain("Reset");
-    await user.click(screen.getByTestId("sort-header-budget_duration"));
-    expect(onSortingChange).toHaveBeenCalled();
-    expect(onSortingChange.mock.calls[0][0]([])).toEqual([{ id: "budget_duration", desc: false }]);
+    expect(screen.queryByTestId("sort-header-budget_duration")).not.toBeInTheDocument();
   });
 
   it("should ask the list for a new sort when a sortable header is clicked", async () => {

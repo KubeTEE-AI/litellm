@@ -137,7 +137,7 @@ impl VertexAiOcrConfig {
                 connection
                     .api_key
                     .as_ref()
-                    .map(litellm_secret_value::SecretValue::expose),
+                    .map(litellm_auth::SecretValue::expose),
                 config,
                 &|name: &str| connection.secret(name),
             )
@@ -174,7 +174,9 @@ impl VertexAiOcrConfig {
                 ])
             })
             .map(|url| url.into_string())
-            .map_err(|error| Error::request_field("api_base", error))
+            .map_err(|_| Error::RequestField {
+                path: "api_base".into(),
+            })
     }
 }
 
@@ -196,7 +198,6 @@ fn validate_location(location: &str) -> Result<(), Error> {
     }
     Err(Error::RequestField {
         path: "vertex_location".into(),
-        cause: None,
     })
 }
 

@@ -1,7 +1,6 @@
 import type { DateRangePickerValue } from "@/components/shared/date_picker_types";
 import { Download } from "lucide-react";
 import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -28,7 +27,7 @@ interface UsageExportHeaderProps {
   showFilters?: boolean;
   filterLabel?: string;
   filterPlaceholder?: string;
-  selectedFilters?: readonly string[];
+  selectedFilters?: string[];
   onFiltersChange?: (filters: string[]) => void;
   filterOptions?: Array<{ label: string; value: string }>;
   filterSlot?: React.ReactNode;
@@ -52,7 +51,6 @@ const UsageExportHeader: React.FC<UsageExportHeaderProps> = ({
   compactLayout = false,
   teams = [],
 }) => {
-  const { t } = useTranslation();
   const anchor = useComboboxAnchor();
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
@@ -60,14 +58,14 @@ const UsageExportHeader: React.FC<UsageExportHeaderProps> = ({
   const optionValues = filterOptions.map((option) => option.value);
   const labelOf = (value: string) => filterOptions.find((option) => option.value === value)?.label ?? value;
   const hasNoOptions = filterOptions.length === 0;
-  const emptyPlaceholder = t("usage.export.header.noOptionsPlaceholder", { entityType });
+  const emptyPlaceholder = `No ${entityType}s with usage in this range`;
   // A selection carried over from a range that did have options still scopes
   // the data below, so the control has to stay usable long enough to clear it.
   const isFilterDisabled = hasNoOptions && selectedFilters.length === 0;
 
   const filterList = (
     <ComboboxContent anchor={anchor}>
-      <ComboboxEmpty>{t("usage.export.header.noOptionsFound")}</ComboboxEmpty>
+      <ComboboxEmpty>No options found</ComboboxEmpty>
       <ComboboxList>
         {(value: string) => (
           <ComboboxItem key={value} value={value}>
@@ -83,7 +81,7 @@ const UsageExportHeader: React.FC<UsageExportHeaderProps> = ({
       multiple
       disabled={isFilterDisabled}
       items={optionValues}
-      value={[...selectedFilters]}
+      value={selectedFilters}
       onValueChange={(next: string[]) => onFiltersChange?.(next)}
     >
       <ComboboxChips render={<div ref={anchor} />} className="w-full">
@@ -100,11 +98,7 @@ const UsageExportHeader: React.FC<UsageExportHeaderProps> = ({
           placeholder={hasNoOptions ? emptyPlaceholder : filterPlaceholder}
           aria-label={hasNoOptions ? emptyPlaceholder : filterPlaceholder}
         />
-        {selectedFilters.length > 0 && (
-          <ComboboxClear
-            aria-label={t("usage.export.header.clear", { label: filterLabel ?? t("usage.export.header.filters") })}
-          />
-        )}
+        {selectedFilters.length > 0 && <ComboboxClear aria-label={`Clear ${filterLabel ?? "filters"}`} />}
       </ComboboxChips>
       {filterList}
     </Combobox>
@@ -129,7 +123,7 @@ const UsageExportHeader: React.FC<UsageExportHeaderProps> = ({
           <div className="justify-self-end">
             <Button variant="outline" size="sm" onClick={() => setIsExportModalOpen(true)}>
               <Download />
-              {t("usage.export.header.exportData")}
+              Export Data
             </Button>
           </div>
         </div>

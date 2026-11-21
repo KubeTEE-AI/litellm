@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Final
 from aiohttp import ClientResponse
 from httpx import Headers, Response
 
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.chat.transformation import (
     BaseLLMException,
     LiteLLMLoggingObj,
@@ -40,7 +39,8 @@ class TopazImageVariationConfig(TopazModelInfo, BaseImageVariationConfig):
         litellm_params: dict,
         stream: bool | None = None,
     ) -> str:
-        return join_api_base(api_base or "https://api.topazlabs.com", "image/v1/enhance")
+        clean_api_base: Final = (api_base or "https://api.topazlabs.com").rstrip("/")
+        return f"{clean_api_base}/image/v1/enhance"
 
     def map_openai_params(
         self,

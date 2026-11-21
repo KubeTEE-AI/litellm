@@ -22,6 +22,7 @@ from openai.types.batch import BatchRequestCounts
 
 import litellm
 from litellm._logging import verbose_logger
+from litellm.litellm_core_utils.get_litellm_params import add_trusted_model_credentials_to_litellm_params
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.anthropic.batches.handler import AnthropicBatchesHandler
 from litellm.llms.azure.batches.handler import AzureBatchesAPI
@@ -358,6 +359,7 @@ def create_batch(
                 max_retries=optional_params.max_retries,
                 create_batch_data=_create_batch_request,
                 custom_endpoint=optional_params.get("custom_endpoint"),
+                litellm_params=litellm_params,
             )
         else:
             raise litellm.exceptions.BadRequestError(
@@ -584,6 +586,7 @@ def retrieve_batch(
             custom_llm_provider=custom_llm_provider,
             **kwargs,
         )
+        add_trusted_model_credentials_to_litellm_params(litellm_params, kwargs)
         if litellm_logging_obj is not None:
             litellm_logging_obj.update_from_kwargs(
                 kwargs=kwargs,

@@ -1,4 +1,3 @@
-import type { ParseKeys } from "i18next";
 import { parseIdentityForForm } from "./agent_identity";
 /**
  * Shared configuration for agent form fields
@@ -15,22 +14,21 @@ import {
 
 export interface FieldConfig {
   name: string;
-  labelKey: ParseKeys;
+  label: string;
   type: "text" | "textarea" | "url" | "switch" | "list" | "select";
   required?: boolean;
-  tooltipKey?: ParseKeys;
+  tooltip?: string;
   placeholder?: string;
-  placeholderKey?: ParseKeys;
   defaultValue?: any;
   rows?: number;
   validation?: any[];
   options?: string[];
-  helpTextKey?: ParseKeys;
+  helpText?: string;
 }
 
 export interface SectionConfig {
   key: string;
-  titleKey: ParseKeys;
+  title: string;
   fields: FieldConfig[];
   defaultExpanded?: boolean;
 }
@@ -46,57 +44,59 @@ export const AGENT_FORM_CONFIG: {
 } = {
   basic: {
     key: "basic",
-    titleKey: "agents.formConfig.basic.title",
+    title: "Basic Information",
     defaultExpanded: true,
     fields: [
       {
         name: "name",
-        labelKey: "agents.formConfig.fields.name.label",
+        label: "Display Name",
         type: "text",
         required: true,
-        placeholderKey: "agents.formConfig.fields.name.placeholder",
+        placeholder: "e.g., Customer Support Agent",
       },
       {
         name: "description",
-        labelKey: "agents.formConfig.fields.description.label",
+        label: "Description",
         type: "textarea",
         required: false,
-        placeholderKey: "agents.formConfig.fields.description.placeholder",
+        placeholder: "Describe what this agent does...",
         rows: 3,
       },
       {
         name: "url",
-        labelKey: "agents.formConfig.fields.url.label",
+        label: "URL",
         type: "url",
         required: false,
         placeholder: "http://localhost:9999/",
-        tooltipKey: "agents.formConfig.fields.url.tooltip",
+        tooltip: "Base URL where the agent is hosted (optional)",
       },
       {
         name: "version",
-        labelKey: "agents.formConfig.fields.version.label",
+        label: "Version",
         type: "text",
         placeholder: "1.0.0",
         defaultValue: "1.0.0",
       },
       {
         name: "protocolVersion",
-        labelKey: "agents.formConfig.fields.protocolVersion.label",
+        label: "Protocol Version",
         type: "select",
         options: ["1.0", "0.3"],
         defaultValue: "1.0",
-        tooltipKey: "agents.formConfig.fields.protocolVersion.tooltip",
-        helpTextKey: "agents.formConfig.basic.protocolVersionHelp",
+        tooltip:
+          "The A2A protocol version LiteLLM serves to clients for this agent. LiteLLM converts the upstream agent's responses to this version, so clients always see the version you pick here regardless of the original agent's version.",
+        helpText:
+          "LiteLLM serves this version to clients and converts the upstream agent's responses to match it, regardless of the original agent's version.",
       },
     ],
   },
   skills: {
     key: "skills",
-    titleKey: "agents.formConfig.skills.title",
+    title: "Skills",
     fields: [
       {
         name: "skills",
-        labelKey: "agents.formConfig.fields.skills.label",
+        label: "Skills",
         type: "list",
         defaultValue: [],
       },
@@ -104,102 +104,102 @@ export const AGENT_FORM_CONFIG: {
   },
   capabilities: {
     key: "capabilities",
-    titleKey: "agents.formConfig.capabilities.title",
+    title: "Capabilities",
     fields: [
       {
         name: "streaming",
-        labelKey: "agents.formConfig.fields.streaming.label",
+        label: "Streaming",
         type: "switch",
         defaultValue: false,
       },
       {
         name: "pushNotifications",
-        labelKey: "agents.formConfig.fields.pushNotifications.label",
+        label: "Push Notifications",
         type: "switch",
       },
       {
         name: "stateTransitionHistory",
-        labelKey: "agents.formConfig.fields.stateTransitionHistory.label",
+        label: "State Transition History",
         type: "switch",
       },
     ],
   },
   optional: {
     key: "optional",
-    titleKey: "agents.formConfig.optional.title",
+    title: "Optional Settings",
     fields: [
       {
         name: "iconUrl",
-        labelKey: "agents.formConfig.fields.iconUrl.label",
+        label: "Icon URL",
         type: "url",
         placeholder: "https://example.com/icon.png",
       },
       {
         name: "documentationUrl",
-        labelKey: "agents.formConfig.fields.documentationUrl.label",
+        label: "Documentation URL",
         type: "url",
         placeholder: "https://docs.example.com",
       },
       {
         name: "supportsAuthenticatedExtendedCard",
-        labelKey: "agents.formConfig.fields.supportsAuthenticatedExtendedCard.label",
+        label: "Supports Authenticated Extended Card",
         type: "switch",
       },
     ],
   },
   litellm: {
     key: "litellm",
-    titleKey: "agents.formConfig.litellm.title",
+    title: "LiteLLM Parameters",
     fields: [
       {
         name: "model",
-        labelKey: "agents.formConfig.fields.model.label",
+        label: "Model (Optional)",
         type: "text",
       },
       {
         name: "make_public",
-        labelKey: "agents.formConfig.fields.makePublic.label",
+        label: "Make Public",
         type: "switch",
       },
     ],
   },
   cost: {
     key: "cost",
-    titleKey: "agents.formConfig.cost.title",
+    title: "Cost Configuration",
     fields: [
       {
         name: "cost_per_query",
-        labelKey: "agents.formConfig.fields.costPerQuery.label",
+        label: "Cost Per Query ($)",
         type: "text",
         placeholder: "0.0",
-        tooltipKey: "agents.formConfig.fields.costPerQuery.tooltip",
+        tooltip: "Fixed cost per query",
       },
       {
         name: "input_cost_per_token",
-        labelKey: "agents.formConfig.fields.inputCostPerToken.label",
+        label: "Input Cost Per Token ($)",
         type: "text",
         placeholder: "0.000001",
-        tooltipKey: "agents.formConfig.fields.inputCostPerToken.tooltip",
+        tooltip: "Cost per input token",
       },
       {
         name: "output_cost_per_token",
-        labelKey: "agents.formConfig.fields.outputCostPerToken.label",
+        label: "Output Cost Per Token ($)",
         type: "text",
         placeholder: "0.000002",
-        tooltipKey: "agents.formConfig.fields.outputCostPerToken.tooltip",
+        tooltip: "Cost per output token",
       },
     ],
   },
   tracing: {
     key: "tracing",
-    titleKey: "agents.formConfig.tracing.title",
+    title: "Tracing",
     fields: [
       {
         name: "enable_tracing",
-        labelKey: "agents.formConfig.fields.enableTracing.label",
+        label: "Enable Tracing",
         type: "switch",
         defaultValue: false,
-        tooltipKey: "agents.formConfig.fields.enableTracing.tooltip",
+        tooltip: "Enable request tracing for this agent",
       },
     ],
   },
@@ -208,33 +208,33 @@ export const AGENT_FORM_CONFIG: {
 export const SKILL_FIELD_CONFIG = {
   id: {
     name: "id",
-    labelKey: "agents.formConfig.skillFields.id" as ParseKeys,
+    label: "Skill ID",
     required: true,
-    placeholderKey: "agents.formConfig.skillFields.idPlaceholder" as ParseKeys,
+    placeholder: "e.g., hello_world",
   },
   name: {
     name: "name",
-    labelKey: "agents.formConfig.skillFields.name" as ParseKeys,
+    label: "Skill Name",
     required: true,
-    placeholderKey: "agents.formConfig.skillFields.namePlaceholder" as ParseKeys,
+    placeholder: "e.g., Returns hello world",
   },
   description: {
     name: "description",
-    labelKey: "agents.formConfig.skillFields.description" as ParseKeys,
+    label: "Description",
     required: true,
-    placeholderKey: "agents.formConfig.skillFields.descriptionPlaceholder" as ParseKeys,
+    placeholder: "What this skill does",
     rows: 2,
   },
   tags: {
     name: "tags",
-    labelKey: "agents.formConfig.skillFields.tags" as ParseKeys,
+    label: "Tags",
     required: true,
-    placeholderKey: "agents.formConfig.skillFields.tagsPlaceholder" as ParseKeys,
+    placeholder: "Type a tag and press Enter",
   },
   examples: {
     name: "examples",
-    labelKey: "agents.formConfig.skillFields.examples" as ParseKeys,
-    placeholderKey: "agents.formConfig.skillFields.examplesPlaceholder" as ParseKeys,
+    label: "Examples",
+    placeholder: "Type an example and press Enter",
   },
 };
 

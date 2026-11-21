@@ -1,15 +1,12 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { InputCard } from "./InputCard";
 import { ParsedMessage } from "./prettyMessagesTypes";
-import { copyToClipboard } from "@/utils/dataUtils";
-import { toast } from "@/lib/toast";
-
-vi.mock("@/utils/dataUtils", () => ({ copyToClipboard: vi.fn() }));
 
 describe("InputCard", () => {
+  const mockWriteText = vi.fn().mockResolvedValue(undefined);
   const mockMessages: ParsedMessage[] = [
     {
       role: "user",
@@ -19,7 +16,13 @@ describe("InputCard", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(copyToClipboard).mockResolvedValue(true);
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: mockWriteText,
+      },
+      writable: true,
+      configurable: true,
+    });
   });
 
   it("should render the InputCard component", () => {
@@ -88,16 +91,27 @@ describe("InputCard", () => {
     expect(screen.getByText(/Cost: \$0\.001500/)).toBeInTheDocument();
   });
 
-  it.each([true, false])("delegates copying and feedback to the helper (%s)", async (success) => {
-    const user = userEvent.setup();
-    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
-    vi.mocked(copyToClipboard).mockResolvedValue(success);
-    render(<InputCard messages={[{ role: "user", content: "Copy this text" }]} />);
+  it("should copy last message content when copy button is clicked", async () => {
+    const messages: ParsedMessage[] = [
+      {
+        role: "user",
+        content: "Copy this text",
+      },
+    ];
 
-    await user.click(screen.getByRole("button", { name: /copy/i }));
+    render(<InputCard messages={messages} />);
 
-    expect(copyToClipboard).toHaveBeenCalledWith("Copy this text", "Input copied");
-    expect(toast.success).not.toHaveBeenCalled();
+    const copyButton = screen.getByRole("button", { name: /copy/i });
+
+    expect(copyButton).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(copyButton);
+    });
+
+    await waitFor(() => {
+      expect(mockWriteText).toHaveBeenCalledWith("Copy this text");
+    });
   });
 
   it("should toggle collapse state when header is clicked", async () => {

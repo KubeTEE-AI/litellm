@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
 import { ArrowRight, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +12,6 @@ interface TransformRequestPanelProps {
 }
 
 const TransformRequestPanel: React.FC<TransformRequestPanelProps> = ({ accessToken }) => {
-  const { t } = useTranslation();
   const [originalRequestJSON, setOriginalRequestJSON] = useState(`{
   "model": "openai/gpt-4o",
   "messages": [
@@ -71,7 +69,7 @@ ${formattedBody}
       try {
         requestBody = JSON.parse(originalRequestJSON);
       } catch (e) {
-        toast.fromError(t("transformRequest.transformRequestPanel.toasts.invalidJson"));
+        toast.fromError("Invalid JSON in request body");
         setIsLoading(false);
         return;
       }
@@ -84,7 +82,7 @@ ${formattedBody}
 
       // Make the API call using fetch
       if (!accessToken) {
-        toast.fromError(t("transformRequest.transformRequestPanel.toasts.noAccessToken"));
+        toast.fromError("No access token found");
         setIsLoading(false);
         return;
       }
@@ -102,17 +100,17 @@ ${formattedBody}
 
         // Update state with the formatted curl command
         setTransformedResponse(formattedCurl);
-        toast.success(t("transformRequest.transformRequestPanel.toasts.transformed"));
+        toast.success("Request transformed successfully");
       } else {
         // Handle the case where the API returns a different format
         // Try to extract the parts from a string response if needed
         const rawText = typeof data === "string" ? data : JSON.stringify(data);
         setTransformedResponse(rawText);
-        toast.info(t("transformRequest.transformRequestPanel.toasts.unexpectedFormat"));
+        toast.info("Transformed request received in unexpected format");
       }
     } catch (err) {
       console.error("Error transforming request:", err);
-      toast.fromError(t("transformRequest.transformRequestPanel.toasts.failed"));
+      toast.fromError("Failed to transform request");
     } finally {
       setIsLoading(false);
     }
@@ -128,16 +126,16 @@ ${formattedBody}
 
   return (
     <div className="p-2">
-      <h1 className="text-lg font-medium text-foreground">{t("transformRequest.transformRequestPanel.title")}</h1>
-      <p className="text-sm text-muted-foreground">{t("transformRequest.transformRequestPanel.description")}</p>
+      <h1 className="text-lg font-medium text-foreground">Playground</h1>
+      <p className="text-sm text-muted-foreground">
+        See how LiteLLM transforms your request for the specified provider.
+      </p>
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Original Request Panel */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl font-bold">
-              {t("transformRequest.transformRequestPanel.original.title")}
-            </CardTitle>
-            <CardDescription>{t("transformRequest.transformRequestPanel.original.description")}</CardDescription>
+            <CardTitle className="text-2xl font-bold">Original Request</CardTitle>
+            <CardDescription>The request you would send to LiteLLM /chat/completions endpoint.</CardDescription>
           </CardHeader>
 
           <CardContent>
@@ -146,13 +144,13 @@ ${formattedBody}
               value={originalRequestJSON}
               onChange={(e) => setOriginalRequestJSON(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={t("transformRequest.transformRequestPanel.original.placeholder")}
+              placeholder="Press Cmd/Ctrl + Enter to transform"
             />
           </CardContent>
 
           <CardFooter className="justify-end">
             <Button onClick={handleTransform} disabled={isLoading}>
-              <span>{t("transformRequest.transformRequestPanel.original.transform")}</span>
+              <span>Transform</span>
               {isLoading ? <UiLoadingSpinner className="size-4" /> : <ArrowRight />}
             </Button>
           </CardFooter>
@@ -161,13 +159,9 @@ ${formattedBody}
         {/* Transformed Request Panel */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl font-bold">
-              {t("transformRequest.transformRequestPanel.transformed.title")}
-            </CardTitle>
-            <CardDescription>{t("transformRequest.transformRequestPanel.transformed.description")}</CardDescription>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {t("transformRequest.transformRequestPanel.transformed.sensitiveHeaders")}
-            </p>
+            <CardTitle className="text-2xl font-bold">Transformed Request</CardTitle>
+            <CardDescription>How LiteLLM transforms your request for the specified provider.</CardDescription>
+            <p className="mt-2 text-xs text-muted-foreground">Note: Sensitive headers are not shown.</p>
           </CardHeader>
 
           <CardContent>
@@ -193,11 +187,11 @@ ${formattedBody}
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t("transformRequest.transformRequestPanel.transformed.copy")}
+                aria-label="Copy to clipboard"
                 className="absolute top-2 right-2"
                 onClick={() => {
                   navigator.clipboard.writeText(transformedResponse || "");
-                  toast.success(t("transformRequest.transformRequestPanel.toasts.copied"));
+                  toast.success("Copied to clipboard");
                 }}
               >
                 <Copy />
@@ -208,19 +202,16 @@ ${formattedBody}
       </div>
       <div className="mt-4 text-right">
         <p className="text-sm text-muted-foreground">
-          <Trans
-            i18nKey="transformRequest.transformRequestPanel.fileIssue"
-            components={{
-              issues: (
-                <a
-                  className="underline underline-offset-4"
-                  href="https://github.com/BerriAI/litellm/issues"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                />
-              ),
-            }}
-          />
+          Found an error? File an issue{" "}
+          <a
+            className="underline underline-offset-4"
+            href="https://github.com/BerriAI/litellm/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            here
+          </a>
+          .
         </p>
       </div>
     </div>

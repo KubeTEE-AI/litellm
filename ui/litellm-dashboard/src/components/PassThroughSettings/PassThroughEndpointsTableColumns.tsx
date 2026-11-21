@@ -1,10 +1,8 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import type { ParseKeys, TFunction } from "i18next";
 import { Eye, EyeOff, Info, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import { CellTooltip, IdentityCell, StatusBadge } from "@/components/shared/table_cells";
 import { Badge } from "@/components/ui/badge";
@@ -16,12 +14,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import i18n from "@/i18n/i18n";
 import { cn } from "@/lib/cva.config";
 
 import type { passThroughItem } from "./PassThroughSettings";
 
-const CONFIG_ENDPOINT_HINT: ParseKeys = "passThroughSettings.passThroughEndpointsTableColumns.configEndpointHint";
+const CONFIG_ENDPOINT_HINT =
+  "This endpoint is defined in the config file and cannot be edited or deleted on the dashboard.";
 
 function HeaderWithTooltip({ title, tooltip }: { title: string; tooltip: string }) {
   return (
@@ -33,7 +31,6 @@ function HeaderWithTooltip({ title, tooltip }: { title: string; tooltip: string 
 }
 
 function HeadersCell({ value }: { value: object }) {
-  const { t } = useTranslation();
   const [showHeaders, setShowHeaders] = useState(false);
   const headerString = JSON.stringify(value);
 
@@ -43,11 +40,7 @@ function HeadersCell({ value }: { value: object }) {
       <button
         type="button"
         onClick={() => setShowHeaders(!showHeaders)}
-        aria-label={
-          showHeaders
-            ? t("passThroughSettings.passThroughEndpointsTableColumns.hideHeaders")
-            : t("passThroughSettings.passThroughEndpointsTableColumns.showHeaders")
-        }
+        aria-label={showHeaders ? "Hide headers" : "Show headers"}
         className="rounded-sm p-1 hover:bg-muted"
       >
         {showHeaders ? (
@@ -61,9 +54,8 @@ function HeadersCell({ value }: { value: object }) {
 }
 
 function MethodsCell({ methods }: { methods: string[] | undefined }) {
-  const { t } = useTranslation();
   if (!methods || methods.length === 0) {
-    return <Badge variant="secondary">{t("passThroughSettings.passThroughEndpointsTableColumns.allMethods")}</Badge>;
+    return <Badge variant="secondary">ALL</Badge>;
   }
   return (
     <div className="flex flex-wrap gap-1">
@@ -83,13 +75,12 @@ interface EndpointRowActionsProps {
 }
 
 function EndpointRowActions({ endpoint, onEndpointClick, onDeleteClick }: EndpointRowActionsProps) {
-  const { t } = useTranslation();
   const endpointId = endpoint.id;
   const isFromConfig = endpoint.is_from_config ?? false;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={t("passThroughSettings.passThroughEndpointsTableColumns.openActions")}
+        aria-label="Open endpoint actions"
         data-testid={`endpoint-actions-${endpointId || endpoint.path}`}
         className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground")}
       >
@@ -102,7 +93,7 @@ function EndpointRowActions({ endpoint, onEndpointClick, onDeleteClick }: Endpoi
           onClick={() => !isFromConfig && endpointId && onEndpointClick(endpointId)}
         >
           <Pencil />
-          {t("passThroughSettings.passThroughEndpointsTableColumns.edit")}
+          Edit
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -112,11 +103,11 @@ function EndpointRowActions({ endpoint, onEndpointClick, onDeleteClick }: Endpoi
           onClick={() => !isFromConfig && endpointId && onDeleteClick(endpointId)}
         >
           <Trash2 />
-          {t("passThroughSettings.passThroughEndpointsTableColumns.delete")}
+          Delete
         </DropdownMenuItem>
         {isFromConfig && (
           <div data-testid="endpoint-config-hint" className="px-2 py-1.5 text-xs text-muted-foreground">
-            {t(CONFIG_ENDPOINT_HINT)}
+            {CONFIG_ENDPOINT_HINT}
           </div>
         )}
       </DropdownMenuContent>
@@ -129,15 +120,15 @@ interface PassThroughEndpointsTableColumnsDeps {
   onDeleteClick: (endpointId: string) => void;
 }
 
-export const getPassThroughEndpointsTableColumns = (
-  { onEndpointClick, onDeleteClick }: PassThroughEndpointsTableColumnsDeps,
-  t: TFunction = i18n.t.bind(i18n),
-): ColumnDef<passThroughItem>[] => [
+export const getPassThroughEndpointsTableColumns = ({
+  onEndpointClick,
+  onDeleteClick,
+}: PassThroughEndpointsTableColumnsDeps): ColumnDef<passThroughItem>[] => [
   {
     id: "id",
     accessorKey: "id",
-    meta: { title: t("passThroughSettings.passThroughEndpointsTableColumns.columns.id") },
-    header: t("passThroughSettings.passThroughEndpointsTableColumns.columns.id"),
+    meta: { title: "ID" },
+    header: "ID",
     size: 190,
     enableSorting: false,
     cell: ({ row }) => {
@@ -156,29 +147,20 @@ export const getPassThroughEndpointsTableColumns = (
   },
   {
     id: "source",
-    meta: { title: t("passThroughSettings.passThroughEndpointsTableColumns.columns.source"), skeleton: "badge" },
-    header: t("passThroughSettings.passThroughEndpointsTableColumns.columns.source"),
+    meta: { title: "Source", skeleton: "badge" },
+    header: "Source",
     size: 100,
     enableSorting: false,
     cell: ({ row }) => {
       const isFromConfig = row.original.is_from_config ?? false;
-      return (
-        <StatusBadge
-          tone={isFromConfig ? "neutral" : "info"}
-          label={
-            isFromConfig
-              ? t("passThroughSettings.passThroughEndpointsTableColumns.source.config")
-              : t("passThroughSettings.passThroughEndpointsTableColumns.source.db")
-          }
-        />
-      );
+      return <StatusBadge tone={isFromConfig ? "neutral" : "info"} label={isFromConfig ? "Config" : "DB"} />;
     },
   },
   {
     id: "path",
     accessorKey: "path",
-    meta: { title: t("passThroughSettings.passThroughEndpointsTableColumns.columns.path") },
-    header: t("passThroughSettings.passThroughEndpointsTableColumns.columns.path"),
+    meta: { title: "Path" },
+    header: "Path",
     size: 200,
     enableSorting: false,
     cell: ({ row }) => (
@@ -190,8 +172,8 @@ export const getPassThroughEndpointsTableColumns = (
   {
     id: "target",
     accessorKey: "target",
-    meta: { title: t("passThroughSettings.passThroughEndpointsTableColumns.columns.target") },
-    header: t("passThroughSettings.passThroughEndpointsTableColumns.columns.target"),
+    meta: { title: "Target" },
+    header: "Target",
     size: 240,
     enableSorting: false,
     cell: ({ row }) => (
@@ -202,13 +184,8 @@ export const getPassThroughEndpointsTableColumns = (
   },
   {
     id: "methods",
-    meta: { title: t("passThroughSettings.passThroughEndpointsTableColumns.columns.methods"), skeleton: "chips" },
-    header: () => (
-      <HeaderWithTooltip
-        title={t("passThroughSettings.passThroughEndpointsTableColumns.columns.methods")}
-        tooltip={t("passThroughSettings.passThroughEndpointsTableColumns.methodsTooltip")}
-      />
-    ),
+    meta: { title: "Methods", skeleton: "chips" },
+    header: () => <HeaderWithTooltip title="Methods" tooltip="HTTP methods supported by this endpoint" />,
     size: 150,
     enableSorting: false,
     cell: ({ row }) => <MethodsCell methods={row.original.methods} />,
@@ -216,33 +193,18 @@ export const getPassThroughEndpointsTableColumns = (
   {
     id: "auth",
     accessorKey: "auth",
-    meta: {
-      title: t("passThroughSettings.passThroughEndpointsTableColumns.columns.authentication"),
-      skeleton: "badge",
-    },
-    header: () => (
-      <HeaderWithTooltip
-        title={t("passThroughSettings.passThroughEndpointsTableColumns.columns.authentication")}
-        tooltip={t("passThroughSettings.passThroughEndpointsTableColumns.authenticationTooltip")}
-      />
-    ),
+    meta: { title: "Authentication", skeleton: "badge" },
+    header: () => <HeaderWithTooltip title="Authentication" tooltip="LiteLLM Virtual Key required to call endpoint" />,
     size: 140,
     enableSorting: false,
     cell: ({ row }) => (
-      <StatusBadge
-        tone={row.original.auth ? "success" : "neutral"}
-        label={
-          row.original.auth
-            ? t("passThroughSettings.passThroughEndpointsTableColumns.auth.yes")
-            : t("passThroughSettings.passThroughEndpointsTableColumns.auth.no")
-        }
-      />
+      <StatusBadge tone={row.original.auth ? "success" : "neutral"} label={row.original.auth ? "Yes" : "No"} />
     ),
   },
   {
     id: "headers",
-    meta: { title: t("passThroughSettings.passThroughEndpointsTableColumns.columns.headers") },
-    header: t("passThroughSettings.passThroughEndpointsTableColumns.columns.headers"),
+    meta: { title: "Headers" },
+    header: "Headers",
     size: 180,
     enableSorting: false,
     cell: ({ row }) => <HeadersCell value={row.original.headers || {}} />,
@@ -250,9 +212,7 @@ export const getPassThroughEndpointsTableColumns = (
   {
     id: "actions",
     meta: { className: "text-right", headerClassName: "text-right" },
-    header: () => (
-      <span className="sr-only">{t("passThroughSettings.passThroughEndpointsTableColumns.columns.actions")}</span>
-    ),
+    header: () => <span className="sr-only">Actions</span>,
     size: 64,
     enableSorting: false,
     enableHiding: false,

@@ -17,7 +17,6 @@ from botocore.credentials import Credentials
 from pydantic import JsonValue
 
 import litellm
-from litellm.rust_bridge import _native as native
 from litellm.rust_bridge.host.secret_manager import capture_secret_manager, native_secret_manager_config
 from litellm.secret_managers.aws_secret_manager_v2 import AWSSecretsManagerV2
 from litellm.secret_managers.cyberark_secret_manager import CyberArkSecretManager
@@ -68,6 +67,7 @@ def _vault_body(value: str) -> dict[str, object]:
 
 
 def _native_handle(client: object) -> "_SecretManagerRuntime":
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     handle: Final = native._SecretManagerRuntime.from_client(client)
     assert handle is not None
     return handle
@@ -75,6 +75,7 @@ def _native_handle(client: object) -> "_SecretManagerRuntime":
 
 @pytest.mark.parametrize("system", ("aws_secret_manager", "hashicorp_vault", "cyberark"))
 async def test_python_native_handle_reuses_backend_across_sync_and_async_reads(system: str) -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         environment: Final = {
             "AWS_REGION_NAME": "us-east-1",
@@ -108,6 +109,7 @@ async def test_python_native_handle_reuses_backend_across_sync_and_async_reads(s
 
 
 def test_shared_initializer_captures_credentials_and_tracks_instance_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body={"SecretString": "native-value"})
         server.expected_requests = 2
@@ -139,6 +141,7 @@ def test_shared_initializer_captures_credentials_and_tracks_instance_settings(mo
 def test_configuration_replacement_rebuilds_without_invalidating_existing_handles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as first_server, recording_service() as second_server:
         first_server.default_response = ResponseSpec(body=_vault_body("first"))
         second_server.default_response = ResponseSpec(body=_vault_body("second"))
@@ -155,6 +158,7 @@ def test_configuration_replacement_rebuilds_without_invalidating_existing_handle
 
 
 def test_custom_subclass_is_not_captured_for_a_native_handle() -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
 
     class CustomManager(AWSSecretsManagerV2):
         def sync_read_secret(self, secret_name: str, primary_secret_name: str | None = None) -> str:
@@ -167,16 +171,19 @@ def test_custom_subclass_is_not_captured_for_a_native_handle() -> None:
 
 @pytest.mark.parametrize("system", ("google_secret_manager", "hashicorp_vault", "cyberark"))
 def test_enterprise_backends_cannot_initialize_without_entitlement(system: str) -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     with pytest.raises(ValueError, match=r"[Ee]nterprise|[Pp]remium"):
         native._SecretManagerRuntime.from_config(system, {"CYBERARK_API_KEY": "key"})
 
 
 def test_azure_factory_rejects_unencrypted_vault_endpoints() -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     with pytest.raises(ValueError, match="https"):
         native._SecretManagerRuntime.from_config("azure_key_vault", {"AZURE_KEY_VAULT_URI": "http://127.0.0.1:1"})
 
 
 def test_direct_builtin_constructor_can_use_native_without_registration(monkeypatch: pytest.MonkeyPatch) -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body=_vault_body("native-value"))
         manager: Final = _vault(monkeypatch, server.base_url)
@@ -186,10 +193,12 @@ def test_direct_builtin_constructor_can_use_native_without_registration(monkeypa
 
 
 def test_uncaptured_clients_have_no_native_handle() -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     assert native._SecretManagerRuntime.from_client(SimpleNamespace()) is None
 
 
 def test_native_failure_is_not_replayed_in_python(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(status=403, body={"errors": ["denied"]})
         server.expected_requests = 1
@@ -258,6 +267,7 @@ def test_same_named_custom_client_is_not_captured() -> None:
 
 @pytest.mark.parametrize("value", ("text", "", True, False, 42, 2**100, [1, "two"], {"nested": True}, None))
 async def test_aws_primary_values_match_python_handler(monkeypatch: pytest.MonkeyPatch, value: JsonValue) -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body={"SecretString": json.dumps({"KEY": value})})
         server.expected_requests = 3
@@ -280,6 +290,7 @@ async def test_aws_primary_values_match_python_handler(monkeypatch: pytest.Monke
 
 @pytest.mark.parametrize("primary", (None, "primary"))
 async def test_aws_primary_values_match_python_reads(monkeypatch: pytest.MonkeyPatch, primary: str | None) -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body={"SecretString": '{"KEY":"value"}'})
         server.expected_requests = 3
@@ -332,6 +343,7 @@ def test_aws_absence_and_failed_reads_match_python_without_environment_fallback(
 async def test_aws_primary_json_errors_preserve_python_exception_details(
     monkeypatch: pytest.MonkeyPatch, document: str
 ) -> None:
+    native: Final = pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body={"SecretString": document})
         server.expected_requests = 3
@@ -358,6 +370,7 @@ async def test_aws_primary_json_errors_preserve_python_exception_details(
 async def test_public_aws_reads_preserve_coroutines_and_per_call_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as initial, recording_service() as selected:
         initial.expected_requests = 0
         selected.expected_requests = 2
@@ -408,6 +421,7 @@ async def test_public_aws_reads_preserve_coroutines_and_per_call_credentials(
 
 
 async def test_public_aws_primary_reads_ignore_operation_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server, recording_service() as unused:
         server.default_response = ResponseSpec(body={"SecretString": '{"KEY":true}'})
         server.expected_requests = 2
@@ -426,6 +440,7 @@ async def test_public_aws_primary_reads_ignore_operation_overrides(monkeypatch: 
 
 
 async def test_public_aws_bootstrap_names_only_bypass_sync_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body={"SecretString": "remote-access"})
         server.expected_requests = 1
@@ -442,6 +457,7 @@ async def test_public_aws_bootstrap_names_only_bypass_sync_reads(monkeypatch: py
 async def test_public_aws_read_timeouts_follow_the_python_http_handler(
     monkeypatch: pytest.MonkeyPatch, timeout: float | httpx.Timeout
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body={"SecretString": "too-late"}, delay=0.25)
         server.expected_requests = 2
@@ -454,6 +470,7 @@ async def test_public_aws_read_timeouts_follow_the_python_http_handler(
 
 
 async def test_public_vault_reads_keep_overrides_cache_and_coroutines(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body=_vault_body("value"))
         server.expected_requests = 2
@@ -473,6 +490,7 @@ async def test_public_vault_reads_keep_overrides_cache_and_coroutines(monkeypatc
 async def test_public_vault_failed_reads_return_none_without_replay(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(status=status, body={"errors": ["unavailable"]})
         server.expected_requests = 2
@@ -484,6 +502,7 @@ async def test_public_vault_failed_reads_return_none_without_replay(
 async def test_public_cyberark_reads_reuse_authentication_and_cached_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     from litellm.proxy import proxy_server
     from litellm.secret_managers.cyberark_secret_manager import CyberArkSecretManager
 
@@ -517,6 +536,7 @@ def test_public_aws_bootstrap_read_does_not_hit_the_provider(monkeypatch: pytest
 def test_public_vault_prefix_overrides_match_python_string_conversion(
     monkeypatch: pytest.MonkeyPatch, override: str | int
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     monkeypatch.setenv("HCP_VAULT_PATH_PREFIX", "default-prefix")
     with recording_service() as server:
         server.default_response = ResponseSpec(body=_vault_body("value"))
@@ -542,6 +562,7 @@ def _cyberark(monkeypatch: pytest.MonkeyPatch, address: str) -> CyberArkSecretMa
 async def test_public_cyberark_writes_and_deletes_share_the_read_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         for body in (b"token", b"old", {}, {}, b"provider-after-delete"):
             server.enqueue(ResponseSpec(body=body))
@@ -588,6 +609,7 @@ async def test_public_cyberark_write_errors_match_python_without_http_retries(
     status: int,
     authentication: bool,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         responses: Final = (
             (ResponseSpec(status=status, body={}),) * 2
@@ -613,6 +635,7 @@ async def test_public_cyberark_write_errors_match_python_without_http_retries(
 async def test_public_cyberark_write_recovers_from_initial_policy_authentication_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.enqueue(ResponseSpec(status=401, body={}))
         server.enqueue(ResponseSpec(body=b"token"))
@@ -635,6 +658,7 @@ async def test_public_cyberark_write_rejects_unsafe_names_before_authentication(
     monkeypatch: pytest.MonkeyPatch,
     name: str,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.expected_requests = 0
         manager: Final = _cyberark(monkeypatch, server.base_url)
@@ -649,6 +673,7 @@ async def test_public_cyberark_rotation_returns_the_write_response_and_retains_o
     monkeypatch: pytest.MonkeyPatch,
     same_name: bool,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         for body in (b"token", b"old-value", {}, {}):
             server.enqueue(ResponseSpec(body=body))
@@ -671,6 +696,7 @@ async def test_public_native_cyberark_rotation_requires_a_fresh_matching_replace
     monkeypatch: pytest.MonkeyPatch,
     replacement: bytes | None,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         for body in (b"token", b"old-value", {}, {}):
             server.enqueue(ResponseSpec(body=body))
@@ -694,6 +720,7 @@ async def test_public_native_cyberark_rotation_requires_a_fresh_matching_replace
 async def test_public_cyberark_cached_authentication_does_not_retry_denied_reads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.enqueue(ResponseSpec(body=b"token"))
         server.enqueue(ResponseSpec(body=b"value"))
@@ -707,6 +734,7 @@ async def test_public_cyberark_cached_authentication_does_not_retry_denied_reads
 async def test_cyberark_handler_errors_match_python_after_cached_authentication_is_denied(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         for response in (
             ResponseSpec(body=b"token"),
@@ -729,6 +757,7 @@ async def test_cyberark_handler_errors_match_python_after_cached_authentication_
 async def test_public_cyberark_connection_errors_match_python(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.expected_requests = 0
         address: Final = server.base_url
@@ -740,6 +769,7 @@ async def test_public_cyberark_connection_errors_match_python(
 
 
 async def test_public_native_cyberark_rotation_stops_after_a_failed_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         for body in (b"token", b"old-value", {}):
             server.enqueue(ResponseSpec(body=body))
@@ -758,6 +788,7 @@ async def test_public_vault_writes_preserve_complete_responses_and_request_field
     monkeypatch: pytest.MonkeyPatch,
     description: str | None,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         response: Final = {
             "request_id": "test-request",
@@ -798,6 +829,7 @@ async def test_public_vault_mutation_http_errors_match_python_without_retry(
     operation: str,
     status: int,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(status=status, body={"errors": ["denied"]})
         server.expected_requests = 2
@@ -824,6 +856,7 @@ async def test_public_vault_write_response_conversion_matches_python(
     monkeypatch: pytest.MonkeyPatch,
     body: bytes,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body=body)
         server.expected_requests = 2
@@ -837,6 +870,7 @@ async def test_public_vault_write_response_conversion_matches_python(
 async def test_public_vault_deletion_invalidates_cached_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.enqueue(ResponseSpec(body=_vault_body("old")))
         server.enqueue(ResponseSpec(status=204, body=b""))
@@ -859,6 +893,7 @@ async def test_public_vault_rotation_preserves_response_and_best_effort_deletion
     same_name: bool,
     delete_status: int,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         response: Final = {"request_id": "write-id", "data": {"version": 3}, "extra": [1, 2]}
         server.enqueue(ResponseSpec(body=b"current-existence-is-status-only"))
@@ -889,6 +924,7 @@ async def test_public_vault_rotation_failure_messages_and_request_counts_match_p
     stage: str,
     status: int,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         before: Final = (
             ()
@@ -924,6 +960,7 @@ async def test_public_vault_rotation_mismatches_do_not_delete_the_old_alias(
     monkeypatch: pytest.MonkeyPatch,
     value: JsonValue,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         responses: Final = (
             ResponseSpec(body=_vault_body("old")),
@@ -946,6 +983,7 @@ async def test_public_vault_mutation_timeouts_match_python(
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.default_response = ResponseSpec(body=_vault_body("value"), delay=0.25)
         server.expected_requests = 2
@@ -983,6 +1021,7 @@ async def test_public_vault_unsafe_names_fail_before_authentication(
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.expected_requests = 0
         manager: Final = _vault(monkeypatch, server.base_url)
@@ -999,6 +1038,7 @@ async def test_public_vault_authentication_errors_match_python(
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     monkeypatch.setenv("HCP_VAULT_APPROLE_ROLE_ID", "role")
     monkeypatch.setenv("HCP_VAULT_APPROLE_SECRET_ID", "secret-id")
     with recording_service() as server:
@@ -1024,6 +1064,7 @@ async def test_public_vault_authentication_errors_match_python(
 async def test_public_vault_rotation_stops_on_a_success_response_containing_an_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         result: Final = {"status": "error", "message": "write rejected", "extra": 2**100}
         for response in (ResponseSpec(body=_vault_body("old")), ResponseSpec(body=result)) * 2:
@@ -1037,6 +1078,7 @@ async def test_public_vault_rotation_stops_on_a_success_response_containing_an_e
 
 
 async def test_public_native_vault_write_invalidates_stale_cached_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.enqueue(ResponseSpec(body=_vault_body("old")))
         server.enqueue(ResponseSpec(body={"data": {"version": 2}}))
@@ -1052,6 +1094,7 @@ async def test_public_native_vault_write_invalidates_stale_cached_values(monkeyp
 async def test_public_native_vault_write_rejects_description_overwriting_the_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         server.expected_requests = 0
         handle: Final = _native_handle(_vault(monkeypatch, server.base_url))
@@ -1068,6 +1111,7 @@ async def test_public_vault_rotation_preserves_malformed_verification_errors(
     monkeypatch: pytest.MonkeyPatch,
     body: JsonValue,
 ) -> None:
+    pytest.importorskip("litellm.rust_bridge._native")
     with recording_service() as server:
         responses: Final = (
             ResponseSpec(body=_vault_body("old")),

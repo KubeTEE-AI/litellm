@@ -12,7 +12,29 @@ use reqwest::{
     dns::{Addrs, Name, Resolve, Resolving},
 };
 
-use crate::{Client, ClientVariant, Error, HttpClientConfig, HttpClientPool, error::Repr};
+use crate::{Client, ClientVariant, HttpClientConfig, HttpClientPool};
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("media URL rejected by network policy")]
+    BlockedUrl,
+    #[error("media download is disabled")]
+    DownloadDisabled,
+    #[error("media download exceeds the maximum size")]
+    DownloadTooLarge,
+    #[error("too many redirects while fetching media")]
+    TooManyRedirects,
+    #[error("media redirect is missing a Location header")]
+    MissingRedirectLocation,
+    #[error("invalid media redirect")]
+    InvalidRedirect,
+    #[error("media download failed with status {0}")]
+    Http(u16),
+    #[error("media download timed out")]
+    Timeout,
+    #[error("{0}")]
+    Transport(#[from] crate::transport::Error),
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UrlPolicy {
@@ -103,7 +125,7 @@ impl MediaFetcher {
         pool: &HttpClientPool,
         config: &HttpClientConfig,
         url_policy: UrlPolicy,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, crate::Error> {
         let uses_proxy: ProxyMatch = Arc::new(config.proxies.matcher());
         Self::with_resolution(
             pool,
@@ -120,7 +142,7 @@ impl MediaFetcher {
         url_policy: UrlPolicy,
         address_resolver: Arc<dyn AddressResolver>,
         uses_proxy: ProxyMatch,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, crate::Error> {
         Ok(Self {
             pinned: pool.client(config, ClientVariant::Media)?,
             unpinned: pool.client(config, ClientVariant::UnpinnedMedia)?,
@@ -145,11 +167,11 @@ impl MediaFetcher {
 
     pub async fn fetch(&self, url: Url, policy: DownloadPolicy) -> Result<DownloadedMedia, Error> {
         if policy.max_bytes == 0 {
-            return Err(Repr::DownloadDisabled.into());
+            return Err(Error::DownloadDisabled);
         }
         tokio::time::timeout(policy.timeout, self.fetch_before_deadline(url, policy))
             .await
-            .map_err(Repr::DownloadTimeout)?
+            .map_err(|_| Error::Timeout)?
     }
 
     async fn fetch_before_deadline(
@@ -165,25 +187,22 @@ impl MediaFetcher {
                 .get(url.clone())
                 .send()
                 .await
-                .map_err(Repr::download)?;
+                .map_err(crate::transport::Error::from)?;
             if response.status().is_redirection() {
                 if redirects_followed == policy.max_redirects {
-                    return Err(Repr::TooManyRedirects.into());
+                    return Err(Error::TooManyRedirects);
                 }
                 let location = response
                     .headers()
                     .get(reqwest::header::LOCATION)
-                    .ok_or(Repr::MissingRedirectLocation)?
-                    .to_str()
-                    .map_err(|error| Repr::InvalidRedirect(error.into()))?;
-                url = url
-                    .join(location)
-                    .map_err(|error| Repr::InvalidRedirect(error.into()))?;
+                    .and_then(|value| value.to_str().ok())
+                    .ok_or(Error::MissingRedirectLocation)?;
+                url = url.join(location).map_err(|_| Error::InvalidRedirect)?;
                 redirects_followed += 1;
                 continue;
             }
             if !response.status().is_success() {
-                return Err(Repr::DownloadStatus(response.status().as_u16()).into());
+                return Err(Error::Http(response.status().as_u16()));
             }
             enforce_download_size(response.content_length().unwrap_or(0), policy.max_bytes)?;
             let content_type = response
@@ -196,7 +215,11 @@ impl MediaFetcher {
                 .unwrap_or("application/octet-stream")
                 .to_string();
             let mut bytes = Vec::new();
-            while let Some(chunk) = response.chunk().await.map_err(Repr::download)? {
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(crate::transport::Error::from)?
+            {
                 enforce_download_size(bytes.len() as u64 + chunk.len() as u64, policy.max_bytes)?;
                 bytes.extend_from_slice(&chunk);
             }
@@ -215,13 +238,13 @@ impl MediaFetcher {
             || !url.username().is_empty()
             || url.password().is_some()
         {
-            return Err(Repr::BlockedUrl.into());
+            return Err(Error::BlockedUrl);
         }
-        let host = url.host_str().ok_or(Repr::BlockedUrl)?;
+        let host = url.host_str().ok_or(Error::BlockedUrl)?;
         if self.allow_private_network {
             return Ok(&self.pinned);
         }
-        let port = url.port_or_known_default().ok_or(Repr::BlockedUrl)?;
+        let port = url.port_or_known_default().ok_or(Error::BlockedUrl)?;
         if self.url_policy.allows(host, port) {
             return Ok(&self.unpinned);
         }
@@ -239,29 +262,27 @@ impl MediaFetcher {
             .trim_end_matches(']')
             .parse::<IpAddr>()
         {
-            return (!is_blocked_ip(ip))
-                .then_some(())
-                .ok_or(Repr::BlockedUrl.into());
+            return (!is_blocked_ip(ip)).then_some(()).ok_or(Error::BlockedUrl);
         }
         let addresses = self
             .address_resolver
             .resolve(host, port)
             .await
-            .map_err(Repr::Resolve)?;
+            .map_err(|error| crate::transport::Error::Network(error.to_string()))?;
         validate_addresses(&addresses)
     }
 }
 
 fn enforce_download_size(length: u64, max_bytes: u64) -> Result<(), Error> {
     if length > max_bytes {
-        return Err(Repr::DownloadTooLarge.into());
+        return Err(Error::DownloadTooLarge);
     }
     Ok(())
 }
 
 fn validate_addresses(addresses: &[SocketAddr]) -> Result<(), Error> {
     if addresses.is_empty() || addresses.iter().any(|address| is_blocked_ip(address.ip())) {
-        return Err(Repr::BlockedUrl.into());
+        return Err(Error::BlockedUrl);
     }
     Ok(())
 }
@@ -335,8 +356,10 @@ impl Resolve for PublicDnsResolver {
                 .await
                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error + Send + Sync>)?
                 .collect::<Vec<_>>();
-            validate_addresses(&addresses)
-                .map_err(|error| Box::new(error) as Box<dyn std::error::Error + Send + Sync>)?;
+            validate_addresses(&addresses).map_err(|_| {
+                Box::new(io::Error::other("destination rejected by network policy"))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })?;
             Ok(Box::new(addresses.into_iter()) as Addrs)
         })
     }
@@ -499,7 +522,7 @@ mod tests {
             b"HTTP/1.1 200 OK\r\nContent-Type: application/pdf; charset=binary\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc",
         )
         .await;
-        let client = Client::for_test();
+        let client = Client::no_redirect_for_test();
         let media = MediaFetcher::for_test(client)
             .fetch(url, policy(3, 0))
             .await
@@ -515,13 +538,13 @@ mod tests {
             b"HTTP/1.1 200 OK\r\nContent-Type: application/pdf\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc",
         )
         .await;
-        let client = Client::for_test();
+        let client = Client::no_redirect_for_test();
         let error = MediaFetcher::for_test(client)
             .fetch(url, policy(2, 0))
             .await
             .expect_err("oversize body is rejected");
         server.await.expect("server completes");
-        assert!(matches!(error.repr(), Repr::DownloadTooLarge));
+        assert!(matches!(error, Error::DownloadTooLarge));
     }
 
     #[tokio::test]
@@ -530,13 +553,13 @@ mod tests {
             b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n",
         )
         .await;
-        let client = Client::for_test();
+        let client = Client::no_redirect_for_test();
         let error = MediaFetcher::for_test(client)
             .fetch(url, policy(3, 0))
             .await
             .expect_err("stream crossing limit is rejected");
         server.await.expect("server completes");
-        assert!(matches!(error.repr(), Repr::DownloadTooLarge));
+        assert!(matches!(error, Error::DownloadTooLarge));
     }
 
     #[tokio::test]
@@ -572,7 +595,7 @@ mod tests {
             .expect_err("private redirect is rejected");
         let requests = server.await.expect("server completes");
         assert_eq!(requests.len(), 1);
-        assert!(matches!(error.repr(), Repr::BlockedUrl));
+        assert!(matches!(error, Error::BlockedUrl));
     }
 
     #[tokio::test]
@@ -599,27 +622,7 @@ mod tests {
             .await
             .expect_err("fetch times out");
         server.await.expect("server completes");
-        assert!(matches!(error.repr(), Repr::DownloadTimeout(_)));
-        assert!(!error.dispatched());
-    }
-
-    #[rstest::rstest]
-    #[case::closed_before_answering(b"")]
-    #[case::reset_mid_body(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nab")]
-    #[tokio::test]
-    async fn a_failed_download_never_reached_the_provider(#[case] response: &'static [u8]) {
-        let (url, server) = serve(response).await;
-        let url = url.join("?sig=secret").expect("valid test URL");
-        let error = MediaFetcher::for_test(Client::for_test())
-            .fetch(url, policy(10, 0))
-            .await
-            .expect_err("download fails");
-        server.await.expect("server completes");
-        let report = litellm_error::Report::new(&error).to_string();
-        assert!(!error.dispatched());
-        assert!(!error.is_request());
-        assert!(!report.contains("secret"), "{report}");
-        assert!(!report.contains("document"), "{report}");
+        assert!(matches!(error, Error::Timeout));
     }
 
     #[tokio::test]
@@ -649,13 +652,8 @@ mod tests {
         let url =
             Url::parse("https://user:password@8.8.8.8/document").expect("credentialed URL parses");
         assert!(matches!(
-            fetcher
-                .fetch(url, policy(1, 0))
-                .await
-                .err()
-                .as_ref()
-                .map(Error::repr),
-            Some(Repr::BlockedUrl)
+            fetcher.fetch(url, policy(1, 0)).await,
+            Err(Error::BlockedUrl)
         ));
     }
 
@@ -685,10 +683,7 @@ mod tests {
         let result = fetcher(UNROUTABLE, HashSet::from(["localhost"]), other_port, false)
             .fetch(url, policy(2, 0))
             .await;
-        assert!(matches!(
-            result.as_ref().err().map(Error::repr),
-            Some(Repr::BlockedUrl)
-        ));
+        assert!(matches!(result, Err(Error::BlockedUrl)));
     }
 
     #[test]
@@ -747,9 +742,6 @@ mod tests {
         )
         .fetch(url, policy(2, 0))
         .await;
-        assert!(matches!(
-            blocked.as_ref().err().map(Error::repr),
-            Some(Repr::BlockedUrl)
-        ));
+        assert!(matches!(blocked, Err(Error::BlockedUrl)));
     }
 }

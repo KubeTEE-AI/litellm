@@ -1,7 +1,7 @@
 import userEvent from "@testing-library/user-event";
 import React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderWithProviders, screen, waitFor, within } from "../../tests/test-utils";
+import { describe, expect, it, vi } from "vitest";
+import { renderWithProviders, screen, waitFor } from "../../tests/test-utils";
 import Navbar from "./navbar";
 
 // Mock the hooks and utilities
@@ -90,7 +90,7 @@ vi.mock("./Navbar/CommunityEngagementButtons/CommunityEngagementButtons", () => 
 }));
 
 // Create mock functions that can be controlled in tests
-let mockUseThemeImpl = (): { logoUrl: string | null; logoUrlDark?: string | null } => ({ logoUrl: null });
+let mockUseThemeImpl = () => ({ logoUrl: null as string | null });
 let mockUseHealthReadinessDetailsImpl = () => ({ data: null as any });
 let mockGetLocalStorageItemImpl = (key: string) => null as string | null;
 const mockUseAuthorizedImpl = () => ({
@@ -136,10 +136,6 @@ Object.defineProperty(window, "location", {
 });
 
 describe("Navbar", () => {
-  afterEach(() => {
-    mockUseThemeImpl = () => ({ logoUrl: null });
-  });
-
   const defaultProps = {
     accessToken: "test-token",
     isPublicPage: false,
@@ -254,21 +250,17 @@ describe("Navbar", () => {
     expect(useHealthReadinessDetailsSpy).toHaveBeenCalledWith(null);
   });
 
-  it.each(["https://example.com/dark-logo.png", null])(
-    "should use the configured dark logo %s with the light logo as fallback",
-    (logoUrlDark) => {
-      const logoUrl = "https://example.com/custom-logo.png";
-      mockUseThemeImpl = () => ({ logoUrl, logoUrlDark });
+  it("should use custom logo from theme context", () => {
+    mockUseThemeImpl = () => ({ logoUrl: "https://example.com/custom-logo.png" });
 
-      renderWithProviders(<Navbar {...defaultProps} />);
+    renderWithProviders(<Navbar {...defaultProps} />);
 
-      const brand = within(screen.getByRole("link", { name: /litellm brand/i }));
-      const light = brand.getByAltText("LiteLLM Brand");
-      const dark = brand.getByAltText("");
-      expect(light).toHaveAttribute("src", logoUrl);
-      expect(dark).toHaveAttribute("src", logoUrlDark ?? logoUrl);
-    },
-  );
+    const logoImg = screen.getByAltText("LiteLLM Brand");
+    expect(logoImg).toHaveAttribute("src", "https://example.com/custom-logo.png");
+
+    // Reset mock
+    mockUseThemeImpl = () => ({ logoUrl: null });
+  });
 
   it("should hide user dropdown and notifications on public pages", () => {
     const publicPageProps = { ...defaultProps, isPublicPage: true };

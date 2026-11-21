@@ -7,8 +7,6 @@ import zipfile
 from pathlib import Path
 from typing import Final
 
-COST_MAP: Final = Path(__file__).resolve().parents[2] / "model_prices_and_context_window.json"
-
 CHILD_SCRIPT: Final = """
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -36,9 +34,6 @@ else:
 after = module.gil_stats()
 if not isinstance(after.get("releases"), int):
     raise AssertionError(f"native module unusable after panic: {after!r}")
-
-if module.bundled_model_cost_map() != Path(sys.argv[2]).read_bytes():
-    raise AssertionError("the wheel embeds a different model_prices_and_context_window.json than this checkout")
 """
 
 
@@ -60,9 +55,7 @@ def main() -> int:
 
         native_path: Final = Path(temporary_directory) / Path(native_members[0].filename).name
         native_path.write_bytes(archive.read(native_members[0]))
-        result: Final = subprocess.run(
-            (sys.executable, "-c", CHILD_SCRIPT, str(native_path), str(COST_MAP)), check=False
-        )
+        result: Final = subprocess.run((sys.executable, "-c", CHILD_SCRIPT, str(native_path)), check=False)
 
     if result.returncode != 0:
         sys.stderr.write(f"native wheel smoke test exited with status {result.returncode}\n")

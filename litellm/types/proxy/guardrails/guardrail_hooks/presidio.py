@@ -1,6 +1,6 @@
-from collections.abc import Mapping
+from typing import Any
 
-from typing_extensions import ReadOnly, TypedDict
+from typing_extensions import TypedDict
 
 from litellm.types.guardrails import PiiEntityType
 
@@ -17,5 +17,5 @@ class PresidioAnalyzeResponseItem(TypedDict, total=False):
     start: int | None
     end: int | None
     score: float | None
-    analysis_explanation: ReadOnly[Mapping[str, object] | None]
-    recognition_metadata: ReadOnly[Mapping[str, object] | None]
+    analysis_explanation: dict[str, Any] | None
+    recognition_metadata: dict[str, Any] | None

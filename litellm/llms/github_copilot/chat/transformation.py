@@ -4,11 +4,9 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Final, cast  # noqa: TID251  # spread dict loses the role literal without a cast
 
 import httpx
-from pydantic import TypeAdapter
 
 from litellm.exceptions import AuthenticationError
 from litellm.llms.anthropic.chat.transformation import AnthropicConfig
-from litellm.llms.openai.common_utils import decoded_json_object
 from litellm.llms.openai.openai import OpenAIConfig
 from litellm.types.llms.openai import AllMessageValues, ChatCompletionToolCallChunk
 from litellm.types.utils import ModelResponse
@@ -16,7 +14,7 @@ from litellm.types.utils import ModelResponse
 from ..authenticator import Authenticator
 from ..common_utils import (
     DEFAULT_GITHUB_COPILOT_API_BASE,
-    GetAccessTokenError,
+    GetAPIKeyError,
     get_copilot_default_headers,
 )
 from ..per_user_auth import require_github_copilot_user_session
@@ -24,8 +22,6 @@ from ..per_user_auth import require_github_copilot_user_session
 if TYPE_CHECKING:
     from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
     from litellm.litellm_core_utils.tokenizer import Encoding
-
-_DECODED_JSON: Final = TypeAdapter(object)
 
 
 class GithubCopilotConfig(OpenAIConfig):
@@ -56,7 +52,7 @@ class GithubCopilotConfig(OpenAIConfig):
         dynamic_api_base: Final = self.api_base_without_login(api_base)
         try:
             dynamic_api_key: Final = self.authenticator.get_api_key()
-        except GetAccessTokenError as e:
+        except GetAPIKeyError as e:
             raise AuthenticationError(
                 model=model,
                 llm_provider=custom_llm_provider,
@@ -104,7 +100,7 @@ class GithubCopilotConfig(OpenAIConfig):
             return get_copilot_default_headers(session_token)
         try:
             return get_copilot_default_headers(self.authenticator.get_api_key())
-        except GetAccessTokenError:
+        except GetAPIKeyError:
             return {}
 
     def validate_environment(
@@ -313,7 +309,7 @@ class GithubCopilotConfig(OpenAIConfig):
         json_mode: bool | None = None,
     ) -> "ModelResponse":
         try:
-            decoded_response: Final = _DECODED_JSON.validate_python(raw_response.json())
+            response_json = raw_response.json()
         except Exception:
             return super().transform_response(
                 model=model,
@@ -329,13 +325,12 @@ class GithubCopilotConfig(OpenAIConfig):
                 json_mode=json_mode,
             )
 
-        response_json: Final = decoded_json_object(decoded_response)
         if not response_json.get("choices"):
-            synthesized: Final = self._synthesize_choices_for_anthropic_native(dict(response_json))
+            response_json = self._synthesize_choices_for_anthropic_native(response_json)
             raw_response = httpx.Response(
                 status_code=raw_response.status_code,
                 headers=raw_response.headers,
-                content=json.dumps(synthesized).encode(),
+                content=json.dumps(response_json).encode(),
             )
 
         return super().transform_response(

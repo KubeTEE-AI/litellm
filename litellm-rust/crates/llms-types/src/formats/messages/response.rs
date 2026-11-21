@@ -10,27 +10,12 @@ pub struct MessagesResponse {
     pub content: Vec<Value>,
     pub stop_reason: Option<String>,
     pub stop_sequence: Option<String>,
-    /// `Some(Value::Null)` when the provider sent an explicit `null`, which Python keeps.
-    #[serde(
-        default,
-        deserialize_with = "present_value",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<Value>,
-    #[serde(
-        default,
-        deserialize_with = "present_value",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub container: Option<Value>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
-}
-
-fn present_value<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Value>, D::Error> {
-    <Value as serde::Deserialize<'de>>::deserialize(deserializer).map(Some)
 }
 
 #[cfg(test)]
@@ -87,22 +72,5 @@ mod tests {
                 .expect("serializable");
         assert_eq!(body.get("usage").cloned(), usage);
         assert_eq!(body.get("container").cloned(), container);
-    }
-
-    #[test]
-    fn explicit_null_usage_and_container_survive_a_round_trip() {
-        let body = json!({"id": "msg_1", "type": "message", "role": "assistant", "model": "m",
-            "content": [], "stop_reason": null, "stop_sequence": null,
-            "usage": null, "container": null});
-        let parsed: MessagesResponse = serde_json::from_value(body.clone()).expect("parses");
-        assert_eq!(serde_json::to_value(parsed).expect("serializable"), body);
-    }
-
-    #[test]
-    fn absent_usage_and_container_stay_absent() {
-        let body = json!({"id": "msg_1", "type": "message", "role": "assistant", "model": "m",
-            "content": [], "stop_reason": null, "stop_sequence": null});
-        let parsed: MessagesResponse = serde_json::from_value(body.clone()).expect("parses");
-        assert_eq!(serde_json::to_value(parsed).expect("serializable"), body);
     }
 }

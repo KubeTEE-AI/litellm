@@ -5,7 +5,7 @@ use litellm_gateway_auth::AuthenticatedRequest;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::BodyError;
+use crate::Error;
 
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -24,9 +24,10 @@ type Prepared = (Map<String, Value>, CacheOptions);
 pub(crate) fn prepare(
     identity: &AuthenticatedRequest,
     body: Map<String, Value>,
-) -> Result<Prepared, BodyError> {
+) -> Result<Prepared, Error> {
     let controls: Controls = match body.get("cache").filter(|value| !value.is_null()) {
-        Some(value) => serde_json::from_value(value.clone()).map_err(BodyError::CacheControls)?,
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|error| Error::InvalidBody(error.to_string()))?,
         None => Controls::default(),
     };
     let caching: Option<bool> = body
@@ -34,7 +35,7 @@ pub(crate) fn prepare(
         .filter(|value| !value.is_null())
         .map(|value| serde_json::from_value(value.clone()))
         .transpose()
-        .map_err(BodyError::Caching)?;
+        .map_err(|error| Error::InvalidBody(error.to_string()))?;
     let caller = identity.caller();
     let options = CacheOptions {
         policy: CachePolicy {
@@ -61,37 +62,36 @@ pub(crate) fn prepare(
     ))
 }
 
-fn duration(seconds: f64) -> Result<Duration, BodyError> {
-    match Duration::try_from_secs_f64(seconds) {
-        Ok(duration) if !duration.is_zero() => Ok(duration),
-        Ok(_) => Err(BodyError::CacheDuration(None)),
-        Err(error) => Err(BodyError::CacheDuration(Some(error))),
-    }
+fn duration(seconds: f64) -> Result<Duration, Error> {
+    Duration::try_from_secs_f64(seconds)
+        .ok()
+        .filter(|duration| !duration.is_zero())
+        .ok_or_else(|| Error::InvalidBody("cache durations must be finite and positive".into()))
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct CacheHeaders(std::sync::Arc<std::sync::OnceLock<String>>);
 
-impl litellm_host::interceptors::Interceptors<litellm_inference::Error> for CacheHeaders {
+impl litellm_host::interceptors::Interceptors<litellm_inference::RouteError> for CacheHeaders {
     async fn before_provider_request(
         &self,
         wire: litellm_host::interceptors::WireRequest,
         _: litellm_host::interceptors::RequestContext,
-    ) -> Result<litellm_host::interceptors::WireRequest, litellm_inference::Error> {
+    ) -> Result<litellm_host::interceptors::WireRequest, litellm_inference::RouteError> {
         Ok(wire)
     }
 
     async fn after_provider_response(
         &self,
         _: litellm_host::interceptors::RawResponse,
-    ) -> Result<(), litellm_inference::Error> {
+    ) -> Result<(), litellm_inference::RouteError> {
         Ok(())
     }
 
     async fn result_ready(
         &self,
         facts: litellm_host::interceptors::ExecutionFacts,
-    ) -> Result<(), litellm_inference::Error> {
+    ) -> Result<(), litellm_inference::RouteError> {
         if let litellm_host::interceptors::ResultSource::Cache { key } = facts.source {
             let _ = self.0.set(key);
         }

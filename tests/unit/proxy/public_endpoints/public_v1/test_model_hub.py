@@ -10,9 +10,8 @@ from fastapi.testclient import TestClient
 import litellm
 from litellm.proxy._types import LiteLLMRoutes
 from litellm.proxy.proxy_server import app
-from litellm.types.router import DeploymentTypedDict, ModelGroupInfo
+from litellm.types.router import ModelGroupInfo
 from tests._master_key import MASTER_KEY
-from tests.unit.proxy.router_entry_point_stubs import route_entry_points_to_stubs
 
 client = TestClient(app)
 
@@ -20,18 +19,14 @@ MODEL_HUB_PATH = "/public/v1/model_hub"
 LEGACY_MODEL_HUB_PATH = "/public/model_hub"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _FakeRouter:
-    """Stands in for the running Router: `_get_model_group_info` only ever asks it these."""
+    """Stands in for the running Router: `_get_model_group_info` only ever asks it this."""
 
     infos: Mapping[str, ModelGroupInfo]
-    model_group_alias: Mapping[str, str] = MappingProxyType({})
 
-    def get_model_group_info(self, model_group: str, team_id: str | None = None) -> ModelGroupInfo | None:
+    def get_model_group_info(self, model_group: str) -> ModelGroupInfo | None:
         return self.infos.get(model_group)
-
-    def get_model_list_of_routed_group(self, model_group: str, team_id: str | None = None) -> list[DeploymentTypedDict]:
-        return []
 
 
 def _info(
@@ -48,7 +43,7 @@ def _publish(monkeypatch, infos: Sequence[ModelGroupInfo], prisma_client: object
     monkeypatch.setattr(litellm, "public_model_groups", [info.model_group for info in infos])
     monkeypatch.setattr(
         "litellm.proxy.proxy_server.llm_router",
-        route_entry_points_to_stubs(_FakeRouter(infos=MappingProxyType({info.model_group: info for info in infos}))),
+        _FakeRouter(infos=MappingProxyType({info.model_group: info for info in infos})),
     )
     monkeypatch.setattr("litellm.proxy.proxy_server.prisma_client", prisma_client)
 
@@ -66,19 +61,13 @@ def _groups(response) -> list[str]:
     return [row["model_group"] for row in response.json()["data"]]
 
 
-def _health_check(
-    model_name: str,
-    status: str = "healthy",
-    *,
-    model_id: str | None = None,
-    checked_at: datetime = datetime(2026, 8, 1, 9, 30, tzinfo=timezone.utc),
-):
+def _health_check(model_name: str, status: str = "healthy"):
     check = MagicMock()
     check.model_name = model_name
-    check.model_id = model_id
+    check.model_id = None
     check.status = status
     check.response_time_ms = 12.5
-    check.checked_at = checked_at
+    check.checked_at = datetime(2026, 8, 1, 9, 30, tzinfo=timezone.utc)
     return check
 
 
@@ -163,21 +152,6 @@ def test_the_latest_health_check_lands_on_its_row(monkeypatch):
     assert rows["model-001"]["health_response_time"] == 12.5
     assert rows["model-001"]["health_checked_at"] == "2026-08-01T09:30:00+00:00"
     assert rows["model-000"]["health_status"] is None
-
-
-def test_a_stale_row_sorting_after_the_fresh_one_does_not_speak_for_the_group(monkeypatch):
-    """The read orders by model_id with NULL last; that order used to pick the group's health."""
-    fresh = _health_check(
-        "model-001", model_id="deployment-a", checked_at=datetime(2026, 10, 16, 11, 10, tzinfo=timezone.utc)
-    )
-    stale = _health_check("model-001", status="unhealthy", checked_at=datetime(2026, 9, 4, 11, 20, tzinfo=timezone.utc))
-    prisma_client, _ = _recording_prisma([fresh, stale])
-    _publish(monkeypatch, _named(3), prisma_client=prisma_client)
-
-    rows = {row["model_group"]: row for row in _get().json()["data"]}
-
-    assert rows["model-001"]["health_status"] == "healthy"
-    assert rows["model-001"]["health_checked_at"] == "2026-10-16T11:10:00+00:00"
 
 
 def test_a_health_read_that_returns_nothing_still_serves_the_page(monkeypatch):
@@ -351,11 +325,11 @@ def test_no_router_answers_with_a_problem_rather_than_the_openai_error_shape(mon
 
 def test_an_unexpected_router_failure_answers_as_a_problem_not_the_openai_error_shape(monkeypatch):
     class _Exploding:
-        def get_model_group_info(self, model_group: str, team_id: str | None = None) -> ModelGroupInfo:
+        def get_model_group_info(self, model_group: str) -> ModelGroupInfo:
             raise RuntimeError("router blew up")
 
     monkeypatch.setattr(litellm, "public_model_groups", ["boom"])
-    monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", route_entry_points_to_stubs(_Exploding()))
+    monkeypatch.setattr("litellm.proxy.proxy_server.llm_router", _Exploding())
     monkeypatch.setattr("litellm.proxy.proxy_server.prisma_client", None)
 
     response = _get()

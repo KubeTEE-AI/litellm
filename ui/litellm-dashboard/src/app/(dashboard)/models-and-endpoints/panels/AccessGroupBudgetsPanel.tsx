@@ -3,7 +3,6 @@
 import { SortingState } from "@tanstack/react-table";
 import { Inbox } from "lucide-react";
 import React, { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import DeleteResourceModal from "@/components/common_components/DeleteResourceModal";
 import { DataTable } from "@/components/shared/DataTable";
@@ -22,24 +21,20 @@ import { getAccessGroupBudgetColumns } from "@/app/(dashboard)/models-and-endpoi
 const DEFAULT_SORTING: SortingState = [{ id: "access_group", desc: false }];
 
 function EmptyState() {
-  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-1 py-6">
       <div className="mb-1 flex size-10 items-center justify-center rounded-lg bg-muted">
         <Inbox className="size-5 text-muted-foreground" />
       </div>
-      <div className="text-sm font-medium text-foreground">
-        {t("modelsAndEndpoints.accessGroupBudgetsPanel.empty.title")}
-      </div>
+      <div className="text-sm font-medium text-foreground">No model access groups yet</div>
       <div className="text-sm text-muted-foreground">
-        {t("modelsAndEndpoints.accessGroupBudgetsPanel.empty.description")}
+        Put a deployment in an access group from its model settings, then give the group a shared budget here.
       </div>
     </div>
   );
 }
 
 export default function AccessGroupBudgetsPanel() {
-  const { t } = useTranslation();
   const { userRole } = useAuthorized();
   const { data: accessGroups, isLoading } = useModelAccessGroups();
   const setBudget = useSetModelAccessGroupBudget();
@@ -62,7 +57,7 @@ export default function AccessGroupBudgetsPanel() {
       { accessGroup, params },
       {
         onSuccess: () => {
-          toast.success(t("modelsAndEndpoints.accessGroupBudgetsPanel.toasts.saved", { accessGroup }));
+          toast.success(`Budget saved for "${accessGroup}"`);
           setEditing(null);
         },
       },
@@ -74,7 +69,7 @@ export default function AccessGroupBudgetsPanel() {
     const accessGroup = clearing.access_group;
     clearBudget.mutate(accessGroup, {
       onSuccess: () => {
-        toast.success(t("modelsAndEndpoints.accessGroupBudgetsPanel.toasts.cleared", { accessGroup }));
+        toast.success(`Budget cleared for "${accessGroup}"`);
         setClearing(null);
       },
     });
@@ -82,7 +77,10 @@ export default function AccessGroupBudgetsPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-muted-foreground">{t("modelsAndEndpoints.accessGroupBudgetsPanel.description")}</p>
+      <p className="text-sm text-muted-foreground">
+        A model access group can carry one budget that every key granted the group by name draws from together. Keys
+        that reach the group&apos;s models through a wildcard or all-proxy-models are not charged against it.
+      </p>
 
       <DataTable
         data={accessGroups ?? []}
@@ -93,7 +91,7 @@ export default function AccessGroupBudgetsPanel() {
         sorting={sorting}
         onSortingChange={setSorting}
         isLoading={isLoading}
-        loadingMessage={t("modelsAndEndpoints.accessGroupBudgetsPanel.loading")}
+        loadingMessage="Loading model access groups…"
         noDataMessage={<EmptyState />}
         size="compact"
       />
@@ -107,19 +105,12 @@ export default function AccessGroupBudgetsPanel() {
 
       <DeleteResourceModal
         isOpen={clearing !== null}
-        title={t("modelsAndEndpoints.accessGroupBudgetsPanel.clearModal.title")}
-        message={t("modelsAndEndpoints.accessGroupBudgetsPanel.clearModal.message")}
-        resourceInformationTitle={t("modelsAndEndpoints.accessGroupBudgetsPanel.clearModal.informationTitle")}
+        title="Clear Budget"
+        message="Are you sure you want to clear this access group's budget? The recorded shared spend is cleared with it, and the group's models stay available."
+        resourceInformationTitle="Access Group"
         resourceInformation={[
-          {
-            label: t("modelsAndEndpoints.accessGroupBudgetsPanel.clearModal.accessGroup"),
-            value: clearing?.access_group ?? null,
-            code: true,
-          },
-          {
-            label: t("modelsAndEndpoints.accessGroupBudgetsPanel.clearModal.maxBudget"),
-            value: clearing?.budget?.max_budget?.toString() ?? null,
-          },
+          { label: "Access Group", value: clearing?.access_group ?? null, code: true },
+          { label: "Max Budget", value: clearing?.budget?.max_budget?.toString() ?? null },
         ]}
         onCancel={() => setClearing(null)}
         onOk={handleConfirmClear}

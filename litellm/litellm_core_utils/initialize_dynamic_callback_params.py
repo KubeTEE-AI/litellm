@@ -28,7 +28,7 @@ def inherit_message_logging_privacy(disabled: bool) -> Generator[None]:
 
 
 def iter_client_callback_metadata_dicts(
-    kwargs: Mapping[str, object],
+    kwargs: dict[str, Any],
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     litellm_params: Final = kwargs.get("litellm_params")
     if isinstance(litellm_params, dict):

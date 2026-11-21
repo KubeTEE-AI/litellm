@@ -23,56 +23,58 @@ import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CircleHelp, Clock } from "lucide-react";
-import type { ParseKeys } from "i18next";
 import React, { useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
-import { useTranslation } from "react-i18next";
 
 const STORE_PROMPTS_FIELD_NAME = "store_prompts_in_spend_logs";
 
 interface OptionalField {
   readonly name: GeneralSettingsFieldName;
   readonly kind: "duration" | "count";
-  readonly label: ParseKeys;
-  readonly placeholder: ParseKeys;
-  readonly fallbackTooltip: ParseKeys;
+  readonly label: string;
+  readonly placeholder: string;
+  readonly fallbackTooltip: string;
 }
 
 const OPTIONAL_FIELDS: readonly OptionalField[] = [
   {
     name: GeneralSettingsFieldName.MAXIMUM_SPEND_LOGS_RETENTION_PERIOD,
     kind: "duration",
-    label: "adminPanel.loggingSettings.fields.retentionPeriod.label",
-    placeholder: "adminPanel.loggingSettings.fields.retentionPeriod.placeholder",
-    fallbackTooltip: "adminPanel.loggingSettings.fields.retentionPeriod.hint",
+    label: "Maximum Spend Logs Retention Period (Optional)",
+    placeholder: "e.g., 7d, 30d",
+    fallbackTooltip:
+      "Set the maximum retention period for spend logs (e.g., '7d' for 7 days, '30d' for 30 days). Leave empty for no limit.",
   },
   {
     name: GeneralSettingsFieldName.MAXIMUM_SPEND_LOGS_CLEANUP_BATCH_SIZE,
     kind: "count",
-    label: "adminPanel.loggingSettings.fields.cleanupBatchSize.label",
-    placeholder: "adminPanel.loggingSettings.fields.cleanupBatchSize.placeholder",
-    fallbackTooltip: "adminPanel.loggingSettings.fields.cleanupBatchSize.hint",
+    label: "Spend Logs Cleanup Batch Size (Optional)",
+    placeholder: "e.g., 1000",
+    fallbackTooltip: "Rows deleted per DELETE statement during cleanup. Leave empty to use the default of 1000.",
   },
   {
     name: GeneralSettingsFieldName.MAXIMUM_SPEND_LOGS_CLEANUP_MAX_BATCHES,
     kind: "count",
-    label: "adminPanel.loggingSettings.fields.cleanupMaxBatches.label",
-    placeholder: "adminPanel.loggingSettings.fields.cleanupMaxBatches.placeholder",
-    fallbackTooltip: "adminPanel.loggingSettings.fields.cleanupMaxBatches.hint",
+    label: "Spend Logs Cleanup Max Batches (Optional)",
+    placeholder: "e.g., 500",
+    fallbackTooltip:
+      "Maximum number of DELETE statements run per table per cleanup run. Leave empty to use the default of 500.",
   },
   {
     name: GeneralSettingsFieldName.MAXIMUM_SPEND_LOGS_CLEANUP_RUN_BUDGET,
     kind: "duration",
-    label: "adminPanel.loggingSettings.fields.cleanupRunBudget.label",
-    placeholder: "adminPanel.loggingSettings.fields.cleanupRunBudget.placeholder",
-    fallbackTooltip: "adminPanel.loggingSettings.fields.cleanupRunBudget.hint",
+    label: "Spend Logs Cleanup Run Budget (Optional)",
+    placeholder: "e.g., 5m",
+    fallbackTooltip:
+      "Wall-clock budget for a whole cleanup run, shared across every table it cleans (e.g., '5m'). Leave empty to use the default of 5m.",
   },
   {
     name: GeneralSettingsFieldName.MAXIMUM_SPEND_LOGS_CLEANUP_BATCH_TIMEOUT,
     kind: "duration",
-    label: "adminPanel.loggingSettings.fields.cleanupBatchTimeout.label",
-    placeholder: "adminPanel.loggingSettings.fields.cleanupBatchTimeout.placeholder",
-    fallbackTooltip: "adminPanel.loggingSettings.fields.cleanupBatchTimeout.hint",
+    label: "Spend Logs Cleanup Batch Timeout (Optional)",
+    placeholder: "e.g., 30s",
+    fallbackTooltip:
+      "Postgres statement and lock timeout applied to each cleanup batch, so cleanup never monopolizes a connection (e.g., '30s'). Leave empty to use the default of 30s.",
   },
 ];
 
@@ -156,7 +158,6 @@ const LoggingSettingsForm: React.FC<LoggingSettingsFormProps> = ({
   isSaving,
   onSubmit,
 }) => {
-  const { t } = useTranslation();
   const form = useForm<LoggingSettingsFormValues>({ defaultValues: initialValues });
 
   return (
@@ -167,8 +168,11 @@ const LoggingSettingsForm: React.FC<LoggingSettingsFormProps> = ({
             control={form.control}
             name={STORE_PROMPTS_FIELD_NAME}
             label={labelWithHint(
-              t("adminPanel.loggingSettings.fields.storePrompts.label"),
-              describeField(STORE_PROMPTS_FIELD_NAME, t("adminPanel.loggingSettings.fields.storePrompts.hint")),
+              "Store Prompts in Spend Logs",
+              describeField(
+                STORE_PROMPTS_FIELD_NAME,
+                "When enabled, prompts will be stored in spend logs for tracking and analysis purposes.",
+              ),
             )}
           >
             {({ id, value, onChange, onBlur }) => (
@@ -181,7 +185,7 @@ const LoggingSettingsForm: React.FC<LoggingSettingsFormProps> = ({
               key={field.name}
               control={form.control}
               name={field.name}
-              label={labelWithHint(t(field.label), describeField(field.name, t(field.fallbackTooltip)))}
+              label={labelWithHint(field.label, describeField(field.name, field.fallbackTooltip))}
             >
               {({ ref, onChange, onBlur, ...control }) =>
                 field.kind === "duration" ? (
@@ -191,7 +195,7 @@ const LoggingSettingsForm: React.FC<LoggingSettingsFormProps> = ({
                       ref={ref}
                       onChange={(event) => onChange(event.target.value)}
                       onBlur={onBlur}
-                      placeholder={t(field.placeholder)}
+                      placeholder={field.placeholder}
                     />
                     <InputGroupAddon>
                       <Clock />
@@ -207,7 +211,7 @@ const LoggingSettingsForm: React.FC<LoggingSettingsFormProps> = ({
                       onChange(countDisplay(event.target.value));
                       onBlur();
                     }}
-                    placeholder={t(field.placeholder)}
+                    placeholder={field.placeholder}
                   />
                 )
               }
@@ -216,14 +220,8 @@ const LoggingSettingsForm: React.FC<LoggingSettingsFormProps> = ({
         </FieldGroup>
 
         <Button type="submit" className="mt-6" disabled={isSaving}>
-          {isSaving && (
-            <UiLoadingSpinner
-              role="img"
-              aria-label={t("adminPanel.loggingSettings.savingAriaLabel")}
-              className="size-4"
-            />
-          )}
-          {isSaving ? t("adminPanel.loggingSettings.saving") : t("adminPanel.loggingSettings.save")}
+          {isSaving && <UiLoadingSpinner role="img" aria-label="loading" className="size-4" />}
+          {isSaving ? "Saving..." : "Save Settings"}
         </Button>
       </form>
     </TooltipProvider>
@@ -231,7 +229,6 @@ const LoggingSettingsForm: React.FC<LoggingSettingsFormProps> = ({
 };
 
 const LoggingSettings: React.FC = () => {
-  const { t } = useTranslation();
   const { mutate, isPending } = useStoreRequestInSpendLogs();
   const { mutate: deleteField, isPending: isDeletingField } = useDeleteProxyConfigField();
   const { data: proxyConfigData, isLoading: isLoadingConfig } = useProxyConfig(ConfigType.GENERAL_SETTINGS);
@@ -298,9 +295,8 @@ const LoggingSettings: React.FC = () => {
     const updateParams = buildUpdateParams(formValues);
     const submitUpdate = () =>
       mutate(updateParams, {
-        onSuccess: () => toast.success(t("adminPanel.loggingSettings.toasts.updated")),
-        onError: (error) =>
-          toast.fromError(t("adminPanel.loggingSettings.toasts.saveFailed", { error: parseErrorMessage(error) })),
+        onSuccess: () => toast.success("Spend logs settings updated successfully"),
+        onError: (error) => toast.fromError("Failed to save spend logs settings: " + parseErrorMessage(error)),
       });
 
     const fieldsToClear = omittedFieldNames(updateParams, isStored);
@@ -313,7 +309,7 @@ const LoggingSettings: React.FC = () => {
       if (failed.length > 0) {
         // Reporting an unqualified success here would tell the admin a setting
         // was reset to its default while the old value is still in force.
-        toast.fromError(t("adminPanel.loggingSettings.toasts.clearFailed", { fields: failed.join(", ") }));
+        toast.fromError(`Failed to clear saved value for: ${failed.join(", ")}`);
         return;
       }
       submitUpdate();
@@ -323,11 +319,13 @@ const LoggingSettings: React.FC = () => {
   return (
     <Card>
       <CardHeader className="border-b">
-        <CardTitle>{t("adminPanel.loggingSettings.title")}</CardTitle>
+        <CardTitle>Logging Settings</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="flex w-full flex-col gap-6">
-          <p className="mb-0 text-muted-foreground">{t("adminPanel.loggingSettings.description")}</p>
+          <p className="mb-0 text-muted-foreground">
+            Proxy-wide settings that control how request and response data are written to spend logs.
+          </p>
 
           {isLoadingConfig ? (
             <div className="flex flex-col gap-3">

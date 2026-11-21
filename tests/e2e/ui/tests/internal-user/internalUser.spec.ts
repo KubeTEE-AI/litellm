@@ -9,7 +9,7 @@ import {
 import { Page } from "../../fixtures/pages";
 import { navigateToPage, clickTeamId } from "../../helpers/navigation";
 import { CHAT_MODEL_A, MOCK_RESPONSE_TEXT, masterKey } from "../../helpers/traffic";
-import { openPlayground, selectModel, sendMessage, enterVirtualKey } from "../../helpers/playground";
+import { keySourceSelect, onlyVisible, openPlayground, selectModel, sendMessage } from "../../helpers/playground";
 
 test.describe("Internal User", () => {
   test.use({ storageState: INTERNAL_USER_STORAGE_PATH });
@@ -67,13 +67,18 @@ test.describe("Internal User", () => {
     await page.getByRole("button", { name: "Create Key", exact: true }).click();
 
     await expect(page.getByText("Save your Key")).toBeVisible({ timeout: 10_000 });
-    const apiKey = (await page.getByRole("dialog", { name: "Save your Key" }).locator("pre").filter({ hasText: /^sk-/ }).innerText()).trim();
+    const apiKey = (await page.getByRole("dialog", { name: "Save your Key" }).locator("pre").innerText()).trim();
     expect(apiKey).toMatch(/^sk-/);
     await page.keyboard.press("Escape");
 
     try {
       await openPlayground(page);
-      await enterVirtualKey(page, apiKey);
+      await keySourceSelect(page).click();
+      await onlyVisible(page.getByRole("option", { name: "Virtual Key" })).click({ timeout: 15_000 });
+
+      const keyInput = onlyVisible(page.getByPlaceholder("Enter custom Virtual Key"));
+      await expect(keyInput).toBeVisible({ timeout: 10_000 });
+      await keyInput.fill(apiKey);
 
       await selectModel(page, CHAT_MODEL_A);
       await sendMessage(page, `internal user team key ping ${keyName}`);

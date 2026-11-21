@@ -71,7 +71,7 @@ where
 impl CounterCache for TestCache<f64> {
     fn increment_cache(&self, _: &str, amount: f64, _: ExactCacheContext) -> Result<f64, Error> {
         if self.fail {
-            return Err(Error::Unavailable(None));
+            return Err(Error::Unavailable);
         }
         let mut value = self.value.lock().unwrap();
         let incremented = value.unwrap_or_default() + amount;
@@ -92,7 +92,7 @@ where
         _: ExactCacheContext,
     ) -> Result<V, Error> {
         if self.fail {
-            return Err(Error::Unavailable(None));
+            return Err(Error::Unavailable);
         }
         let mut value = self.value.lock().unwrap();
         let winner = match value.as_ref() {
@@ -113,7 +113,7 @@ fn failed_l2_increment_leaves_l1_unchanged() {
 
     assert_eq!(
         cache.increment_cache("counter", 2.0, ExactCacheContext::default()),
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     );
     assert_eq!(
         l1.get_cache("counter", &ExactCacheContext::default())
@@ -276,11 +276,11 @@ impl BaseCache for Unavailable {
     }
 
     fn set_cache(&self, _: &str, _: String, _: &ExactCacheContext) -> Result<(), Error> {
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     }
 
     fn get_cache(&self, _: &str, _: &ExactCacheContext) -> Result<Option<String>, Error> {
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     }
 }
 
@@ -288,13 +288,13 @@ impl BatchCache for Unavailable {}
 
 impl DeleteCache for Unavailable {
     fn delete_cache(&self, _: &str) -> Result<(), Error> {
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     }
 }
 
 impl FlushCache for Unavailable {
     fn flush_cache(&self) -> Result<(), Error> {
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     }
 }
 
@@ -306,7 +306,7 @@ impl ClaimCache for Unavailable {
         _: &[String],
         _: ExactCacheContext,
     ) -> Result<String, Error> {
-        Err(Error::InvalidEntry(None))
+        Err(Error::InvalidEntry)
     }
 }
 
@@ -316,12 +316,9 @@ fn remote_failure_policy_selects_propagation_or_the_local_tier() {
     let strict = DualCache::new(Arc::new(TestCache::new(None, false)), Arc::new(Unavailable));
     assert_eq!(
         strict.set_cache("key", "value".into(), &context),
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     );
-    assert_eq!(
-        strict.get_cache("key", &context),
-        Err(Error::Unavailable(None))
-    );
+    assert_eq!(strict.get_cache("key", &context), Err(Error::Unavailable));
 
     let l1 = Arc::new(TestCache::new(None, false));
     let degraded = DualCache::new(l1.clone(), Arc::new(Unavailable))
@@ -350,7 +347,7 @@ fn claim_fallback_does_not_hide_non_availability_errors() {
             &[],
             ExactCacheContext::default()
         ),
-        Err(Error::InvalidEntry(None))
+        Err(Error::InvalidEntry)
     );
 }
 
@@ -422,7 +419,7 @@ impl Tier {
 
     fn check(&self) -> Result<(), Error> {
         if self.fail {
-            return Err(Error::Unavailable(None));
+            return Err(Error::Unavailable);
         }
         Ok(())
     }
@@ -601,7 +598,7 @@ async fn failed_async_l2_increment_leaves_l1_unchanged(log: Log) {
         cache
             .async_increment("counter", 2.0, seconds(30), true)
             .await,
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     );
     assert_eq!(
         l1.counter("counter"),
@@ -672,7 +669,7 @@ async fn failed_l2_increment_pipeline_leaves_l1_unchanged(log: Log) {
                 ttl: None,
             }])
             .await,
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     );
     assert_eq!(events(&log), ["l2 pipeline a"]);
     assert_eq!(l1.counter("a"), Some((1.0, ExactCacheContext::default())));
@@ -716,7 +713,7 @@ async fn failed_local_set_add_never_reaches_l2(log: Log) {
         cache
             .async_set_cache_sadd("members", vec!["a".into()], None)
             .await,
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     );
     assert!(events(&log).is_empty());
 }
@@ -771,7 +768,7 @@ async fn bulk_delete_stops_before_l2_when_the_local_delete_fails(log: Log) {
     );
     assert_eq!(
         cache.delete_cache_keys(vec!["a".into()]).await,
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     );
     assert!(events(&log).is_empty());
 }

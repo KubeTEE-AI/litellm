@@ -1,4 +1,3 @@
-import type { TFunction } from "i18next";
 import type { McpDcrCredentials } from "@/hooks/useMcpOAuthFlow";
 import {
   ADMIN_CONFIG_CREDENTIAL_KEYS,
@@ -115,23 +114,20 @@ const assertNever = (value: never): never => {
   throw new Error(`unhandled edit payload result: ${JSON.stringify(value)}`);
 };
 
-export const editPayloadErrorMessage = (
-  result: Exclude<BuildEditPayloadResult, { kind: "ok" }>,
-  t: TFunction,
-): string => {
+export const editPayloadErrorMessage = (result: Exclude<BuildEditPayloadResult, { kind: "ok" }>): string => {
   switch (result.kind) {
     case "invalid_tool_display_name":
-      return t("mcpServers.editServerPayload.errors.invalidToolDisplayName", { displayName: result.displayName });
+      return `Tool display name "${result.displayName}" is invalid. Only letters, digits, underscores, and hyphens are allowed (no spaces).`;
     case "stdio_config_missing_command":
-      return t("mcpServers.editServerPayload.errors.stdioConfigMissingCommand");
+      return "Stdio configuration must include a command";
     case "invalid_stdio_json":
-      return t("mcpServers.editServerPayload.errors.invalidStdioJson");
+      return "Invalid JSON in stdio configuration";
     case "invalid_stdio_env_json":
-      return t("mcpServers.editServerPayload.errors.invalidStdioEnvJson");
+      return "Invalid JSON in stdio env configuration";
     case "stdio_command_required":
-      return t("mcpServers.editServerPayload.errors.stdioCommandRequired");
+      return "Stdio transport requires a command";
     case "invalid_token_validation_json":
-      return t("mcpServers.editServerPayload.errors.invalidTokenValidationJson");
+      return "Invalid JSON in Token Validation Rules";
     default:
       return assertNever(result);
   }

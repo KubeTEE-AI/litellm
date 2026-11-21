@@ -12,9 +12,7 @@ from litellm.constants import (
 from litellm.litellm_core_utils.fallback_generalizations import (
     match_routing_generalization,
 )
-from litellm.litellm_core_utils.model_latest_aliases import resolve_model_latest_alias
 from litellm.llms.openai_like.json_loader import JSONProviderRegistry
-from litellm.llms.opencode.common_utils import is_opencode_api_base
 from litellm.secret_managers.main import get_secret, get_secret_str
 
 from ..types.router import GenericLiteLLMParams, LiteLLM_Params
@@ -148,10 +146,6 @@ def handle_anthropic_text_model_custom_llm_provider(
     return model, custom_llm_provider
 
 
-def declared_provider(model: str | None, custom_llm_provider: str | None = None) -> str | None:
-    return custom_llm_provider or (model.split("/", 1)[0] if model and "/" in model else None)
-
-
 def declared_authenticating_provider(model: str | None, custom_llm_provider: str | None = None) -> str | None:
     """The authenticating provider this pair already names, or None.
 
@@ -160,7 +154,7 @@ def declared_authenticating_provider(model: str | None, custom_llm_provider: str
     and for a declared pair the resolver's answer is the declaration itself, so metadata callers
     adopt the declaration instead of resolving.
     """
-    declared: Final = declared_provider(model, custom_llm_provider)
+    declared: Final = custom_llm_provider or (model.split("/", 1)[0] if model and "/" in model else None)
     return declared if declared in PROVIDERS_THAT_AUTHENTICATE_ON_PROVIDER_INFO else None
 
 
@@ -185,19 +179,6 @@ def inferred_provider(model: str | None) -> str | None:
 
 
 def get_llm_provider(
-    model: str,
-    custom_llm_provider: str | None = None,
-    api_base: str | None = None,
-    api_key: str | None = None,
-    litellm_params: GenericLiteLLMParams | None = None,
-) -> tuple[str, str, str | None, str | None]:
-    resolved_model, provider, dynamic_api_key, resolved_api_base = _get_llm_provider(
-        model, custom_llm_provider, api_base, api_key, litellm_params
-    )
-    return resolve_model_latest_alias(resolved_model, provider), provider, dynamic_api_key, resolved_api_base
-
-
-def _get_llm_provider(
     model: str,
     custom_llm_provider: str | None = None,
     api_base: str | None = None,
@@ -311,10 +292,6 @@ def _get_llm_provider(
                     elif endpoint == "api.deepinfra.com/v1/openai":
                         custom_llm_provider = "deepinfra"
                         dynamic_api_key = get_secret_str("DEEPINFRA_API_KEY")
-                    elif endpoint == "api.clfaigateway.dev/v1":
-                        custom_llm_provider = "clf_ai_gateway"  # rebind-ok: endpoint inference, like every branch
-                        clf_env_key = get_secret_str("CLF_AI_GATEWAY_API_KEY")
-                        dynamic_api_key = api_key or clf_env_key
                     elif endpoint == "api.mistral.ai/v1":
                         custom_llm_provider = "mistral"
                         dynamic_api_key = get_secret_str("MISTRAL_API_KEY")
@@ -460,6 +437,7 @@ def _get_llm_provider(
             model in litellm.open_ai_chat_completion_models
             or "ft:gpt-3.5-turbo" in model
             or "ft:gpt-4" in model  # catches ft:gpt-4-0613, ft:gpt-4o
+            or model in litellm.openai_image_generation_models
             or model.startswith("gpt-image")
             or model in litellm.openai_video_generation_models
         ):
@@ -667,11 +645,6 @@ def _get_openai_compatible_provider_info(
             api_base,
             dynamic_api_key,
         ) = litellm.DeepInfraConfig().get_openai_compatible_provider_info(api_base, api_key)
-    elif custom_llm_provider == "clf_ai_gateway":
-        (
-            api_base,  # rebind-ok: resolved base/key are what this function returns, like every branch
-            dynamic_api_key,  # rebind-ok: see above
-        ) = litellm.ClfAiGatewayConfig().get_openai_compatible_provider_info(api_base, api_key)
     elif custom_llm_provider == "empower":
         api_base = api_base or get_secret("EMPOWER_API_BASE") or "https://app.empower.dev/api/v1"
         dynamic_api_key = api_key or get_secret_str("EMPOWER_API_KEY")
@@ -822,13 +795,6 @@ def _get_openai_compatible_provider_info(
             api_base,
             dynamic_api_key,
         ) = litellm.XAIChatConfig().get_openai_compatible_provider_info(api_base, api_key)
-    elif custom_llm_provider == "bigmodel":
-        from litellm.llms.bigmodel.common_utils import get_bigmodel_api_key, get_bigmodel_url
-
-        (
-            api_base,  # rebind-ok: existing provider-resolution pipeline resolves the API base in place
-            dynamic_api_key,  # rebind-ok: existing provider-resolution pipeline resolves the API key in place
-        ) = get_bigmodel_url(api_base, "chat"), get_bigmodel_api_key(api_key)
     elif custom_llm_provider == "zai":
         (
             api_base,
@@ -884,9 +850,7 @@ def _get_openai_compatible_provider_info(
             api_base,
             dynamic_api_key,
             custom_llm_provider,
-        ) = litellm.ChatGPTConfig().get_openai_compatible_provider_info(
-            model, api_base, api_key, custom_llm_provider, litellm_params
-        )
+        ) = litellm.ChatGPTConfig().get_openai_compatible_provider_info(model, api_base, api_key, custom_llm_provider)
     elif custom_llm_provider == "novita":
         api_base = api_base or get_secret("NOVITA_API_BASE") or "https://api.novita.ai/v3/openai"
         dynamic_api_key = api_key or get_secret_str("NOVITA_API_KEY")
@@ -946,10 +910,6 @@ def _get_openai_compatible_provider_info(
             api_base,
             dynamic_api_key,
         ) = litellm.MorphChatConfig().get_openai_compatible_provider_info(api_base, api_key)
-    elif custom_llm_provider == "opencode_go":
-        from litellm.llms.opencode.common_utils import go_api_base, go_api_key
-
-        return model, custom_llm_provider, go_api_key(api_key), go_api_base(api_base, model)
     elif custom_llm_provider == "lambda_ai":
         (
             api_base,
@@ -1020,7 +980,3 @@ def _get_openai_compatible_provider_info(
     if dynamic_api_key is None and api_key is not None:
         dynamic_api_key = api_key
     return model, custom_llm_provider, dynamic_api_key, api_base
-
-
-def get_provider_affinity_header(api_base: str | None) -> str | None:
-    return "x-opencode-session" if is_opencode_api_base(api_base) else None

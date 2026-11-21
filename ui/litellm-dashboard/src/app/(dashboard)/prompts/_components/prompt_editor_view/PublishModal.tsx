@@ -1,6 +1,5 @@
 import React from "react";
 import { LoaderCircleIcon } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,35 +28,36 @@ const PublishModal: React.FC<PublishModalProps> = ({
   onPublish,
   onCancel,
 }) => {
-  const { t } = useTranslation();
   return (
     <Dialog open={visible} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("prompts.publishModal.title")}</DialogTitle>
-          <DialogDescription>{t("prompts.publishModal.description")}</DialogDescription>
+          <DialogTitle>Publish Prompt</DialogTitle>
+          <DialogDescription>Published prompts are versioned and can be used in API calls.</DialogDescription>
         </DialogHeader>
         <div className="py-4">
           <label htmlFor="publish-prompt-name" className="mb-2 block">
-            {t("prompts.publishModal.nameLabel")}
+            Name
           </label>
           <Input
             id="publish-prompt-name"
             value={promptName}
             onChange={(e) => onNameChange(e.target.value)}
-            placeholder={t("prompts.publishModal.namePlaceholder")}
+            placeholder="Enter prompt name"
             onKeyDown={(event) => event.key === "Enter" && onPublish()}
             autoFocus
           />
-          <p className="text-muted-foreground text-xs mt-2">{t("prompts.publishModal.hint")}</p>
+          <p className="text-muted-foreground text-xs mt-2">
+            Published prompts can be used in API calls and are versioned for easy tracking.
+          </p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            {t("prompts.publishModal.cancel")}
+            Cancel
           </Button>
           <Button onClick={onPublish} disabled={isSaving}>
             {isSaving && <LoaderCircleIcon className="animate-spin" />}
-            {t("prompts.publishModal.publish")}
+            Publish
           </Button>
         </DialogFooter>
       </DialogContent>

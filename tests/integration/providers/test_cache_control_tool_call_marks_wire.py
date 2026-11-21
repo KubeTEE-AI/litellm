@@ -61,8 +61,6 @@ from pydantic import JsonValue, TypeAdapter
 
 from litellm.utils import get_prompt_cache_min_tokens
 
-pytestmark: Final = pytest.mark.shares_worker_state
-
 _OWNED_PROXY_TIMEOUT: Final = 2 * graceful_stop_seconds() + 120
 _JSON_OBJECT: Final = TypeAdapter(dict[str, JsonValue])
 _LANE_CONFIG: Final = Path(__file__).resolve().parents[1] / "proxy_config.yaml"
@@ -354,7 +352,7 @@ _WEB_RESULTS: Final[dict[str, JsonValue]] = {
         ),
         pytest.param(
             {},
-            [SYSTEM_LABEL, ASK_LABEL, tool_use_label(CITIES[0]), tool_use_label(CITIES[1])],
+            [ASK_LABEL, tool_use_label(CITIES[0]), tool_use_label(CITIES[1]), "assistant:tool_use:srvtoolu_web"],
             id="server-tool-without-result",
         ),
     ),
@@ -406,21 +404,23 @@ def _gemini_peer(request: Request) -> Reply:
 
 _GEMINI: Final = "gemini/gemini-3.8-flash"
 _GEMINI_CACHE_WRITE: Final = [
-    ("GET", "/cachedContents"),
-    ("POST", "/cachedContents"),
+    ("GET", "/models/gemini-3.8-flash:cachedContents"),
+    ("POST", "/models/gemini-3.8-flash:cachedContents"),
     ("POST", "/models/gemini-3.8-flash:generateContent"),
 ]
 
 
 @pytest.mark.parametrize(
-    "calls",
+    ("calls", "expected"),
     (
-        pytest.param(marked_calls(), id="tool-calls-fill-the-cap"),
-        pytest.param([tool_call(city) for city in CITIES], id="unmarked-tool-calls"),
+        pytest.param(
+            marked_calls(), [("POST", "/models/gemini-3.8-flash:generateContent")], id="tool-calls-fill-the-cap"
+        ),
+        pytest.param([tool_call(city) for city in CITIES], _GEMINI_CACHE_WRITE, id="unmarked-tool-calls"),
     ),
 )
-def test_gemini_context_cache_takes_the_system_message_with_the_marked_ask(
-    gateway: Gateway, calls: list[JsonValue]
+def test_gemini_context_cache_follows_the_cap_census(
+    gateway: Gateway, calls: list[JsonValue], expected: list[tuple[str, str]]
 ) -> None:
     marker: Final = new_marker()
     long_system: Final[JsonValue] = {"role": "system", "content": "lorem " * (2 * get_prompt_cache_min_tokens(_GEMINI))}
@@ -434,18 +434,8 @@ def test_gemini_context_cache_takes_the_system_message_with_the_marked_ask(
         )
         status, _, text = post_chat(gateway, chat_body(model, messages))
         assert status == 200, text
-        received: Final = wire.drain()
-    targets: Final = [(request.method, request.target.split("?")[0]) for request in received]
-    cache_writes: Final = [
-        request.body for request in received if request.method == "POST" and "cachedContents" in request.target
-    ]
-    generate: Final = _JSON_OBJECT.validate_json(received[-1].body)
-    assert (
-        targets,
-        [b"lorem lorem" in body for body in cache_writes],
-        generate.get("cachedContent"),
-        "system_instruction" in generate,
-    ) == (_GEMINI_CACHE_WRITE, [True], "cachedContents/census", False), (cache_writes, generate)
+        targets: Final = [(request.method, request.target.split("?")[0]) for request in wire.drain()]
+    assert targets == expected
 
 
 def _openai_marks(request: Request) -> list[str]:
@@ -755,11 +745,11 @@ def test_request_level_points_skip_injection_when_client_marks_fill_the_cap(gate
 _OTHER_CALL_RESULT: Final[dict[str, JsonValue]] = {
     "web_search_results": [{"type": "web_search_tool_result", "tool_use_id": "srvtoolu_other", "content": []}]
 }
-_UNRUN_SERVER_MARK_UNCOUNTED: Final = [
-    SYSTEM_LABEL,
+_SERVER_MARK_COUNTED: Final = [
     ASK_LABEL,
     tool_use_label(CITIES[0]),
     tool_use_label(CITIES[1]),
+    "assistant:tool_use:srvtoolu_web",
 ]
 
 
@@ -775,7 +765,7 @@ _UNRUN_SERVER_MARK_UNCOUNTED: Final = [
         pytest.param(_OTHER_CALL_RESULT, id="result-for-another-call"),
     ),
 )
-def test_malformed_provider_specific_fields_leave_the_unrun_server_tool_call_mark_uncounted(
+def test_malformed_provider_specific_fields_count_the_server_tool_call_mark(
     gateway: Gateway, fields: JsonValue
 ) -> None:
     marker: Final = new_marker()
@@ -787,7 +777,7 @@ def test_malformed_provider_specific_fields_leave_the_unrun_server_tool_call_mar
         )
         assert status == 200, text
         labels: Final = anthropic_labels(_only_request(wire))
-    assert labels == _UNRUN_SERVER_MARK_UNCOUNTED
+    assert labels == _SERVER_MARK_COUNTED
 
 
 @pytest.mark.parametrize(

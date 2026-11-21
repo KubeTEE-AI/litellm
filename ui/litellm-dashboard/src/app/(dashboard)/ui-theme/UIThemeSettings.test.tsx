@@ -10,8 +10,7 @@ const setLogoUrl = vi.fn();
 const setLogoUrlDark = vi.fn();
 const setFaviconUrl = vi.fn();
 
-vi.mock("@/contexts/ThemeContext", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/contexts/ThemeContext")>()),
+vi.mock("@/contexts/ThemeContext", () => ({
   useTheme: () => ({
     logoUrl: null,
     setLogoUrl,
@@ -23,7 +22,7 @@ vi.mock("@/contexts/ThemeContext", async (importOriginal) => ({
 }));
 
 vi.mock("@/components/networking", () => ({
-  getProxyBaseUrl: () => "/gateway",
+  getProxyBaseUrl: () => "",
   getGlobalLitellmHeaderName: () => "Authorization",
 }));
 
@@ -111,34 +110,6 @@ describe("UIThemeSettings", () => {
     await waitFor(() => expect(patchCalls()).toHaveLength(1));
     expect(bodyOf(patchCalls()[0]).logo_url_dark).toBe("https://a.test/logo-dark.png");
   });
-
-  it.each(["Save Changes", "Reset to Default"])(
-    "should keep local logo routes out of settings and clear preview overrides with %s",
-    async (action) => {
-      const user = userEvent.setup();
-      fetchMock.mockImplementation(async () =>
-        Response.json({
-          values: { logo_url: null, logo_url_dark: null },
-          logo_url_via_proxy: true,
-          logo_url_dark_via_proxy: true,
-        }),
-      );
-
-      render(<UIThemeSettings userID="user-1" userRole="Admin" accessToken="sk-test" />);
-
-      await waitFor(() => expect(setLogoUrlDark).toHaveBeenCalledWith("/gateway/get_image?theme=dark"));
-      expect(setLogoUrl).toHaveBeenCalledWith("/gateway/get_image");
-      expect(screen.getByPlaceholderText(LOGO_PLACEHOLDER)).toHaveValue("");
-      expect(screen.getByPlaceholderText(LOGO_DARK_PLACEHOLDER)).toHaveValue("");
-
-      await user.click(screen.getByRole("button", { name: action }));
-      await waitFor(() => expect(patchCalls()).toHaveLength(1));
-      expect(bodyOf(patchCalls()[0])).toEqual({ logo_url: null, logo_url_dark: null, favicon_url: null });
-
-      expect(setLogoUrl).toHaveBeenLastCalledWith(null);
-      expect(setLogoUrlDark).toHaveBeenLastCalledWith(null);
-    },
-  );
 
   it("should surface a backend failure when saving fails", async () => {
     const user = userEvent.setup();

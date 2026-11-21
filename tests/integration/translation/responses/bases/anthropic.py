@@ -35,7 +35,7 @@ CLAUDE_HAIKU_4_5_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-haiku-4-5-20251001",
-        "id": "msg_011Cg7v1CTrRytLeZfaZojBR",
+        "id": "msg_011CfgDzBnuPYc7TdysZFRpo",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello."}],
@@ -51,7 +51,6 @@ CLAUDE_HAIKU_4_5_TEST_CASE: Final = TranslationTestCase(
             "output_tokens": 5,
             "service_tier": "standard",
             "inference_geo": "not_available",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -131,10 +130,10 @@ CLAUDE_SONNET_4_6_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-sonnet-4-6",
-        "id": "msg_011Cg7v1kr1sYXyQA143nsda",
+        "id": "msg_011CfgDzH3AcaSNXtvurLgAG",
         "type": "message",
         "role": "assistant",
-        "content": [{"type": "text", "text": "Hello! How can I help you?"}],
+        "content": [{"type": "text", "text": "Hello!"}],
         "container": None,
         "stop_reason": "end_turn",
         "stop_sequence": None,
@@ -144,10 +143,9 @@ CLAUDE_SONNET_4_6_TEST_CASE: Final = TranslationTestCase(
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
             "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0},
-            "output_tokens": 11,
+            "output_tokens": 5,
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -166,7 +164,7 @@ CLAUDE_SONNET_4_6_TEST_CASE: Final = TranslationTestCase(
                 "id": ANY,
                 "status": "completed",
                 "role": "assistant",
-                "content": [{"type": "output_text", "text": "Hello! How can I help you?", "annotations": []}],
+                "content": [{"type": "output_text", "text": "Hello!", "annotations": []}],
                 "phase": None,
             }
         ],
@@ -192,9 +190,9 @@ CLAUDE_SONNET_4_6_TEST_CASE: Final = TranslationTestCase(
                 "video_tokens": None,
                 "cache_write_tokens": 0,
             },
-            "output_tokens": 11,
-            "output_tokens_details": {"audio_tokens": None, "reasoning_tokens": 0, "text_tokens": 11},
-            "total_tokens": 29,
+            "output_tokens": 5,
+            "output_tokens_details": {"audio_tokens": None, "reasoning_tokens": 0, "text_tokens": 5},
+            "total_tokens": 23,
             "cost": None,
         },
         "user": None,
@@ -227,7 +225,7 @@ CLAUDE_SONNET_5_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-sonnet-5",
-        "id": "msg_011Cg7v215mkRTDBRoPcerLf",
+        "id": "msg_011CfgDzPkj2HxBq8qGJsGSi",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello."}],
@@ -244,7 +242,6 @@ CLAUDE_SONNET_5_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 0},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -324,7 +321,7 @@ CLAUDE_OPUS_4_8_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-opus-4-8",
-        "id": "msg_011Cg7v1PgnYbGrw8eGpka6f",
+        "id": "msg_011CfgDzV9vZCkuQJt15n3Z1",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello."}],
@@ -341,7 +338,6 @@ CLAUDE_OPUS_4_8_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 0},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -466,7 +462,6 @@ CLAUDE_SONNET_5_5_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 313},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
     },
     expected_litellm_response={**RESPONSES_RESPONSE, "model": "anthropic/claude-sonnet-5-5"},
@@ -539,7 +534,6 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 67},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
     },
     expected_litellm_response={
@@ -559,7 +553,7 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
                         "requested.\n"
                         "\n",
                         "annotations": [],
-                    }
+                    },
                 ],
                 "phase": None,
                 "encrypted_content": json.dumps(
@@ -571,7 +565,7 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
                             "requested.\n"
                             "\n",
                             "signature": CLAUDE_HAIKU_5_5_THINKING_SIGNATURE_0,
-                        }
+                        },
                     ],
                     separators=(",", ":"),
                 ),
@@ -611,7 +605,7 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
                     "range near the top of the file since no specific lines were requested.\n"
                     "\n",
                     "signature": CLAUDE_HAIKU_5_5_THINKING_SIGNATURE_0,
-                }
+                },
             ],
         },
     },
@@ -704,7 +698,6 @@ CLAUDE_OPUS_5_5_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 130},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
     },
     expected_litellm_response={
@@ -726,7 +719,7 @@ CLAUDE_OPUS_5_5_TEST_CASE: Final = TranslationTestCase(
                         "zero, negative, and non-integer inputs before moving to the test file.\n"
                         "\n",
                         "annotations": [],
-                    }
+                    },
                 ],
                 "phase": None,
                 "encrypted_content": json.dumps(
@@ -849,7 +842,6 @@ CLAUDE_FABLE_5_1_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 0},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
     },
     expected_litellm_response={
@@ -868,7 +860,7 @@ CLAUDE_FABLE_5_1_TEST_CASE: Final = TranslationTestCase(
                         "rejection, then I'll read the test file in a separate step since there's "
                         "nothing to derive from it for the read.",
                         "annotations": [],
-                    }
+                    },
                 ],
                 "phase": None,
             },

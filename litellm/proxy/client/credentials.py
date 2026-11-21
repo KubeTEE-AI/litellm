@@ -3,11 +3,8 @@ from typing import Any, Final
 from urllib.parse import quote
 
 import requests
-from pydantic import TypeAdapter
 
 from .exceptions import UnauthorizedError
-
-_DECODED_JSON: Final = TypeAdapter(object)
 
 
 class CredentialsManagementClient:
@@ -78,7 +75,7 @@ class CredentialsManagementClient:
         credential_values: Mapping[str, object],
         return_request: bool = False,
         display_name: str | None = None,
-    ) -> object | requests.Request:
+    ) -> dict[str, Any] | requests.Request:
         """
         Create a new credential.
 
@@ -114,7 +111,7 @@ class CredentialsManagementClient:
         try:
             response: Final = session.send(request.prepare(), timeout=self._timeout)
             response.raise_for_status()
-            return _DECODED_JSON.validate_python(response.json())
+            return response.json()
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 raise UnauthorizedError(e)
@@ -124,7 +121,7 @@ class CredentialsManagementClient:
         self,
         credential_name: str,
         return_request: bool = False,
-    ) -> object | requests.Request:
+    ) -> dict[str, Any] | requests.Request:
         """
         Delete a credential by name.
 
@@ -151,7 +148,7 @@ class CredentialsManagementClient:
         try:
             response: Final = session.send(request.prepare(), timeout=self._timeout)
             response.raise_for_status()
-            return _DECODED_JSON.validate_python(response.json())
+            return response.json()
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 raise UnauthorizedError(e)
@@ -162,7 +159,7 @@ class CredentialsManagementClient:
         credential_name: str,
         display_name: str | None,
         return_request: bool = False,
-    ) -> object | requests.Request:
+    ) -> Mapping[str, object] | requests.Request:
         url: Final = f"{self._base_url}/credentials/{quote(credential_name, safe='')}"
         data: Final[Mapping[str, object]] = {"display_name": display_name, "credential_info": {}}
 
@@ -175,7 +172,7 @@ class CredentialsManagementClient:
         try:
             response: Final = session.send(request.prepare(), timeout=self._timeout)
             response.raise_for_status()
-            return _DECODED_JSON.validate_python(response.json())
+            return response.json()
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 raise UnauthorizedError(e)
@@ -185,7 +182,7 @@ class CredentialsManagementClient:
         self,
         credential_name: str,
         return_request: bool = False,
-    ) -> object | requests.Request:
+    ) -> dict[str, Any] | requests.Request:
         """
         Get a credential by name.
 
@@ -212,7 +209,7 @@ class CredentialsManagementClient:
         try:
             response: Final = session.send(request.prepare(), timeout=self._timeout)
             response.raise_for_status()
-            return _DECODED_JSON.validate_python(response.json())
+            return response.json()
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 raise UnauthorizedError(e)

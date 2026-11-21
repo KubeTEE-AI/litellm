@@ -1,5 +1,4 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -57,39 +56,41 @@ export default function PassthroughAuthorizeSection({
   onRemoveStoredAppChange?: (remove: boolean) => void;
   appMayNotMatchUpstream?: boolean;
 }) {
-  const { t } = useTranslation();
   if (!isClientForwardedTokenMode(authType)) return null;
   const authorizeButtonLabels: Record<string, string> = {
-    authorizing: t("mcpServers.passthroughAuthorizeSection.authorize.authorizing"),
-    exchanging: t("mcpServers.passthroughAuthorizeSection.authorize.exchanging"),
+    authorizing: "Waiting for authorization...",
+    exchanging: "Exchanging authorization code...",
   };
-  const authorizeButtonLabel =
-    authorizeButtonLabels[oauthFlow.status] ?? t("mcpServers.passthroughAuthorizeSection.authorize.start");
+  const authorizeButtonLabel = authorizeButtonLabels[oauthFlow.status] ?? "Authorize & Fetch Tools (browser-only)";
   // On edit, "keep existing" only holds when the stored credential class is unchanged; a cross-class
   // switch (e.g. oauth2 -> true_passthrough) replaces credentials, so blanks then mean "no app".
   const classUnchanged = isEditing && credentialAuthClass(savedAuthType) === credentialAuthClass(authType);
   const clientIdPlaceholder = classUnchanged
-    ? t("mcpServers.passthroughAuthorizeSection.clientId.placeholderKeepSaved")
-    : t("mcpServers.passthroughAuthorizeSection.clientId.placeholderDcr");
+    ? "Leave blank to keep the currently saved app (if any)"
+    : "Leave blank to use dynamic client registration";
   const clientSecretPlaceholder = classUnchanged
-    ? t("mcpServers.passthroughAuthorizeSection.clientSecret.placeholderKeepSaved")
-    : t("mcpServers.passthroughAuthorizeSection.clientSecret.placeholderPublicClient");
+    ? "Leave blank to keep the currently saved secret (if any)"
+    : "Leave blank for public clients / PKCE";
   const fieldClassName = "rounded-lg border-border focus:border-info focus:ring-ring";
   const clientIdExtra = classUnchanged
-    ? t("mcpServers.passthroughAuthorizeSection.clientId.helpKeepSaved")
-    : t("mcpServers.passthroughAuthorizeSection.clientId.helpClassChanged");
+    ? "Set this to make everyone authorize through a specific app; required for upstreams without dynamic client registration (e.g. a pre-registered Slack app)."
+    : "Switching the auth type discards the previously saved app; enter a client ID here or leave blank to use dynamic client registration.";
   return (
     <div className="rounded-lg border border-dashed border-border p-4 space-y-2 mb-4">
-      <p className="text-sm text-muted-foreground">{t("mcpServers.passthroughAuthorizeSection.description")}</p>
+      <p className="text-sm text-muted-foreground">
+        Callers bring their own upstream token for this auth type, so LiteLLM never stores tokens. To preview tools and
+        configure the tool allowlist, authorize against the upstream here: the token stays in this browser session only
+        and is never saved to LiteLLM. An OAuth app configured below IS saved with the server, so internal users who
+        authorize from the Tools page go through it.
+      </p>
       {appMayNotMatchUpstream && (
-        <p className="text-sm text-warning">{t("mcpServers.passthroughAuthorizeSection.appMayNotMatchUpstream")}</p>
+        <p className="text-sm text-warning">
+          You changed the upstream URL or endpoints; the OAuth app entered here was registered for the previous upstream
+          and may not be valid. Update the client ID, or clear it to use dynamic client registration.
+        </p>
       )}
       <MountedFormField
-        label={
-          <span className="text-sm font-medium text-foreground">
-            {t("mcpServers.passthroughAuthorizeSection.clientId.label")}
-          </span>
-        }
+        label={<span className="text-sm font-medium text-foreground">OAuth Client ID (optional)</span>}
         name={["credentials", "client_id"]}
         help={clientIdExtra}
       >
@@ -103,11 +104,7 @@ export default function PassthroughAuthorizeSection({
         )}
       </MountedFormField>
       <MountedFormField
-        label={
-          <span className="text-sm font-medium text-foreground">
-            {t("mcpServers.passthroughAuthorizeSection.clientSecret.label")}
-          </span>
-        }
+        label={<span className="text-sm font-medium text-foreground">OAuth Client Secret (optional)</span>}
         name={["credentials", "client_secret"]}
       >
         {(control) => (
@@ -120,13 +117,9 @@ export default function PassthroughAuthorizeSection({
         )}
       </MountedFormField>
       <MountedFormField
-        label={
-          <span className="text-sm font-medium text-foreground">
-            {t("mcpServers.passthroughAuthorizeSection.authorizationUrl.label")}
-          </span>
-        }
+        label={<span className="text-sm font-medium text-foreground">Authorization URL (optional)</span>}
         name="authorization_url"
-        help={t("mcpServers.passthroughAuthorizeSection.authorizationUrl.help")}
+        help="Set this when the upstream publishes no OAuth metadata, for example an internal server behind Microsoft Entra. Leave blank to discover it from the upstream."
       >
         {(control) => (
           <Input
@@ -137,13 +130,9 @@ export default function PassthroughAuthorizeSection({
         )}
       </MountedFormField>
       <MountedFormField
-        label={
-          <span className="text-sm font-medium text-foreground">
-            {t("mcpServers.passthroughAuthorizeSection.tokenUrl.label")}
-          </span>
-        }
+        label={<span className="text-sm font-medium text-foreground">Token URL (optional)</span>}
         name="token_url"
-        help={t("mcpServers.passthroughAuthorizeSection.tokenUrl.help")}
+        help="Token endpoint of the same authorization server. Leave blank to discover it from the upstream."
       >
         {(control) => (
           <Input
@@ -154,27 +143,17 @@ export default function PassthroughAuthorizeSection({
         )}
       </MountedFormField>
       <MountedFormField
-        label={
-          <span className="text-sm font-medium text-foreground">
-            {t("mcpServers.passthroughAuthorizeSection.scopes.label")}
-          </span>
-        }
+        label={<span className="text-sm font-medium text-foreground">Scopes (optional)</span>}
         name={["credentials", "scopes"]}
-        help={t("mcpServers.passthroughAuthorizeSection.scopes.help")}
+        help="Scopes requested from the upstream when a user authorizes. Press enter or comma between scopes."
       >
-        {(control) => (
-          <MultiSelect
-            {...tagsControl(control, t)}
-            placeholder={t("mcpServers.passthroughAuthorizeSection.scopes.placeholder")}
-            className="rounded-lg"
-          />
-        )}
+        {(control) => <MultiSelect {...tagsControl(control)} placeholder="Add scopes" className="rounded-lg" />}
       </MountedFormField>
       <DcrBridgeToggle authType={authType} initialChecked={dcrBridgeInitialChecked} />
       {isEditing && onRemoveStoredAppChange && (
         <Label className="items-start leading-normal font-normal text-foreground">
           <Checkbox className="mt-0.5" checked={removeStoredApp} onCheckedChange={onRemoveStoredAppChange} />
-          {t("mcpServers.passthroughAuthorizeSection.removeStoredApp")}
+          Remove the saved OAuth app on save (the server goes back to dynamic client registration)
         </Label>
       )}
       <Button
@@ -186,7 +165,10 @@ export default function PassthroughAuthorizeSection({
       </Button>
       {oauthFlow.error && <p className="text-sm text-destructive">{oauthFlow.error}</p>}
       {oauthFlow.status === "success" && oauthFlow.tokenResponse?.access_token && (
-        <p className="text-sm text-success">{t("mcpServers.passthroughAuthorizeSection.authorize.success")}</p>
+        <p className="text-sm text-success">
+          Token held for this browser session. Tools can now be previewed and configured; the token was not saved to
+          LiteLLM.
+        </p>
       )}
     </div>
   );

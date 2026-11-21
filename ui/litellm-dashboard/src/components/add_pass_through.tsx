@@ -4,7 +4,6 @@ import React, { useState } from "react";
 import { CircleHelp, Info, Plug } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/shared/Alert";
 import { useWatch } from "react-hook-form";
-import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { createPassThroughEndpoint } from "./networking";
@@ -26,8 +25,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useZodForm } from "@/lib/forms/useZodForm";
-import i18n from "@/i18n/i18n";
-import { codeSamples } from "@/i18n/untranslated/codeSamples";
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"] as const;
 const HTTP_METHOD_OPTIONS = HTTP_METHODS.map((method) => ({ label: method, value: method }));
@@ -37,19 +34,18 @@ type GuardrailSettings = Record<string, { request_fields?: string[]; response_fi
 const keyValuePairsSchema = z.array(z.tuple([z.string(), z.string()]));
 
 const passThroughFormSchema = z.object({
-  path: z
-    .string()
-    .min(1, { error: () => i18n.t("addPassThrough.validation.pathRequired") })
-    .regex(/^\//, { error: () => i18n.t("addPassThrough.validation.pathRequired") }),
+  path: z.string().min(1, "Path is required").regex(/^\//, "Path is required"),
   target: z
     .string()
-    .min(1, { error: () => i18n.t("addPassThrough.validation.targetRequired") })
-    .pipe(z.url({ error: () => i18n.t("addPassThrough.validation.invalidUrl") })),
+    .min(1, "Target URL is required")
+    .pipe(z.url({ error: "Please enter a valid URL" })),
   methods: z.array(z.string()).optional(),
   include_subpath: z.boolean(),
-  headers: keyValuePairsSchema,
+  headers: keyValuePairsSchema.refine((pairs) => pairs.some(([name]) => name !== ""), {
+    error: "Please configure the headers",
+  }),
   default_query_params: keyValuePairsSchema.optional(),
-  auth: z.boolean(),
+  auth: z.boolean().optional(),
   timeout: z.string().optional(),
   cost_per_request: z.string().optional(),
 });
@@ -63,7 +59,7 @@ const emptyFormValues = {
   include_subpath: true,
   headers: [],
   default_query_params: undefined,
-  auth: true,
+  auth: undefined,
   timeout: undefined,
   cost_per_request: undefined,
 } as unknown as PassThroughFormValues;
@@ -92,14 +88,15 @@ interface AddFallbacksProps {
   accessToken: string;
   passThroughItems: passThroughItem[];
   setPassThroughItems: React.Dispatch<React.SetStateAction<passThroughItem[]>>;
+  premiumUser?: boolean;
 }
 
 const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
   accessToken,
   setPassThroughItems,
   passThroughItems,
+  premiumUser = false,
 }) => {
-  const { t } = useTranslation();
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [guardrails, setGuardrails] = useState<GuardrailSettings>({});
@@ -126,7 +123,7 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
         include_subpath: values.include_subpath,
         headers: toRecord(values.headers),
         default_query_params: optionalRecord(values.default_query_params),
-        auth: values.auth,
+        ...(premiumUser ? { auth: values.auth } : {}),
         timeout: values.timeout,
         cost_per_request: values.cost_per_request,
         ...(Object.keys(guardrails).length > 0 ? { guardrails } : {}),
@@ -137,12 +134,12 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
 
       setPassThroughItems([...passThroughItems, createdEndpoint]);
 
-      toast.success(t("addPassThrough.toasts.created"));
+      toast.success("Pass-through endpoint created successfully");
       form.reset(emptyFormValues);
       setGuardrails({});
       setIsModalVisible(false);
     } catch (error) {
-      toast.fromError(t("addPassThrough.toasts.createFailed", { error: String(error) }));
+      toast.fromError("Error creating pass-through endpoint: " + error);
     } finally {
       setIsLoading(false);
     }
@@ -152,39 +149,44 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
     <TooltipProvider>
       <div>
         <Button className="mx-auto mb-4 mt-4" onClick={() => setIsModalVisible(true)}>
-          {t("addPassThrough.openButton")}
+          + Add Pass-Through Endpoint
         </Button>
         <Dialog open={isModalVisible} onOpenChange={(open) => !open && handleCancel()}>
           <DialogContent className="top-8 max-h-[calc(100dvh-4rem)] translate-y-0 overflow-y-auto sm:max-w-[1000px]">
             <DialogHeader>
               <div className="flex items-center space-x-3 border-b border-border pb-4">
                 <Plug className="size-5 text-info" />
-                <DialogTitle className="text-xl font-semibold text-foreground">{t("addPassThrough.title")}</DialogTitle>
+                <DialogTitle className="text-xl font-semibold text-foreground">Add Pass-Through Endpoint</DialogTitle>
               </div>
             </DialogHeader>
             <div className="mt-6">
               <Alert variant="info" className="mb-6">
                 <Info />
-                <AlertTitle>{t("addPassThrough.intro.title")}</AlertTitle>
-                <AlertDescription>{t("addPassThrough.intro.description")}</AlertDescription>
+                <AlertTitle>What is a Pass-Through Endpoint?</AlertTitle>
+                <AlertDescription>
+                  Route requests from your LiteLLM proxy to any external API. Perfect for custom models, image
+                  generation APIs, or any service you want to proxy through LiteLLM.
+                </AlertDescription>
               </Alert>
 
               <form onSubmit={form.handleSubmit(addPassThrough)} className="space-y-6">
                 <Card className="block p-5">
-                  <h3 className="mb-2 text-lg font-semibold text-foreground">{t("addPassThrough.route.title")}</h3>
-                  <p className="mb-5 text-sm text-muted-foreground">{t("addPassThrough.route.description")}</p>
+                  <h3 className="mb-2 text-lg font-semibold text-foreground">Route Configuration</h3>
+                  <p className="mb-5 text-sm text-muted-foreground">
+                    Configure how requests to your domain will be forwarded to the target API
+                  </p>
 
                   <div className="space-y-5">
                     <FormField
                       control={form.control}
                       name="path"
-                      label={t("addPassThrough.route.pathPrefix")}
-                      description={t("addPassThrough.route.pathPrefixExample")}
+                      label="Path Prefix"
+                      description="Example: /bria, /adobe-photoshop, /elasticsearch"
                     >
                       {({ value, onChange, ...field }) => (
                         <Input
                           {...field}
-                          placeholder={codeSamples.passThrough.targetPrefix}
+                          placeholder="bria"
                           value={value ?? ""}
                           onChange={(event) => {
                             const raw = event.target.value;
@@ -197,8 +199,8 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
                     <FormField
                       control={form.control}
                       name="target"
-                      label={t("addPassThrough.route.targetUrl")}
-                      description={t("addPassThrough.route.targetUrlExample")}
+                      label="Target URL"
+                      description="Example:https://engine.prod.bria-api.com"
                     >
                       {({ value, ...field }) => (
                         <Input {...field} placeholder="https://engine.prod.bria-api.com" value={value ?? ""} />
@@ -209,23 +211,21 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
                       control={form.control}
                       name="methods"
                       label={labelWithHint(
-                        t("addPassThrough.route.httpMethods"),
-                        t("addPassThrough.route.httpMethodsHint"),
+                        "HTTP Methods (Optional)",
+                        "Select specific HTTP methods. Leave empty to support all methods (GET, POST, PUT, DELETE, PATCH). Useful when the same path needs different targets for different methods.",
                       )}
                       description={
                         selectedMethods.length === 0
-                          ? t("addPassThrough.route.allMethodsDefault")
-                          : t("addPassThrough.route.onlyMethods", { methods: selectedMethods.join(", ") })
+                          ? "All HTTP methods supported (default)"
+                          : `Only ${selectedMethods.join(", ")} requests will be routed to this endpoint`
                       }
                     >
                       {({ value, onChange, ref: _ref, ...field }) => (
                         <Select multiple items={HTTP_METHOD_OPTIONS} value={value ?? []} onValueChange={onChange}>
                           <SelectTrigger {...field} className="w-full">
-                            <SelectValue placeholder={t("addPassThrough.route.methodsPlaceholder")}>
+                            <SelectValue placeholder="Select methods (leave empty for all)">
                               {(selected: string[]) =>
-                                selected.length === 0
-                                  ? t("addPassThrough.route.methodsPlaceholder")
-                                  : selected.join(", ")
+                                selected.length === 0 ? "Select methods (leave empty for all)" : selected.join(", ")
                               }
                             </SelectValue>
                           </SelectTrigger>
@@ -242,11 +242,9 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
 
                     <div className="flex items-center justify-between py-3">
                       <div>
-                        <div className="text-sm font-medium text-foreground">
-                          {t("addPassThrough.route.includeSubpaths")}
-                        </div>
+                        <div className="text-sm font-medium text-foreground">Include Subpaths</div>
                         <div className="mt-0.5 text-xs text-muted-foreground">
-                          {t("addPassThrough.route.includeSubpathsDescription")}
+                          Forward all subpaths to the target API (recommended for REST APIs)
                         </div>
                       </div>
                       <FormField control={form.control} name="include_subpath">
@@ -261,17 +259,24 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
                 <RoutePreview pathValue={pathValue} targetValue={targetValue} includeSubpath={includeSubpath} />
 
                 <Card className="block p-6">
-                  <h3 className="mb-2 text-lg font-semibold text-foreground">{t("addPassThrough.headers.title")}</h3>
-                  <p className="mb-6 text-sm text-muted-foreground">{t("addPassThrough.headers.description")}</p>
+                  <h3 className="mb-2 text-lg font-semibold text-foreground">Headers</h3>
+                  <p className="mb-6 text-sm text-muted-foreground">
+                    Add headers that will be sent with every request to the target API
+                  </p>
 
                   <FormField
                     control={form.control}
                     name="headers"
-                    label={labelWithHint(t("addPassThrough.headers.label"), t("addPassThrough.headers.hint"))}
+                    label={labelWithHint(
+                      "Authentication Headers",
+                      "Authentication and other headers to forward with requests",
+                    )}
                     description={
                       <>
-                        <span className="mb-1 block font-medium">{t("addPassThrough.headers.requiredNote")}</span>
-                        <span className="block">{t("addPassThrough.headers.examples")}</span>
+                        <span className="mb-1 block font-medium">
+                          Add authentication tokens and other required headers
+                        </span>
+                        <span className="block">Common examples: auth_token, Authorization, x-api-key</span>
                       </>
                     }
                   >
@@ -280,19 +285,26 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
                 </Card>
 
                 <Card className="block p-6">
-                  <h3 className="mb-2 text-lg font-semibold text-foreground">
-                    {t("addPassThrough.queryParams.title")}
-                  </h3>
-                  <p className="mb-6 text-sm text-muted-foreground">{t("addPassThrough.queryParams.description")}</p>
+                  <h3 className="mb-2 text-lg font-semibold text-foreground">Default Query Parameters</h3>
+                  <p className="mb-6 text-sm text-muted-foreground">
+                    Add query parameters that will be automatically sent with every request to the target API
+                  </p>
 
                   <FormField
                     control={form.control}
                     name="default_query_params"
-                    label={labelWithHint(t("addPassThrough.queryParams.label"), t("addPassThrough.queryParams.hint"))}
+                    label={labelWithHint(
+                      "Default Query Parameters (Optional)",
+                      "Query parameters that will be added to all requests. Clients can override these by providing their own values.",
+                    )}
                     description={
                       <>
-                        <span className="mb-1 block font-medium">{t("addPassThrough.queryParams.methodsNote")}</span>
-                        <span className="block">{t("addPassThrough.queryParams.overrideNote")}</span>
+                        <span className="mb-1 block font-medium">
+                          Parameters are sent with all GET, POST, PUT, PATCH requests
+                        </span>
+                        <span className="block">
+                          Client parameters override defaults. Examples: version=v1, format=json, key=default
+                        </span>
                       </>
                     }
                   >
@@ -301,25 +313,31 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
                 </Card>
 
                 <FormField control={form.control} name="auth">
-                  {({ value, onChange }) => <PassThroughSecuritySection authEnabled={value} onAuthChange={onChange} />}
+                  {({ value, onChange }) => (
+                    <PassThroughSecuritySection
+                      premiumUser={premiumUser}
+                      authEnabled={value ?? false}
+                      onAuthChange={onChange}
+                    />
+                  )}
                 </FormField>
 
                 <PassThroughGuardrailsSection accessToken={accessToken} value={guardrails} onChange={setGuardrails} />
 
                 <Card className="block p-6">
-                  <h3 className="mb-2 text-lg font-semibold text-foreground">
-                    {t("addPassThrough.performance.title")}
-                  </h3>
-                  <p className="mb-6 text-sm text-muted-foreground">{t("addPassThrough.performance.description")}</p>
+                  <h3 className="mb-2 text-lg font-semibold text-foreground">Performance</h3>
+                  <p className="mb-6 text-sm text-muted-foreground">
+                    Configure upstream request timeout for this endpoint
+                  </p>
 
                   <FormField
                     control={form.control}
                     name="timeout"
                     label={labelWithHint(
-                      t("addPassThrough.performance.timeoutLabel"),
-                      t("addPassThrough.performance.timeoutHint"),
+                      "Request Timeout (seconds)",
+                      "Max time to wait for the upstream API to respond. Leave empty to use general_settings.pass_through_request_timeout (default 600s).",
                     )}
-                    description={t("addPassThrough.performance.timeoutDescription")}
+                    description="Use a higher value for slow upstream APIs (e.g. 1200 for long-running LLM calls)"
                   >
                     {({ value, onChange, ref: _ref, ...field }) => (
                       <NumericalInput
@@ -337,14 +355,17 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
                 </Card>
 
                 <Card className="block p-6">
-                  <h3 className="mb-2 text-lg font-semibold text-foreground">{t("addPassThrough.billing.title")}</h3>
-                  <p className="mb-6 text-sm text-muted-foreground">{t("addPassThrough.billing.description")}</p>
+                  <h3 className="mb-2 text-lg font-semibold text-foreground">Billing</h3>
+                  <p className="mb-6 text-sm text-muted-foreground">Optional cost tracking for this endpoint</p>
 
                   <FormField
                     control={form.control}
                     name="cost_per_request"
-                    label={labelWithHint(t("addPassThrough.billing.costLabel"), t("addPassThrough.billing.costHint"))}
-                    description={t("addPassThrough.billing.costDescription")}
+                    label={labelWithHint(
+                      "Cost Per Request (USD)",
+                      "Optional: Track costs for requests to this endpoint",
+                    )}
+                    description="The cost charged for each request through this endpoint"
                   >
                     {({ value, onChange, ref: _ref, ...field }) => (
                       <NumericalInput
@@ -363,11 +384,11 @@ const AddPassThroughEndpoint: React.FC<AddFallbacksProps> = ({
 
                 <div className="flex items-center justify-end space-x-3 border-t border-border pt-6">
                   <Button type="button" variant="outline" onClick={handleCancel}>
-                    {t("addPassThrough.cancel")}
+                    Cancel
                   </Button>
                   <Button type="submit" disabled={isLoading} aria-busy={isLoading}>
                     {isLoading && <UiLoadingSpinner className="size-4" />}
-                    {isLoading ? t("addPassThrough.creating") : t("addPassThrough.submit")}
+                    {isLoading ? "Creating..." : "Add Pass-Through Endpoint"}
                   </Button>
                 </div>
               </form>

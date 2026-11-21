@@ -1,5 +1,4 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ComplexityRouterConfigValue } from "./ComplexityRouterConfig";
@@ -18,13 +17,14 @@ const ClassifierPluginTimeoutField: React.FC<ClassifierPluginTimeoutFieldProps> 
   onChange,
   showValidationErrors = false,
 }) => {
-  const { t } = useTranslation();
   const error = getClassifierPluginTimeoutError("custom", value.classifier_plugin_timeout_ms);
   return (
     <div className="mt-4 space-y-2">
-      <p className="text-sm text-muted-foreground">{t("addModel.classifierPluginTimeoutField.intro")}</p>
+      <p className="text-sm text-muted-foreground">
+        This router uses a custom classifier plugin set in config.yaml. Pick a classifier below to replace it.
+      </p>
       <Label htmlFor={CLASSIFIER_PLUGIN_TIMEOUT_ID} className="block font-semibold">
-        {t("addModel.classifierPluginTimeoutField.label")}
+        Classifier plugin timeout (ms)
       </Label>
       <Input
         id={CLASSIFIER_PLUGIN_TIMEOUT_ID}
@@ -39,7 +39,9 @@ const ClassifierPluginTimeoutField: React.FC<ClassifierPluginTimeoutFieldProps> 
         }
         aria-invalid={Boolean(showValidationErrors && error)}
       />
-      <p className="text-sm text-muted-foreground">{t("addModel.classifierPluginTimeoutField.help")}</p>
+      <p className="text-sm text-muted-foreground">
+        Time budget for the plugin call. On expiry the fallback path decides the tier.
+      </p>
       {showValidationErrors && error && (
         <p className="text-sm text-destructive" role="alert">
           {error}

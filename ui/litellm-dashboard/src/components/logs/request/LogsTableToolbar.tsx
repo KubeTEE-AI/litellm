@@ -3,7 +3,6 @@
 import moment from "moment";
 import { CalendarDays } from "lucide-react";
 import { type ComponentProps, useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,15 +43,14 @@ interface LogsTimeRangePickerProps {
 }
 
 export function LogsTimeRangePicker({ value, onValueChange }: LogsTimeRangePickerProps) {
-  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   const selectedOption = QUICK_SELECT_OPTIONS.find(
     (option) => option.value === value.interval.value && option.unit === value.interval.unit,
   );
   const displayLabel = value.isCustomDate
-    ? getTimeRangeDisplay(true, value.startTime, value.endTime, t)
-    : selectedOption && t(selectedOption.labelKey);
+    ? getTimeRangeDisplay(true, value.startTime, value.endTime)
+    : selectedOption?.label;
 
   return (
     <>
@@ -69,7 +67,7 @@ export function LogsTimeRangePicker({ value, onValueChange }: LogsTimeRangePicke
           <div className="space-y-1">
             {QUICK_SELECT_OPTIONS.map((option) => (
               <Button
-                key={option.labelKey}
+                key={option.label}
                 variant="ghost"
                 className="w-full justify-start font-normal"
                 onClick={() => {
@@ -77,7 +75,7 @@ export function LogsTimeRangePicker({ value, onValueChange }: LogsTimeRangePicke
                   setOpen(false);
                 }}
               >
-                {t(option.labelKey)}
+                {option.label}
               </Button>
             ))}
             <div className="my-2 border-t" />
@@ -86,7 +84,7 @@ export function LogsTimeRangePicker({ value, onValueChange }: LogsTimeRangePicke
               className="w-full justify-start font-normal"
               onClick={() => onValueChange({ ...value, isCustomDate: !value.isCustomDate })}
             >
-              {t("logs.request.toolbar.customRange")}
+              Custom Range
             </Button>
           </div>
         </PopoverContent>
@@ -100,7 +98,7 @@ export function LogsTimeRangePicker({ value, onValueChange }: LogsTimeRangePicke
             value={value.startTime}
             onChange={(event) => onValueChange({ ...value, startTime: event.target.value })}
           />
-          <span className="text-sm text-muted-foreground">{t("logs.request.toolbar.rangeSeparator")}</span>
+          <span className="text-sm text-muted-foreground">to</span>
           <Input
             type="datetime-local"
             className="w-auto"

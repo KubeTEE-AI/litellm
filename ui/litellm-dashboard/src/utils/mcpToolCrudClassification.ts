@@ -1,5 +1,3 @@
-import type { ParseKeys } from "i18next";
-
 export type CrudOp = "read" | "create" | "update" | "delete" | "unknown";
 
 const DELETE_RE = /\b(delete|remove|destroy|purge|drop|erase|unlink)\b/i;
@@ -58,31 +56,31 @@ export function groupToolsByCrud(tools: MCPToolEntry[]): Record<CrudOp, MCPToolE
 
 export const CRUD_GROUP_META: Record<
   CrudOp,
-  { label: ParseKeys; description: ParseKeys; risk: "low" | "medium" | "high" | "unknown" }
+  { label: string; description: string; risk: "low" | "medium" | "high" | "unknown" }
 > = {
   read: {
-    label: "mcpTools.crudPermissionPanel.groups.read.label",
-    description: "mcpTools.crudPermissionPanel.groups.read.description",
+    label: "Read",
+    description: "Safe operations — fetch, list, search. No side effects.",
     risk: "low",
   },
   create: {
-    label: "mcpTools.crudPermissionPanel.groups.create.label",
-    description: "mcpTools.crudPermissionPanel.groups.create.description",
+    label: "Create",
+    description: "Add new resources — insert, upload, register.",
     risk: "medium",
   },
   update: {
-    label: "mcpTools.crudPermissionPanel.groups.update.label",
-    description: "mcpTools.crudPermissionPanel.groups.update.description",
+    label: "Update",
+    description: "Modify existing resources — edit, patch, rename.",
     risk: "medium",
   },
   delete: {
-    label: "mcpTools.crudPermissionPanel.groups.delete.label",
-    description: "mcpTools.crudPermissionPanel.groups.delete.description",
+    label: "Delete",
+    description: "Destructive operations — remove, purge, destroy.",
     risk: "high",
   },
   unknown: {
-    label: "mcpTools.crudPermissionPanel.groups.unknown.label",
-    description: "mcpTools.crudPermissionPanel.groups.unknown.description",
+    label: "Other",
+    description: "Operations that could not be automatically classified.",
     risk: "unknown",
   },
 };

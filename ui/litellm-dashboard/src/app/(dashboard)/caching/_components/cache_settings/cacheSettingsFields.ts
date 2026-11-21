@@ -1,5 +1,3 @@
-import type { ParseKeys } from "i18next";
-
 export type CacheFieldType =
   | "string"
   | "password"
@@ -12,14 +10,14 @@ export type CacheFieldType =
 
 export interface CacheFieldOption {
   readonly value: string;
-  readonly label: ParseKeys;
+  readonly label: string;
 }
 
 export type RedisType = "node" | "cluster" | "sentinel" | "semantic";
 
 export type CacheSection = "connection" | "cluster" | "sentinel" | "semantic" | "ssl" | "cacheManagement" | "gcp";
 
-export type CacheFieldRule = (value: unknown) => ParseKeys | null;
+export type CacheFieldRule = (value: unknown) => string | null;
 
 // Marker the backend returns for a configured credential and maps back to the
 // stored secret on save, so the plaintext never round-trips through the form.
@@ -27,10 +25,10 @@ export const REDACTED_VALUE = "***REDACTED***";
 
 export interface CacheField {
   readonly name: string;
-  readonly label: ParseKeys;
+  readonly label: string;
   readonly type: CacheFieldType;
   readonly section: CacheSection;
-  readonly helpText: ParseKeys;
+  readonly helpText: string;
   readonly redisType: RedisType | null;
   readonly defaultValue?: string | number | boolean;
   readonly options?: readonly CacheFieldOption[];
@@ -42,11 +40,11 @@ export interface CacheField {
 
 export const REDIS_TYPES: readonly RedisType[] = ["node", "cluster", "sentinel", "semantic"];
 
-export const REDIS_TYPE_DESCRIPTIONS: Readonly<Record<RedisType, ParseKeys>> = {
-  node: "caching.settings.redisType.descriptions.node",
-  cluster: "caching.settings.redisType.descriptions.cluster",
-  sentinel: "caching.settings.redisType.descriptions.sentinel",
-  semantic: "caching.settings.redisType.descriptions.semantic",
+export const REDIS_TYPE_DESCRIPTIONS: Readonly<Record<RedisType, string>> = {
+  node: "Standard Redis node/single instance",
+  cluster: "Redis Cluster mode for high availability and horizontal scaling",
+  sentinel: "Redis Sentinel mode for high availability with automatic failover",
+  semantic: "Semantic caching that reuses responses for similar prompts",
 };
 
 const isBlank = (value: unknown): boolean => value === undefined || value === null || String(value).trim() === "";
@@ -56,7 +54,7 @@ const portRule: CacheFieldRule = (value) => {
     return null;
   }
   const port = Number(value);
-  return Number.isInteger(port) && port >= 1 && port <= 65535 ? null : "caching.settings.validation.port";
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? null : "Port must be an integer between 1 and 65535";
 };
 
 const jsonListRule: CacheFieldRule = (value) => {
@@ -67,9 +65,9 @@ const jsonListRule: CacheFieldRule = (value) => {
   try {
     parsed = JSON.parse(String(value));
   } catch {
-    return "caching.settings.validation.jsonArrayInvalid";
+    return "Must be a valid JSON array (use double quotes)";
   }
-  return Array.isArray(parsed) ? null : "caching.settings.validation.jsonArrayRequired";
+  return Array.isArray(parsed) ? null : "Must be a JSON array";
 };
 
 const nonNegativeIntegerRule: CacheFieldRule = (value) => {
@@ -77,202 +75,205 @@ const nonNegativeIntegerRule: CacheFieldRule = (value) => {
     return null;
   }
   const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 0 ? null : "caching.settings.validation.nonNegativeInteger";
+  return Number.isInteger(parsed) && parsed >= 0 ? null : "Must be a non-negative integer";
 };
 
 const numberRule: CacheFieldRule = (value) => {
   if (isBlank(value)) {
     return null;
   }
-  return Number.isNaN(Number(value)) ? "caching.settings.validation.number" : null;
+  return Number.isNaN(Number(value)) ? "Must be a number" : null;
 };
 
 export const CACHE_FIELDS: readonly CacheField[] = [
   {
     name: "url",
-    label: "caching.settings.fields.url.label",
+    label: "Redis URL",
     type: "string",
     section: "connection",
-    helpText: "caching.settings.fields.url.helpText",
+    helpText:
+      "Full Redis/Valkey connection URL (e.g. redis://:password@host:6379/1). When set, it takes precedence over Host, Port, Password, and Database Index.",
     redisType: null,
     secret: true,
   },
   {
     name: "host",
-    label: "caching.settings.fields.host.label",
+    label: "Host",
     type: "string",
     section: "connection",
-    helpText: "caching.settings.fields.host.helpText",
+    helpText: "Redis server hostname or IP address",
     redisType: null,
   },
   {
     name: "port",
-    label: "caching.settings.fields.port.label",
+    label: "Port",
     type: "string",
     section: "connection",
-    helpText: "caching.settings.fields.port.helpText",
+    helpText: "Redis server port number",
     redisType: null,
     defaultValue: "6379",
     rules: [portRule],
   },
   {
     name: "db",
-    label: "caching.settings.fields.db.label",
+    label: "Database Index",
     type: "integer",
     section: "connection",
-    helpText: "caching.settings.fields.db.helpText",
+    helpText: "Logical database index to isolate the cache (e.g. 1 for redis://host:6379/1)",
     redisType: null,
     rules: [nonNegativeIntegerRule],
   },
   {
     name: "password",
-    label: "caching.settings.fields.password.label",
+    label: "Password",
     type: "password",
     section: "connection",
-    helpText: "caching.settings.fields.password.helpText",
+    helpText: "Redis server password",
     redisType: null,
     secret: true,
   },
   {
     name: "username",
-    label: "caching.settings.fields.username.label",
+    label: "Username",
     type: "string",
     section: "connection",
-    helpText: "caching.settings.fields.username.helpText",
+    helpText: "Redis server username (if required)",
     redisType: null,
   },
   {
     name: "redis_startup_nodes",
-    label: "caching.settings.fields.redisStartupNodes.label",
+    label: "Startup Nodes",
     type: "list",
     section: "cluster",
-    helpText: "caching.settings.fields.redisStartupNodes.helpText",
+    helpText: 'List of startup nodes for Redis Cluster (e.g., [{"host": "127.0.0.1", "port": "7001"}])',
     redisType: "cluster",
     rules: [jsonListRule],
   },
   {
     name: "sentinel_nodes",
-    label: "caching.settings.fields.sentinelNodes.label",
+    label: "Sentinel Nodes",
     type: "list",
     section: "sentinel",
-    helpText: "caching.settings.fields.sentinelNodes.helpText",
+    helpText: 'List of Sentinel nodes (e.g., [["localhost", 26379]])',
     redisType: "sentinel",
     rules: [jsonListRule],
   },
   {
     name: "service_name",
-    label: "caching.settings.fields.serviceName.label",
+    label: "Service Name",
     type: "string",
     section: "sentinel",
-    helpText: "caching.settings.fields.serviceName.helpText",
+    helpText: "Master service name for Redis Sentinel",
     redisType: "sentinel",
   },
   {
     name: "sentinel_password",
-    label: "caching.settings.fields.sentinelPassword.label",
+    label: "Sentinel Password",
     type: "password",
     section: "sentinel",
-    helpText: "caching.settings.fields.sentinelPassword.helpText",
+    helpText: "Password for Redis Sentinel authentication",
     redisType: "sentinel",
     secret: true,
   },
   {
     name: "similarity_threshold",
-    label: "caching.settings.fields.similarityThreshold.label",
+    label: "Similarity Threshold",
     type: "float",
     section: "semantic",
-    helpText: "caching.settings.fields.similarityThreshold.helpText",
+    helpText: "Similarity threshold for semantic cache",
     redisType: "semantic",
     defaultValue: 0.8,
     rules: [numberRule],
   },
   {
     name: "redis_semantic_cache_embedding_model",
-    label: "caching.settings.fields.embeddingModel.label",
+    label: "Embedding Model",
     type: "model-select",
     section: "semantic",
-    helpText: "caching.settings.fields.embeddingModel.helpText",
+    helpText: "Embedding model for semantic cache",
     redisType: "semantic",
   },
   {
     name: "semantic_cache_scope",
-    label: "caching.settings.fields.semanticCacheScope.label",
+    label: "Semantic Cache Scope",
     type: "select",
     section: "semantic",
-    helpText: "caching.settings.fields.semanticCacheScope.helpText",
+    helpText:
+      "Who can share a semantic cache hit. Key shares hits between all end users of a key/team/org. End user also isolates per end user; requests without an end user fall back to the key scope.",
     redisType: "semantic",
     defaultValue: "key",
     options: [
-      { value: "key", label: "caching.settings.scopeOptions.key" },
-      { value: "end_user", label: "caching.settings.scopeOptions.endUser" },
+      { value: "key", label: "Key (shared by all end users of the key/team/org)" },
+      { value: "end_user", label: "End user (isolated per end user)" },
     ],
   },
   {
     name: "ssl",
-    label: "caching.settings.fields.ssl.label",
+    label: "SSL",
     type: "boolean",
     section: "ssl",
-    helpText: "caching.settings.fields.ssl.helpText",
+    helpText: "Enable SSL/TLS connection",
     redisType: null,
     defaultValue: false,
   },
   {
     name: "ssl_cert_reqs",
-    label: "caching.settings.fields.sslCertReqs.label",
+    label: "SSL Cert Reqs",
     type: "string",
     section: "ssl",
-    helpText: "caching.settings.fields.sslCertReqs.helpText",
+    helpText: "SSL certificate requirements (None, CERT_REQUIRED, CERT_OPTIONAL)",
     redisType: null,
   },
   {
     name: "ssl_check_hostname",
-    label: "caching.settings.fields.sslCheckHostname.label",
+    label: "SSL Check Hostname",
     type: "boolean",
     section: "ssl",
-    helpText: "caching.settings.fields.sslCheckHostname.helpText",
+    helpText: "Enable SSL hostname verification",
     redisType: null,
     defaultValue: false,
   },
   {
     name: "namespace",
-    label: "caching.settings.fields.namespace.label",
+    label: "Namespace",
     type: "string",
     section: "cacheManagement",
-    helpText: "caching.settings.fields.namespace.helpText",
+    helpText: "Namespace prefix for cache keys",
     redisType: null,
   },
   {
     name: "ttl",
-    label: "caching.settings.fields.ttl.label",
+    label: "TTL (seconds)",
     type: "float",
     section: "cacheManagement",
-    helpText: "caching.settings.fields.ttl.helpText",
+    helpText: "Time-to-live for cached items in seconds",
     redisType: null,
     rules: [numberRule],
   },
   {
     name: "max_connections",
-    label: "caching.settings.fields.maxConnections.label",
+    label: "Max Connections",
     type: "integer",
     section: "cacheManagement",
-    helpText: "caching.settings.fields.maxConnections.helpText",
+    helpText: "Maximum number of connections in the connection pool",
     redisType: null,
     rules: [nonNegativeIntegerRule],
   },
   {
     name: "gcp_service_account",
-    label: "caching.settings.fields.gcpServiceAccount.label",
+    label: "GCP Service Account",
     type: "string",
     section: "gcp",
-    helpText: "caching.settings.fields.gcpServiceAccount.helpText",
+    helpText:
+      "GCP service account for IAM authentication (e.g., projects/-/serviceAccounts/your-sa@project.iam.gserviceaccount.com)",
     redisType: null,
   },
   {
     name: "gcp_ssl_ca_certs",
-    label: "caching.settings.fields.gcpSslCaCerts.label",
+    label: "GCP SSL CA Certs",
     type: "string",
     section: "gcp",
-    helpText: "caching.settings.fields.gcpSslCaCerts.helpText",
+    helpText: "Path to SSL CA certificate file for GCP Memorystore Redis",
     redisType: null,
   },
 ];

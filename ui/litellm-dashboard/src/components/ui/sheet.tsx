@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
-import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/cva.config";
 import { Button } from "@/components/ui/button";
@@ -47,7 +46,6 @@ function SheetContent({
   side?: "top" | "right" | "bottom" | "left";
   showCloseButton?: boolean;
 }) {
-  const { t } = useTranslation();
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -67,7 +65,7 @@ function SheetContent({
             render={<Button variant="ghost" className="absolute top-4 right-4" size="icon-sm" />}
           >
             <XIcon />
-            <span className="sr-only">{t("ui.sheet.close")}</span>
+            <span className="sr-only">Close</span>
           </SheetPrimitive.Close>
         )}
       </SheetPrimitive.Popup>

@@ -1,7 +1,6 @@
 """Bedrock Runtime Chat Completions: the default for GPT 5.6 and newer, ``bedrock/chat_completions/<model>`` for the rest."""
 
 import json
-import logging
 import re
 
 import httpx
@@ -707,30 +706,18 @@ def test_with_max_completion_tokens_leaves_other_params_alone():
 
 
 @pytest.mark.parametrize(
-    ("model", "logged_model"),
-    [
-        ("us.xai.grok-4.6", "us.xai.grok-4.6"),
-        ("chat_completions/us.xai.grok-4.6", "us.xai.grok-4.6"),
-        ("bedrock/us-gov-west-1/us.xai.grok-4.6", "us-gov-west-1/us.xai.grok-4.6"),
-    ],
+    "model",
+    ["us.xai.grok-4.6", "bedrock/us-gov-west-1/us.xai.grok-4.6"],
 )
-def test_map_openai_params_drops_reasoning_effort_none_for_grok_with_one_warning(
-    model: str, logged_model: str, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_map_openai_params_drops_reasoning_effort_none_for_grok(model):
     cfg = AmazonBedrockRuntimeChatCompletionsConfig()
-    with caplog.at_level(logging.WARNING, logger="LiteLLM"):
-        mapped = cfg.map_openai_params(
-            non_default_params={"reasoning_effort": "none", "max_tokens": 64},
-            optional_params={},
-            model=model,
-            drop_params=False,
-        )
-    drop_warnings = [record.getMessage() for record in caplog.records if "Dropping" in record.getMessage()]
+    mapped = cfg.map_openai_params(
+        non_default_params={"reasoning_effort": "none", "max_tokens": 64},
+        optional_params={},
+        model=model,
+        drop_params=False,
+    )
     assert "reasoning_effort" not in mapped
-    assert len(drop_warnings) == 1
-    assert "reasoning_effort='none'" in drop_warnings[0]
-    assert f"model={logged_model!r}" in drop_warnings[0]
-    assert "drop_params" not in drop_warnings[0]
 
 
 def test_map_openai_params_keeps_reasoning_effort_low_for_grok():
@@ -763,24 +750,17 @@ def test_map_openai_params_refuses_a_non_string_reasoning_effort_without_drop_pa
 @pytest.mark.parametrize("reasoning_effort", [["low"], {"effort": "low"}, 5], ids=["list", "object", "int"])
 @pytest.mark.parametrize("drop_params_via", ["request", "litellm.drop_params"])
 def test_map_openai_params_drops_a_non_string_reasoning_effort_under_drop_params(
-    monkeypatch, caplog, model, reasoning_effort, drop_params_via
+    monkeypatch, model, reasoning_effort, drop_params_via
 ):
     monkeypatch.setattr(litellm, "drop_params", drop_params_via == "litellm.drop_params")
-    with caplog.at_level(logging.WARNING, logger="LiteLLM"):
-        mapped = AmazonBedrockRuntimeChatCompletionsConfig().map_openai_params(
-            non_default_params={"reasoning_effort": reasoning_effort, "max_tokens": 64},
-            optional_params={},
-            model=model,
-            drop_params=drop_params_via == "request",
-        )
-    drop_warnings = [record.getMessage() for record in caplog.records if "Dropping" in record.getMessage()]
+    mapped = AmazonBedrockRuntimeChatCompletionsConfig().map_openai_params(
+        non_default_params={"reasoning_effort": reasoning_effort, "max_tokens": 64},
+        optional_params={},
+        model=model,
+        drop_params=drop_params_via == "request",
+    )
     assert "reasoning_effort" not in mapped
     assert mapped["max_completion_tokens"] == 64
-    assert len(drop_warnings) == 1
-    assert all(
-        fragment in drop_warnings[0]
-        for fragment in (f"reasoning_effort={reasoning_effort!r}", repr(model), "(drop_params=True)")
-    )
 
 
 def test_map_openai_params_keeps_reasoning_effort_none_for_gpt56():

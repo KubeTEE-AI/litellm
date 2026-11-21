@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, Final
 from aiohttp import ClientResponse
 from pydantic import ConfigDict, TypeAdapter
 
-from litellm.litellm_core_utils.url_utils import ensure_api_route
 from litellm.llms.openai_like.chat.transformation import OpenAILikeChatConfig
 from litellm.types.llms.openai import AllMessageValues
 from litellm.types.utils import Choices, ModelResponse
@@ -45,7 +44,12 @@ class AiohttpOpenAIChatConfig(OpenAILikeChatConfig):
         Ensure - /v1/chat/completions is at the end of the url
 
         """
-        return ensure_api_route("https://api.openai.com" if api_base is None else api_base, "chat/completions")
+        if api_base is None:
+            api_base = "https://api.openai.com"
+
+        if not api_base.endswith("/chat/completions"):
+            api_base += "/chat/completions"
+        return api_base
 
     def validate_environment(
         self,
@@ -82,6 +86,4 @@ class AiohttpOpenAIChatConfig(OpenAILikeChatConfig):
         model_response.model = _json_response.get("model")
         model_response.object = _json_response.get("object")
         model_response.system_fingerprint = _json_response.get("system_fingerprint")
-        if "service_tier" in _json_response:
-            return model_response.model_copy(update={"service_tier": _json_response.get("service_tier")})
         return model_response

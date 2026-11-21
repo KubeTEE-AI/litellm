@@ -1,6 +1,5 @@
 import React from "react";
 import { CircleCheck, CircleX, FlaskConical } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -31,7 +30,6 @@ interface EvalViewerProps {
 }
 
 export default function EvalViewer({ data }: EvalViewerProps) {
-  const { t } = useTranslation();
   const entries: EvalInformation[] = Array.isArray(data) ? data : [data];
 
   if (!entries.length) return null;
@@ -41,7 +39,7 @@ export default function EvalViewer({ data }: EvalViewerProps) {
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <FlaskConical className="size-4" style={{ color: "#6366f1" }} />
         <span className="font-semibold" style={{ fontSize: 15 }}>
-          {t("logs.detail.eval.title")}
+          LLM Judge Results
         </span>
       </div>
 
@@ -53,7 +51,6 @@ export default function EvalViewer({ data }: EvalViewerProps) {
 }
 
 function EvalEntryCard({ entry }: { entry: EvalInformation }) {
-  const { t } = useTranslation();
   const passed = entry.passed;
   const scoreColor = passed ? "#52c41a" : "#ff4d4f";
 
@@ -74,9 +71,7 @@ function EvalEntryCard({ entry }: { entry: EvalInformation }) {
               <CircleX className="size-4" style={{ color: "#ff4d4f" }} />
             )}
             <span className="font-semibold">{entry.eval_name}</span>
-            <Badge variant={passed ? "secondary" : "destructive"}>
-              {passed ? t("logs.detail.eval.passed") : t("logs.detail.eval.failed")}
-            </Badge>
+            <Badge variant={passed ? "secondary" : "destructive"}>{passed ? "PASSED" : "FAILED"}</Badge>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger
@@ -88,9 +83,12 @@ function EvalEntryCard({ entry }: { entry: EvalInformation }) {
                   }
                 >
                   {entry.overall_score?.toFixed(0)} / 100
-                  {entry.threshold != null && t("logs.detail.eval.threshold", { value: entry.threshold })}
+                  {entry.threshold != null && ` (threshold: ${entry.threshold})`}
                 </TooltipTrigger>
-                <TooltipContent>{t("logs.detail.eval.scoreTooltip")}</TooltipContent>
+                <TooltipContent>
+                  Weighted average of all criterion scores. Each criterion has a weight (%) set when the eval was
+                  created — higher-weight criteria count more toward the final score.
+                </TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
@@ -99,12 +97,12 @@ function EvalEntryCard({ entry }: { entry: EvalInformation }) {
           <div className="flex items-center gap-2">
             {entry.judge_model && (
               <span className="text-muted-foreground" style={{ fontSize: 12 }}>
-                {t("logs.detail.eval.judge", { model: entry.judge_model })}
+                Judge: {entry.judge_model}
               </span>
             )}
             {entry.iteration != null && (
               <span className="text-muted-foreground" style={{ fontSize: 12 }}>
-                {t("logs.detail.eval.iteration", { value: entry.iteration + 1 })}
+                Iter: {entry.iteration + 1}
               </span>
             )}
           </div>
@@ -114,7 +112,7 @@ function EvalEntryCard({ entry }: { entry: EvalInformation }) {
       <CardContent>
         {entry.eval_error && (
           <span className="text-warning" style={{ display: "block", marginBottom: 8, fontSize: 12 }}>
-            {t("logs.detail.eval.judgeError", { error: entry.eval_error })}
+            Judge error: {entry.eval_error}
           </span>
         )}
 
@@ -122,20 +120,22 @@ function EvalEntryCard({ entry }: { entry: EvalInformation }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead style={{ width: 160 }}>{t("logs.detail.eval.columns.criterion")}</TableHead>
-                <TableHead style={{ width: 65 }}>{t("logs.detail.eval.columns.weight")}</TableHead>
-                <TableHead style={{ width: 65 }}>{t("logs.detail.eval.columns.score")}</TableHead>
+                <TableHead style={{ width: 160 }}>Criterion</TableHead>
+                <TableHead style={{ width: 65 }}>Weight</TableHead>
+                <TableHead style={{ width: 65 }}>Score</TableHead>
                 <TableHead style={{ width: 75 }}>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger render={<span style={{ borderBottom: "1px dashed #aaa", cursor: "help" }} />}>
-                        {t("logs.detail.eval.columns.weighted")}
+                        Weighted
                       </TooltipTrigger>
-                      <TooltipContent>{t("logs.detail.eval.columns.weightedTooltip")}</TooltipContent>
+                      <TooltipContent>
+                        Score × Weight — how much each criterion contributes to the final score
+                      </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </TableHead>
-                <TableHead>{t("logs.detail.eval.columns.comment")}</TableHead>
+                <TableHead>Comment</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -189,7 +189,7 @@ function EvalEntryCard({ entry }: { entry: EvalInformation }) {
                 <TableRow>
                   <TableCell>
                     <span className="font-semibold" style={{ fontSize: 12 }}>
-                      {t("logs.detail.eval.total")}
+                      Total
                     </span>
                   </TableCell>
                   <TableCell />
@@ -206,7 +206,7 @@ function EvalEntryCard({ entry }: { entry: EvalInformation }) {
           </Table>
         ) : (
           <span className="text-muted-foreground" style={{ fontSize: 12 }}>
-            {t("logs.detail.eval.noBreakdown", { score: entry.overall_score?.toFixed(1) })}
+            Score: {entry.overall_score?.toFixed(1)} — no per-criterion breakdown available.
           </span>
         )}
       </CardContent>

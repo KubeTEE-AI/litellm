@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { StatusBadge } from "@/components/shared/table_cells";
 import { Button } from "@/components/ui/button";
 import { FieldLabel } from "@/components/ui/field";
@@ -28,7 +27,6 @@ export interface DecisionTestSectionProps {
 }
 
 const DecisionTestSection: React.FC<DecisionTestSectionProps> = ({ accessToken, model, checks }) => {
-  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [runs, setRuns] = useState<DecisionTestRun[]>([]);
   const [running, setRunning] = useState(false);
@@ -37,9 +35,9 @@ const DecisionTestSection: React.FC<DecisionTestSectionProps> = ({ accessToken, 
 
   const runnableQuestions = runnableDecisionQuestions(checks);
   let disabledReason: string | null = null;
-  if (!model) disabledReason = t("guardrails.decisionModel.test.disabled.noModel");
-  else if (!input.trim()) disabledReason = t("guardrails.decisionModel.test.disabled.noInput");
-  else if (runnableQuestions.length === 0) disabledReason = t("guardrails.decisionModel.test.disabled.noQuestions");
+  if (!model) disabledReason = "Select a decision model to run a test";
+  else if (!input.trim()) disabledReason = "Type an input to run a test";
+  else if (runnableQuestions.length === 0) disabledReason = "Add a question to run a test";
   const canRun = !disabledReason && !running;
 
   const runTest = async () => {
@@ -81,13 +79,16 @@ const DecisionTestSection: React.FC<DecisionTestSectionProps> = ({ accessToken, 
   return (
     <div className="space-y-3 border-t border-border pt-4">
       <div className="space-y-1">
-        <FieldLabel>{t("guardrails.decisionModel.test.label")}</FieldLabel>
-        <p className="m-0 text-xs text-muted-foreground">{t("guardrails.decisionModel.test.description")}</p>
+        <FieldLabel>Test</FieldLabel>
+        <p className="m-0 text-xs text-muted-foreground">
+          Try your questions on a sample input before you save. Uses the thresholds above. Each run is a real decision
+          model call, so it is billed and shows up in Logs.
+        </p>
       </div>
       <Textarea
-        aria-label={t("guardrails.decisionModel.test.inputAriaLabel")}
+        aria-label="Test input"
         rows={3}
-        placeholder={t("guardrails.decisionModel.test.inputPlaceholder")}
+        placeholder="Paste a sample input to score against your questions"
         className="w-full resize-none"
         value={input}
         onChange={(event) => setInput(event.target.value)}
@@ -100,14 +101,16 @@ const DecisionTestSection: React.FC<DecisionTestSectionProps> = ({ accessToken, 
       />
       <div className="flex items-center gap-2">
         <Button type="button" onClick={runTest} disabled={!canRun}>
-          {running ? t("guardrails.decisionModel.test.running") : t("guardrails.decisionModel.test.run")}
+          {running ? "Running…" : "Run test"}
         </Button>
         {!running && disabledReason && <p className="m-0 text-xs text-muted-foreground">{disabledReason}</p>}
         {!running && !disabledReason && <p className="m-0 text-xs text-muted-foreground">{runTestShortcutLabel()}</p>}
       </div>
       {runs.length > 0 && (
         <>
-          <p className="m-0 text-xs text-muted-foreground">{t("guardrails.decisionModel.test.historyHint")}</p>
+          <p className="m-0 text-xs text-muted-foreground">
+            Latest first. Each run keeps its input so you can compare.
+          </p>
           <div className="space-y-2" data-slot="decision-test-history">
             {runs.map((run) => {
               const visible = "error" in run ? [] : visibleTestResults(run, checks, model);
@@ -120,32 +123,25 @@ const DecisionTestSection: React.FC<DecisionTestSectionProps> = ({ accessToken, 
                     {visible.length > 0 && (
                       <StatusBadge
                         tone={DECISION_TEST_CHIP_TONE[decisionTestOverall(visible)]}
-                        label={
-                          decisionTestOverall(visible) === "block"
-                            ? t("guardrails.decisionModel.test.overall.block")
-                            : t("guardrails.decisionModel.test.overall.pass")
-                        }
+                        label={decisionTestOverall(visible) === "block" ? "Block" : "Pass"}
                       />
                     )}
                   </div>
                   {"error" in run && <p className="m-0 mt-1.5 text-xs text-destructive">{run.error}</p>}
                   {!("error" in run) && visible.length === 0 && (
                     <p className="m-0 mt-1.5 text-xs text-muted-foreground">
-                      {t("guardrails.decisionModel.test.stale")}
+                      The model or questions changed since this run. Run it again to score them.
                     </p>
                   )}
                   {visible.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {visible.map(({ check, result }) => {
                         const chip = decisionTestChip(result, check);
-                        const score =
-                          result.kind === "probability"
-                            ? result.probability.toFixed(2)
-                            : t("guardrails.decisionModel.test.chip.noAnswer");
+                        const score = result.kind === "probability" ? result.probability.toFixed(2) : "No answer";
                         let label = "";
-                        if (chip === "block") label = t("guardrails.decisionModel.test.chip.block");
-                        else if (chip === "logged") label = t("guardrails.decisionModel.test.chip.logged");
-                        else if (chip === "pass") label = t("guardrails.decisionModel.test.chip.pass");
+                        if (chip === "block") label = "Block";
+                        else if (chip === "logged") label = "Pass · logged";
+                        else if (chip === "pass") label = "Pass";
                         return (
                           <StatusBadge
                             key={check.name}

@@ -47,7 +47,8 @@ class BaseBatchesConfig(ABC):
         return {
             k: v
             for k, v in class_attributes.items()
-            if not k.startswith("_")
+            if not k.startswith("__")
+            and not k.startswith("_abc")
             and not isinstance(
                 v,
                 (

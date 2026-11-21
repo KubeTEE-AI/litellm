@@ -4,14 +4,9 @@ from typing import Final
 
 import click
 import rich
-from pydantic import TypeAdapter
-
-from litellm.litellm_core_utils.core_helpers import as_str_mapping
 
 from ...http_client import HTTPClient
-from ._cli_context import cli_context_values
-
-_DECODED_JSON: Final = TypeAdapter(object)
+from .auth import cli_context_obj
 
 
 @click.group()
@@ -45,32 +40,23 @@ def migrate(ctx: click.Context, check_only: bool, dry_run: bool):
         lite encryption migrate --check   # attestation scan, no writes
         lite encryption migrate           # perform the migration
     """
-    context: Final = cli_context_values(ctx)
-    client: Final = HTTPClient(context["base_url"], context["api_key"])
+    client: Final = HTTPClient(cli_context_obj(ctx)["base_url"], ctx.obj["api_key"])
 
-    response: Final = _DECODED_JSON.validate_python(
-        client.request("GET", "/credentials/migrate-encryption/check")
-        if check_only
-        else client.request(
+    if check_only:
+        response = client.request("GET", "/credentials/migrate-encryption/check")
+    else:
+        response = client.request(
             "POST",
             "/credentials/migrate-encryption",
             json={},
             params={"dry_run": "true"} if dry_run else None,
         )
-    )
 
     rich.print_json(data=response)
 
-    report_value: Final = (as_str_mapping(response) or {}).get("report", {})
-    report: Final = as_str_mapping(report_value)
-    if report is None:
-        raise click.ClickException(f"Unexpected report in the proxy response: {report_value!r}")
+    report: Final = response.get("report", {}) if isinstance(response, dict) else {}
     residual: Final = report.get("residual_legacy")
-    if residual is None:
-        return
-    if not isinstance(residual, int | float):
-        raise click.ClickException(f"Unexpected residual_legacy in the proxy response: {residual!r}")
-    if residual > 0:
+    if residual is not None and residual > 0:
         rich.print(f"[yellow]Residual legacy values remaining: {residual}[/yellow]")
     elif residual == 0:
         rich.print("[green]No legacy values remaining (residual_legacy == 0).[/green]")

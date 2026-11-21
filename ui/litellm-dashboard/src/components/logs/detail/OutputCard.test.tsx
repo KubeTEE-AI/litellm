@@ -1,15 +1,12 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { OutputCard } from "./OutputCard";
 import { ParsedMessage } from "./prettyMessagesTypes";
-import { copyToClipboard } from "@/utils/dataUtils";
-import { toast } from "@/lib/toast";
-
-vi.mock("@/utils/dataUtils", () => ({ copyToClipboard: vi.fn() }));
 
 describe("OutputCard", () => {
+  const mockWriteText = vi.fn().mockResolvedValue(undefined);
   const mockMessage: ParsedMessage = {
     role: "assistant",
     content: "This is a test response",
@@ -17,7 +14,13 @@ describe("OutputCard", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(copyToClipboard).mockResolvedValue(true);
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: mockWriteText,
+      },
+      writable: true,
+      configurable: true,
+    });
   });
 
   it("should render the OutputCard component", () => {
@@ -50,16 +53,20 @@ describe("OutputCard", () => {
     expect(screen.getByText(/Cost: \$0\.002500/)).toBeInTheDocument();
   });
 
-  it.each([true, false])("delegates copying and feedback to the helper (%s)", async (success) => {
-    const user = userEvent.setup();
-    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
-    vi.mocked(copyToClipboard).mockResolvedValue(success);
+  it("should copy message content when copy button is clicked", async () => {
     render(<OutputCard message={mockMessage} />);
 
-    await user.click(screen.getByRole("button", { name: /copy/i }));
+    const copyButton = screen.getByRole("button", { name: /copy/i });
 
-    expect(copyToClipboard).toHaveBeenCalledWith("This is a test response", "Output copied");
-    expect(toast.success).not.toHaveBeenCalled();
+    expect(copyButton).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(copyButton);
+    });
+
+    await waitFor(() => {
+      expect(mockWriteText).toHaveBeenCalledWith("This is a test response");
+    });
   });
 
   it("should not copy when message is null and copy button is clicked", async () => {
@@ -73,7 +80,7 @@ describe("OutputCard", () => {
     await user.click(copyButton);
 
     await waitFor(() => {
-      expect(copyToClipboard).not.toHaveBeenCalled();
+      expect(mockWriteText).not.toHaveBeenCalled();
     });
   });
 

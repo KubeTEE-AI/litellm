@@ -3,7 +3,6 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { Info } from "lucide-react";
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { ReasoningEffort, TierModelParams } from "./complexity_router_tiers";
 
 const PROVIDER_DEFAULT = "__provider_default__";
@@ -59,7 +58,6 @@ export const tierEffortRows = ({
     .filter(({ model, options }) => options.length > 0 || canEditFastMode(model, fastModeByModel, paramsByModel));
 
 const TierModelEffortRows: React.FC<TierModelEffortRowsProps> = (props) => {
-  const { t } = useTranslation();
   const { tierLabel, paramsByModel, onEffortChange, fastModeByModel, onFastModeChange } = props;
   const rows = tierEffortRows(props);
   if (rows.length === 0) return null;
@@ -67,10 +65,10 @@ const TierModelEffortRows: React.FC<TierModelEffortRowsProps> = (props) => {
     <div className="mt-2 space-y-1">
       {rows.some(({ options }) => options.length > 0) && (
         <div className="flex items-center gap-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            {t("addModel.tierModelEffortRows.reasoningEffort")}
-          </span>
-          <SimpleTooltip content={t("addModel.tierModelEffortRows.reasoningEffortTooltip")}>
+          <span className="text-xs font-medium text-muted-foreground">Reasoning effort</span>
+          <SimpleTooltip
+            content={`Sent as reasoning_effort on requests this tier routes to the model, overriding the caller's value. Default leaves the request untouched.`}
+          >
             <Info className="size-3 text-muted-foreground/70" />
           </SimpleTooltip>
         </div>
@@ -84,7 +82,7 @@ const TierModelEffortRows: React.FC<TierModelEffortRowsProps> = (props) => {
             {options.length > 0 && (
               <Select
                 items={[
-                  { value: PROVIDER_DEFAULT, label: t("addModel.tierModelEffortRows.default") },
+                  { value: PROVIDER_DEFAULT, label: "Default" },
                   ...options.map((option) => ({ value: option, label: option })),
                 ]}
                 value={effort ?? PROVIDER_DEFAULT}
@@ -95,12 +93,12 @@ const TierModelEffortRows: React.FC<TierModelEffortRowsProps> = (props) => {
                 <SelectTrigger
                   size="sm"
                   className="w-36"
-                  aria-label={t("addModel.tierModelEffortRows.reasoningEffortAria", { model, tier: tierLabel })}
+                  aria-label={`Reasoning effort for ${model} in the ${tierLabel} tier`}
                 >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={PROVIDER_DEFAULT}>{t("addModel.tierModelEffortRows.default")}</SelectItem>
+                  <SelectItem value={PROVIDER_DEFAULT}>Default</SelectItem>
                   {options.map((option) => (
                     <SelectItem key={option} value={option}>
                       {option}
@@ -110,17 +108,17 @@ const TierModelEffortRows: React.FC<TierModelEffortRowsProps> = (props) => {
               </Select>
             )}
             {canEditFastMode(model, fastModeByModel, paramsByModel) && (
-              <SimpleTooltip content={t("addModel.tierModelEffortRows.fastModeTooltip")}>
+              <SimpleTooltip content="Fast mode has higher pricing and requires an eligible provider account. Off removes this tier's speed override and inherits the request or provider default">
                 <label
                   className="flex items-center gap-2 text-xs"
-                  aria-label={t("addModel.tierModelEffortRows.fastModeAria", { model, tier: tierLabel })}
+                  aria-label={`Fast mode for ${model} in the ${tierLabel} tier`}
                 >
                   <Switch
                     size="sm"
                     checked={paramsByModel?.[model]?.speed === "fast"}
                     onCheckedChange={(enabled) => onFastModeChange(model, enabled)}
                   />
-                  {t("addModel.tierModelEffortRows.fastMode")}
+                  Fast mode
                 </label>
               </SimpleTooltip>
             )}

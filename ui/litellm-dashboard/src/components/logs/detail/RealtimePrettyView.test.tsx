@@ -1,11 +1,8 @@
 import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { copyToClipboard } from "@/utils/dataUtils";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RealtimePrettyView, isRealtimeResponse } from "./RealtimePrettyView";
-
-vi.mock("@/utils/dataUtils", () => ({ copyToClipboard: vi.fn().mockResolvedValue(true) }));
 
 const sampleRealtimeResponse = {
   usage: {
@@ -145,20 +142,15 @@ describe("isRealtimeResponse", () => {
 });
 
 describe("RealtimePrettyView", () => {
+  const mockWriteText = vi.fn().mockResolvedValue(undefined);
+
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("copies all transcript turns when the Clipboard API is unavailable", async () => {
-    const user = userEvent.setup();
-    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
-    render(<RealtimePrettyView response={sampleRealtimeResponse} />);
-
-    await user.click(screen.getByRole("button", { name: /copy/i }));
-
-    expect(copyToClipboard).toHaveBeenCalledWith(
-      "assistant: Hello! How's your day going?\nassistant: I'm here to help with information and general questions.",
-    );
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: mockWriteText },
+      writable: true,
+      configurable: true,
+    });
   });
 
   it("should render the component successfully", () => {

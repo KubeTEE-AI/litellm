@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from e2e_metadata import step
 from proxy_client import ProxyClient
@@ -77,16 +77,6 @@ class BatchErrorList(BaseModel):
     data: list[BatchErrorItem] = []
 
 
-class BatchUsage(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-    total_tokens: int | None = None
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-
-
 class BatchObject(BaseModel):
     id: str
     object: str | None = None
@@ -100,7 +90,6 @@ class BatchObject(BaseModel):
     completion_window: str | None = None
     created_at: int | None = None
     model: str | None = None
-    usage: BatchUsage | None = None
 
 
 class BatchList(BaseModel):

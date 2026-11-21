@@ -10,14 +10,12 @@ use super::{
 use crate::protocol::{HostRequest, Protocol};
 
 /// The machine's own failures, distinct from anything the provider call reports.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MachineFault {
     /// The host dropped an op's reply unanswered, or went away while the call waited.
-    #[error("the host abandoned the call")]
     Abandoned,
     /// The host resumed the call out of turn.
-    #[error("the host resumed the call out of turn")]
-    Protocol(#[source] ResumeError),
+    Protocol(ResumeError),
 }
 
 pub type ExecuteFuture<R, C = <R as Protocol>::Response> =

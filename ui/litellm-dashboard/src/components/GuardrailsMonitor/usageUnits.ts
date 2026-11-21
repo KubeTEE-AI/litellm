@@ -1,5 +1,3 @@
-import type { TFunction } from "i18next";
-import i18n from "@/i18n/i18n";
 import { formatNumberWithCommas, getSpendString } from "@/utils/dataUtils";
 
 export type UsageUnits = Readonly<Record<string, number>>;
@@ -17,11 +15,9 @@ export const counterLabel = (counter: string): string =>
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/^./, (c) => c.toUpperCase());
 
-export const unpricedSummary = (untracked: UsageUnits, t: TFunction = i18n.t.bind(i18n)): string | null => {
+export const unpricedSummary = (untracked: UsageUnits): string | null => {
   const total = totalUnits(untracked);
-  return total > 0
-    ? t("guardrailsMonitor.usageUnits.unpricedSummary", { count: total, value: total.toLocaleString() })
-    : null;
+  return total > 0 ? `${total.toLocaleString()} ${total === 1 ? "unit" : "units"} unpriced` : null;
 };
 
 export interface CounterMath {
@@ -50,25 +46,18 @@ export interface MathRow {
   readonly note: string | null;
 }
 
-export const counterMathRow = (row: CounterMath, t: TFunction = i18n.t.bind(i18n)): MathRow => {
+export const counterMathRow = (row: CounterMath): MathRow => {
   const label = counterLabel(row.counter);
   const price = unitPrice(row);
   if (price == null) {
-    return {
-      label,
-      parts: [row.units.toLocaleString(), "× —", "= —"],
-      note: t("guardrailsMonitor.usageUnits.noKnownPrice"),
-    };
+    return { label, parts: [row.units.toLocaleString(), "× —", "= —"], note: "no known price, left out" };
   }
   return {
     label,
     parts: [pricedUnits(row).toLocaleString(), `× ${formatUnitPrice(price)}`, `= ${formatCost(row.cost)}`],
     note:
       row.unpriced > 0
-        ? t("guardrailsMonitor.usageUnits.unpricedLeftOut", {
-            count: row.unpriced,
-            value: row.unpriced.toLocaleString(),
-          })
+        ? `${row.unpriced.toLocaleString()} unpriced ${row.unpriced === 1 ? "unit" : "units"} left out`
         : null,
   };
 };

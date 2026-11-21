@@ -2,7 +2,6 @@
 
 import { BotIcon, InfoIcon, LayersIcon, ServerIcon, SparklesIcon } from "lucide-react";
 import type { UseFormReturn } from "react-hook-form";
-import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { useAgents } from "@/app/(dashboard)/hooks/agents/useAgents";
@@ -17,10 +16,9 @@ import SkillSelector from "@/components/skills/SkillSelector";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import i18n from "@/i18n/i18n";
 
 export const accessGroupFormSchema = z.object({
-  name: z.string().min(1, { error: () => i18n.t("accessGroups.form.name.required") }),
+  name: z.string().min(1, "Please enter the access group name"),
   description: z.string(),
   modelIds: z.array(z.string()),
   mcpServerIds: z.array(z.string()),
@@ -82,7 +80,6 @@ export function AccessGroupBaseForm({
   onTabChange,
   initialServerIds,
 }: AccessGroupBaseFormProps) {
-  const { t } = useTranslation();
   const { accessToken } = useAuthorized();
   const { data: agentsData } = useAgents();
   const { data: mcpServersData } = useMCPServers();
@@ -101,61 +98,56 @@ export function AccessGroupBaseForm({
       <TabsList className="w-full">
         <TabsTrigger value={GENERAL_TAB}>
           <InfoIcon size={16} />
-          {t("accessGroups.form.tabs.general")}
+          General Info
         </TabsTrigger>
         <TabsTrigger value={MODELS_TAB}>
           <LayersIcon size={16} />
-          {t("accessGroups.form.tabs.models")}
+          Models
         </TabsTrigger>
         <TabsTrigger value={MCP_SERVERS_TAB}>
           <ServerIcon size={16} />
-          {t("accessGroups.form.tabs.mcpServers")}
+          MCP Servers
         </TabsTrigger>
         <TabsTrigger value={AGENTS_TAB}>
           <BotIcon size={16} />
-          {t("accessGroups.form.tabs.agents")}
+          Agents
         </TabsTrigger>
         <TabsTrigger value={SKILLS_TAB}>
           <SparklesIcon size={16} />
-          {t("accessGroups.form.tabs.skills")}
+          Skills
         </TabsTrigger>
       </TabsList>
 
       <TabsContent value={GENERAL_TAB} className="pt-4">
         <FieldGroup>
-          <FormField control={form.control} name="name" label={t("accessGroups.form.name.label")}>
+          <FormField control={form.control} name="name" label="Group Name">
             {({ ref, ...field }) => (
-              <Input
-                {...field}
-                ref={ref}
-                placeholder={t("accessGroups.form.name.placeholder")}
-                disabled={isNameDisabled}
-              />
+              <Input {...field} ref={ref} placeholder="e.g. Engineering Team" disabled={isNameDisabled} />
             )}
           </FormField>
-          <FormField control={form.control} name="description" label={t("accessGroups.form.description.label")}>
+          <FormField control={form.control} name="description" label="Description">
             {({ ref, ...field }) => (
-              <Textarea {...field} ref={ref} rows={4} placeholder={t("accessGroups.form.description.placeholder")} />
+              <Textarea {...field} ref={ref} rows={4} placeholder="Describe the purpose of this access group..." />
             )}
           </FormField>
         </FieldGroup>
       </TabsContent>
 
       <TabsContent value={MODELS_TAB} className="pt-4">
-        <FormField control={form.control} name="modelIds" label={t("accessGroups.form.models.label")}>
+        <FormField control={form.control} name="modelIds" label="Allowed Models">
           {(field) => <ModelSelect context="global" value={field.value} onChange={field.onChange} />}
         </FormField>
       </TabsContent>
 
       <TabsContent value={MCP_SERVERS_TAB} className="pt-4">
-        <FormField control={form.control} name="mcpServerIds" label={t("accessGroups.form.mcpServers.label")}>
+        <FormField control={form.control} name="mcpServerIds" label="Allowed MCP Servers">
           {({ id, value, onChange }) => (
             <MultiSelect
               id={id}
               value={value}
               onValueChange={onChange}
               options={mcpServerOptions}
-              placeholder={t("accessGroups.form.mcpServers.placeholder")}
+              placeholder="Select MCP servers"
             />
           )}
         </FormField>
@@ -168,14 +160,14 @@ export function AccessGroupBaseForm({
       </TabsContent>
 
       <TabsContent value={AGENTS_TAB} className="pt-4">
-        <FormField control={form.control} name="agentIds" label={t("accessGroups.form.agents.label")}>
+        <FormField control={form.control} name="agentIds" label="Allowed Agents">
           {({ id, value, onChange }) => (
             <MultiSelect
               id={id}
               value={value}
               onValueChange={onChange}
               options={agentOptions}
-              placeholder={t("accessGroups.form.agents.placeholder")}
+              placeholder="Select agents"
             />
           )}
         </FormField>
@@ -185,15 +177,15 @@ export function AccessGroupBaseForm({
         <FormField
           control={form.control}
           name="skillNames"
-          label={t("accessGroups.form.skills.label")}
-          description={t("accessGroups.form.skills.description")}
+          label="Allowed Skills"
+          description="Enabled skills are visible to everyone. Grant disabled (private) Claude Code plugins to the teams and keys in this group here."
         >
           {({ value, onChange }) => (
             <SkillSelector
               onChange={onChange}
               value={value}
               accessToken={accessToken || ""}
-              placeholder={t("accessGroups.form.skills.placeholder")}
+              placeholder="Select skills (optional)"
             />
           )}
         </FormField>

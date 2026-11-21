@@ -3,7 +3,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BotIcon, InfoIcon, LayersIcon, ServerIcon, SparklesIcon } from "lucide-react";
 import * as React from "react";
-import { useTranslation } from "react-i18next";
 
 import { accessGroupKeys } from "@/app/(dashboard)/hooks/accessGroups/useAccessGroups";
 import { useAgents } from "@/app/(dashboard)/hooks/agents/useAgents";
@@ -45,7 +44,6 @@ export const AccessGroupCreateDialog = ({
   onOpenChange,
   createAccessGroup = defaultCreateAccessGroup,
 }: AccessGroupCreateDialogProps) => {
-  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const form = useZodForm(accessGroupCreateSchema, { defaultValues: emptyAccessGroupFormValues });
   const [activeTab, setActiveTab] = React.useState(GENERAL_TAB);
@@ -72,12 +70,12 @@ export const AccessGroupCreateDialog = ({
   const mutation = useMutation({
     mutationFn: (body: AccessGroupCreateBody) => createAccessGroup(body),
     onSuccess: () => {
-      toast.success(t("accessGroups.create.success"));
+      toast.success("Access group created successfully");
       queryClient.invalidateQueries({ queryKey: accessGroupKeys.all });
       closeAndReset();
     },
     onError: (error: unknown) =>
-      toast.fromError(error instanceof Error ? error.message : t("accessGroups.create.failed")),
+      toast.fromError(error instanceof Error ? error.message : "Failed to create access group"),
   });
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -102,7 +100,7 @@ export const AccessGroupCreateDialog = ({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{t("accessGroups.create.title")}</DialogTitle>
+          <DialogTitle>Create Access Group</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={onSubmit} noValidate>
@@ -110,40 +108,38 @@ export const AccessGroupCreateDialog = ({
             <TabsList className="w-full">
               <TabsTrigger value={GENERAL_TAB}>
                 <InfoIcon />
-                {t("accessGroups.form.tabs.general")}
+                General Info
               </TabsTrigger>
               <TabsTrigger value="models">
                 <LayersIcon />
-                {t("accessGroups.form.tabs.models")}
+                Models
               </TabsTrigger>
               <TabsTrigger value="mcp-servers">
                 <ServerIcon />
-                {t("accessGroups.form.tabs.mcpServers")}
+                MCP Servers
               </TabsTrigger>
               <TabsTrigger value="agents">
                 <BotIcon />
-                {t("accessGroups.form.tabs.agents")}
+                Agents
               </TabsTrigger>
               <TabsTrigger value="skills">
                 <SparklesIcon />
-                {t("accessGroups.form.tabs.skills")}
+                Skills
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value={GENERAL_TAB} className="pt-4">
               <FieldGroup>
-                <FormField control={form.control} name="name" label={t("accessGroups.form.name.label")}>
-                  {({ ref, ...field }) => (
-                    <Input {...field} ref={ref} placeholder={t("accessGroups.form.name.placeholder")} />
-                  )}
+                <FormField control={form.control} name="name" label="Group Name">
+                  {({ ref, ...field }) => <Input {...field} ref={ref} placeholder="e.g. Engineering Team" />}
                 </FormField>
-                <FormField control={form.control} name="description" label={t("accessGroups.form.description.label")}>
+                <FormField control={form.control} name="description" label="Description">
                   {({ ref, ...field }) => (
                     <Textarea
                       {...field}
                       ref={ref}
                       rows={4}
-                      placeholder={t("accessGroups.form.description.placeholder")}
+                      placeholder="Describe the purpose of this access group..."
                     />
                   )}
                 </FormField>
@@ -151,20 +147,20 @@ export const AccessGroupCreateDialog = ({
             </TabsContent>
 
             <TabsContent value="models" className="pt-4">
-              <FormField control={form.control} name="modelIds" label={t("accessGroups.form.models.label")}>
+              <FormField control={form.control} name="modelIds" label="Allowed Models">
                 {(field) => <ModelSelect context="global" value={field.value} onChange={field.onChange} />}
               </FormField>
             </TabsContent>
 
             <TabsContent value="mcp-servers" className="pt-4">
-              <FormField control={form.control} name="mcpServerIds" label={t("accessGroups.form.mcpServers.label")}>
+              <FormField control={form.control} name="mcpServerIds" label="Allowed MCP Servers">
                 {({ id, value, onChange }) => (
                   <MultiSelect
                     id={id}
                     value={value}
                     onValueChange={onChange}
                     options={mcpServerOptions}
-                    placeholder={t("accessGroups.form.mcpServers.placeholder")}
+                    placeholder="Select MCP servers"
                   />
                 )}
               </FormField>
@@ -176,14 +172,14 @@ export const AccessGroupCreateDialog = ({
             </TabsContent>
 
             <TabsContent value="agents" className="pt-4">
-              <FormField control={form.control} name="agentIds" label={t("accessGroups.form.agents.label")}>
+              <FormField control={form.control} name="agentIds" label="Allowed Agents">
                 {({ id, value, onChange }) => (
                   <MultiSelect
                     id={id}
                     value={value}
                     onValueChange={onChange}
                     options={agentOptions}
-                    placeholder={t("accessGroups.form.agents.placeholder")}
+                    placeholder="Select agents"
                   />
                 )}
               </FormField>
@@ -193,15 +189,15 @@ export const AccessGroupCreateDialog = ({
               <FormField
                 control={form.control}
                 name="skillNames"
-                label={t("accessGroups.form.skills.label")}
-                description={t("accessGroups.form.skills.description")}
+                label="Allowed Skills"
+                description="Enabled skills are visible to everyone. Grant disabled (private) Claude Code plugins to the teams and keys in this group here."
               >
                 {({ value, onChange }) => (
                   <SkillSelector
                     onChange={onChange}
                     value={value}
                     accessToken={accessToken || ""}
-                    placeholder={t("accessGroups.form.skills.placeholder")}
+                    placeholder="Select skills (optional)"
                   />
                 )}
               </FormField>
@@ -215,10 +211,10 @@ export const AccessGroupCreateDialog = ({
               onClick={() => handleOpenChange(false)}
               disabled={mutation.isPending}
             >
-              {t("accessGroups.create.cancel")}
+              Cancel
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? t("accessGroups.create.submitting") : t("accessGroups.create.submit")}
+              {mutation.isPending ? "Creating..." : "Create Group"}
             </Button>
           </DialogFooter>
         </form>

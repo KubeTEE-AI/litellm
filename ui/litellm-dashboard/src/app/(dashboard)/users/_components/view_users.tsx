@@ -1,6 +1,5 @@
 import { parseAsString, useQueryState } from "nuqs";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import BulkEditUserModal from "./BulkEditUsers";
 import BulkCreateUsersButton from "@/components/bulk_create_users_button";
@@ -18,7 +17,7 @@ import {
 import OnboardingModal, { InvitationLink } from "@/components/onboarding_link";
 
 import { DEBOUNCE_WAIT_MS } from "@/utils/debounceConstants";
-import { all_admin_roles, isAdminRole, isProxyAdminRole } from "@/utils/roles";
+import { isAdminRole, isProxyAdminRole } from "@/utils/roles";
 import { useDebouncedValue } from "@tanstack/react-pacer/debouncer";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -59,7 +58,6 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
   teams,
   orgAdminOrgIds,
 }) => {
-  const { t } = useTranslation();
   const isProxyAdmin = userRole ? isProxyAdminRole(userRole) : false;
   const queryClient = useQueryClient();
 
@@ -159,19 +157,19 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
   const handleResetPassword = useCallback(
     async (userId: string) => {
       if (!accessToken) {
-        toast.fromError(t("users.page.toasts.accessTokenMissing"));
+        toast.fromError("Access token not found");
         return;
       }
       try {
-        toast.success(t("users.page.toasts.generatingResetLink"));
+        toast.success("Generating password reset link...");
         const data = await invitationCreateCall(accessToken, userId);
         setInvitationLinkData(data);
         setIsInvitationLinkModalVisible(true);
       } catch (error) {
-        toast.fromError(t("users.page.toasts.resetLinkFailed"));
+        toast.fromError("Failed to generate password reset link");
       }
     },
-    [accessToken, t],
+    [accessToken],
   );
 
   const confirmDelete = async () => {
@@ -187,10 +185,10 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
           return { ...previousData, users: updatedUsers };
         });
 
-        toast.success(t("users.page.toasts.deleted"));
+        toast.success("User deleted successfully");
       } catch (error) {
         console.error("Error deleting user:", error);
-        toast.fromError(t("users.page.toasts.deleteFailed"));
+        toast.fromError("Failed to delete user");
       } finally {
         setIsDeleteModalOpen(false);
         setUserToDelete(null);
@@ -300,7 +298,6 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
       isLoading={userListQuery.isLoading || userListQuery.isPlaceholderData}
       possibleUIRoles={possibleUIRoles}
       teams={teams}
-      canViewUserUsage={all_admin_roles.includes(userRole ?? "")}
       sorting={sorting}
       onSortingChange={handleSortingChange}
       pagination={pagination}
@@ -346,7 +343,7 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
                   variant={selectionMode ? "default" : "outline"}
                   data-testid="toggle-user-selection"
                 >
-                  {selectionMode ? t("users.page.selection.cancel") : t("users.page.selection.start")}
+                  {selectionMode ? "Cancel Selection" : "Select Users"}
                 </Button>
               )}
 
@@ -357,7 +354,7 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
                   disabled={selectedUsers.length === 0}
                   data-testid="bulk-edit-users"
                 >
-                  {t("users.page.selection.bulkEdit", { count: selectedUsers.length })}
+                  Bulk Edit ({selectedUsers.length} selected)
                 </Button>
               )}
             </>
@@ -369,10 +366,10 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
         <Tabs defaultValue="users" className="gap-0">
           <TabsList variant="line" className="mb-4">
             <TabsTrigger value="users" className="flex-none data-active:text-primary after:bg-primary">
-              {t("users.page.tabs.users")}
+              Users
             </TabsTrigger>
             <TabsTrigger value="default-settings" className="flex-none data-active:text-primary after:bg-primary">
-              {t("users.page.tabs.defaultSettings")}
+              Default User Settings
             </TabsTrigger>
           </TabsList>
 
@@ -385,7 +382,7 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
               <div
                 className="flex h-64 items-center justify-center"
                 role="status"
-                aria-label={t("users.page.defaultSettingsLoading")}
+                aria-label="Loading default user settings"
               >
                 <div className="w-full max-w-lg space-y-3">
                   <Skeleton className="h-5 w-1/3" />
@@ -406,20 +403,20 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
       {/* Existing Modals */}
       <DeleteResourceModal
         isOpen={isDeleteModalOpen}
-        title={t("users.page.deleteModal.title")}
-        message={t("users.page.deleteModal.message")}
-        resourceInformationTitle={t("users.page.deleteModal.informationTitle")}
+        title="Delete User?"
+        message="Are you sure you want to delete this user? This action cannot be undone."
+        resourceInformationTitle="User Information"
         resourceInformation={[
-          { label: t("users.page.deleteModal.email"), value: userToDelete?.user_email },
-          { label: t("users.page.deleteModal.userId"), value: userToDelete?.user_id, code: true },
+          { label: "Email", value: userToDelete?.user_email },
+          { label: "User ID", value: userToDelete?.user_id, code: true },
           {
-            label: t("users.page.deleteModal.globalProxyRole"),
+            label: "Global Proxy Role",
             value:
               (userToDelete?.user_role && possibleUIRoles?.[userToDelete.user_role]?.ui_label) ||
               userToDelete?.user_role ||
               "-",
           },
-          { label: t("users.page.deleteModal.totalSpend"), value: userToDelete?.spend?.toFixed(2) },
+          { label: "Total Spend (USD)", value: userToDelete?.spend?.toFixed(2) },
         ]}
         onCancel={cancelDelete}
         onOk={confirmDelete}

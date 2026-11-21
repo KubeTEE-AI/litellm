@@ -42,11 +42,7 @@ const pluginApiClient = createApiClient({ getBaseUrl: () => getProxyBaseUrl() ??
 
 function readStoredMode(): PluginMode {
   if (typeof window === "undefined") return "ai-gateway";
-  try {
-    return localStorage.getItem(STORAGE_KEY) ?? "ai-gateway";
-  } catch {
-    return "ai-gateway";
-  }
+  return localStorage.getItem(STORAGE_KEY) ?? "ai-gateway";
 }
 
 interface PluginModeProviderProps {
@@ -88,15 +84,7 @@ export function PluginModeProvider({ children, accessToken }: PluginModeProvider
 
   const setMode = (m: PluginMode) => {
     setModeState(m);
-    try {
-      localStorage.setItem(STORAGE_KEY, m);
-    } catch {
-      try {
-        localStorage.removeItem(STORAGE_KEY);
-      } catch {
-        // Switching workspaces still works when browser storage is unavailable.
-      }
-    }
+    localStorage.setItem(STORAGE_KEY, m);
   };
 
   const activePlugin = plugins.find((p) => p.name === effectiveMode) ?? null;

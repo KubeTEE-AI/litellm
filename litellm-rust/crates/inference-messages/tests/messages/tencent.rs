@@ -79,9 +79,13 @@ async fn missing_credentials_fail_before_sending(tencent_call: MessagesCall) {
     })
     .await
     .unwrap_err();
-    assert!(error.is_missing_credential(), "{error:?}");
-    let report = litellm_error::Report::new(&error).to_string();
-    assert!(report.contains("TENCENT_API_KEY"), "{report}");
+    assert!(matches!(
+        error,
+        Error::Auth(litellm_auth::Error::MissingApiKey {
+            environment_variable: "TENCENT_API_KEY",
+            ..
+        })
+    ));
     assert!(received(&upstream).await.is_empty());
 }
 

@@ -16,12 +16,10 @@ from pydantic import ValidationError
 
 from litellm._logging import verbose_router_logger
 from litellm.router import CustomRoutingStrategyBase
-from litellm.router_api import ChangeSet
-from litellm.router_deprecated import renamed_router_param
 from litellm.types.lar1 import LAR1Metadata, LAR1Time
 
 if TYPE_CHECKING:
-    from litellm.router_api import RoutingContext
+    from litellm.router import Router
 
 DEFAULT_THRESHOLDS: Final[dict[str, float]] = {"low": 0.3, "medium": 0.5, "high": 0.7}
 
@@ -43,17 +41,16 @@ def lar1_thresholds_from_args(
     }
 
 
-@renamed_router_param("router")
 def apply_lar1_routing_strategy(
-    ctx: RoutingContext,
+    router: Router,
     routing_strategy_args: Mapping[str, object] | None = None,
 ) -> None:
     strategy: Final = LAR1RoutingStrategy(
-        ctx=ctx,
+        router_instance=router,
         thresholds=lar1_thresholds_from_args(routing_strategy_args),
     )
-    ctx.apply(ChangeSet(assign={"routing_strategy": "lar1"}))
-    ctx.register_plugin(strategy)
+    router.routing_strategy = "lar1"
+    router.set_custom_routing_strategy(strategy)
 
 
 def _normalize_thresholds(thresholds: dict[str, float] | None) -> dict[str, float]:
@@ -81,13 +78,12 @@ def _parse_lar1_metadata(request_kwargs: dict) -> LAR1Metadata:
 
 
 class LAR1RoutingStrategy(CustomRoutingStrategyBase):
-    @renamed_router_param("router_instance")
     def __init__(
         self,
-        ctx: RoutingContext | None = None,
+        router_instance: Router | None = None,
         thresholds: dict[str, float] | None = None,
     ):
-        self._ctx = ctx
+        self._router = router_instance
         self.thresholds = _normalize_thresholds(thresholds)
 
     async def async_get_available_deployment(
@@ -100,7 +96,7 @@ class LAR1RoutingStrategy(CustomRoutingStrategyBase):
     ):
         if request_kwargs is None:
             request_kwargs = {}
-        if self._ctx is None:
+        if self._router is None:
             return None
 
         lar1: Final = _parse_lar1_metadata(request_kwargs)
@@ -108,10 +104,9 @@ class LAR1RoutingStrategy(CustomRoutingStrategyBase):
         evidence: Final = tuple(e.value for e in lar1.evidence)
         time_dim: Final = lar1.time.value
 
-        healthy: Final = await self._ctx.select(
-            model,
-            request_kwargs,
-            kind="healthy",
+        healthy: Final = await self._router.async_get_healthy_deployments(
+            model=model,
+            request_kwargs=request_kwargs,
             messages=messages,
             input=input,
             specific_deployment=specific_deployment,
@@ -119,7 +114,7 @@ class LAR1RoutingStrategy(CustomRoutingStrategyBase):
         if isinstance(healthy, dict):
             return healthy
 
-        if not isinstance(healthy, list) or not healthy:
+        if not healthy:
             return None
 
         target: Final = self._classify_request(confidence, evidence, time_dim)

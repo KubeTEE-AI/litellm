@@ -6,7 +6,7 @@ import os
 import time
 from collections.abc import Mapping
 from typing import Final
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -291,9 +291,11 @@ def test_get_azure_ad_token_from_username_password(mock_get_bearer_token_provide
 
     mock_credential.assert_called_once_with(client_id=client_id, username=username, password=password)
 
-    mock_get_bearer_token_provider.assert_called_once_with(ANY, "https://cognitiveservices.azure.com/.default")
+    mock_get_bearer_token_provider.assert_called_once_with(
+        mock_credential.return_value, "https://cognitiveservices.azure.com/.default"
+    )
 
-    assert result() == "mock-token"
+    assert result == mock_token_provider
 
 
 def test_azure_openai_gpt_4o_naming(monkeypatch):
@@ -337,7 +339,6 @@ def test_azure_openai_gpt_4o_naming(monkeypatch):
     ],
 )
 def test_azure_gpt_4o_with_tool_call_and_response_format(api_version):
-    from litellm import completion
     from typing import Optional
     from pydantic import BaseModel
     import litellm
@@ -607,7 +608,6 @@ def test_azure_with_content_safety_error():
     """
     Verify user can access innererror from the Azure OpenAI exception
     """
-    from litellm import completion
     from litellm.exceptions import ContentPolicyViolationError
     from litellm.litellm_core_utils.exception_mapping_utils import exception_type
     from unittest.mock import MagicMock

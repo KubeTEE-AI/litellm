@@ -7,9 +7,9 @@ pub enum Error {
     #[error("encrypted environment value is missing")]
     MissingCiphertext,
     #[error("ciphertext is not valid base64 for the configured manager")]
-    InvalidCiphertext(#[source] Option<base64::DecodeError>),
+    InvalidCiphertext,
     #[error("decrypted value is not UTF-8")]
-    Utf8(#[source] std::str::Utf8Error),
+    Utf8,
     #[error(transparent)]
     Client(#[from] litellm_http::Error),
     #[error("unsupported OIDC provider or missing build feature")]
@@ -19,21 +19,21 @@ pub enum Error {
     #[error("OIDC environment variable is missing")]
     MissingEnvironment,
     #[error("OIDC request failed")]
-    OidcHttp(#[source] litellm_http::Error),
+    OidcHttp,
     #[error("OIDC provider returned HTTP {0}")]
     OidcStatus(u16),
     #[error("OIDC response is invalid")]
-    OidcResponse(#[source] litellm_http::Error),
+    OidcResponse,
     #[error("OIDC file path must be absolute and within the credential allowlist")]
     UnsafeOidcPath,
     #[error("OIDC file could not be read")]
-    OidcFile(#[source] std::io::Error),
+    OidcFile,
     #[error("secret cannot be converted to {expected}")]
     TypeMismatch { expected: &'static str },
     #[error("external secret manager failed")]
-    ExternalManager(#[source] litellm_error::Source),
+    ExternalManager(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("external secret manager read failed")]
-    ExternalRead(#[source] litellm_error::Source),
+    ExternalRead(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[cfg(feature = "aws")]
     #[error(transparent)]
     Aws(#[from] litellm_secrets_aws::Error),

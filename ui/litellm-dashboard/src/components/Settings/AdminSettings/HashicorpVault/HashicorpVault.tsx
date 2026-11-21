@@ -1,9 +1,7 @@
 "use client";
 
 import { Edit, ExternalLink, Info, KeyRound, PlugZap, Trash2 } from "lucide-react";
-import type { TFunction } from "i18next";
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import { testHashicorpVaultConnection } from "@/app/(dashboard)/hooks/configOverrides/hashicorpVaultApi";
 import { useDeleteHashicorpVaultConfig } from "@/app/(dashboard)/hooks/configOverrides/useDeleteHashicorpVaultConfig";
@@ -20,13 +18,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import EditHashicorpVaultModal from "./EditHashicorpVaultModal";
 import HashicorpVaultEmptyPlaceholder from "./HashicorpVaultEmptyPlaceholder";
 import { FIELD_LABELS, SENSITIVE_FIELDS } from "./constants";
-import { productNames } from "@/i18n/untranslated/productNames";
 
-function detectAuthMethod(values: Record<string, unknown>, t: TFunction): string {
+function detectAuthMethod(values: Record<string, unknown>): string {
   if (values.approle_role_id || values.approle_secret_id) return "AppRole";
-  if (values.client_cert && values.client_key) return t("adminPanel.hashicorpVault.authMethods.tlsCertificate");
-  if (values.vault_token) return t("adminPanel.hashicorpVault.authMethods.token");
-  return t("adminPanel.hashicorpVault.authMethods.none");
+  if (values.client_cert && values.client_key) return "TLS Certificate";
+  if (values.vault_token) return "Token";
+  return "None";
 }
 
 function DetailRow({ children, label }: { children: React.ReactNode; label: string }) {
@@ -39,7 +36,6 @@ function DetailRow({ children, label }: { children: React.ReactNode; label: stri
 }
 
 export default function HashicorpVault() {
-  const { t } = useTranslation();
   const { accessToken } = useAuthorized();
   const { data, isLoading, isError, error } = useHashicorpVaultConfig();
   const { mutate: deleteConfig, isPending: isDeleting } = useDeleteHashicorpVaultConfig(accessToken);
@@ -56,7 +52,7 @@ export default function HashicorpVault() {
     setIsTesting(true);
     try {
       const result = await testHashicorpVaultConnection(accessToken);
-      toast.success(result.message || t("adminPanel.hashicorpVault.toasts.connectionSuccess"));
+      toast.success(result.message || "Connection to Vault successful!");
     } catch (err) {
       toast.fromError(err);
     } finally {
@@ -67,7 +63,7 @@ export default function HashicorpVault() {
   const handleDelete = () => {
     deleteConfig(undefined, {
       onSuccess: () => {
-        toast.success(t("adminPanel.hashicorpVault.toasts.deleted"));
+        toast.success("Hashicorp Vault configuration deleted");
         setIsDeleteModalOpen(false);
       },
       onError: (err) => toast.fromError(err),
@@ -80,11 +76,7 @@ export default function HashicorpVault() {
       { [clearingField]: "" },
       {
         onSuccess: () => {
-          toast.success(
-            t("adminPanel.hashicorpVault.toasts.fieldCleared", {
-              field: (Object.hasOwn(FIELD_LABELS, clearingField) && t(FIELD_LABELS[clearingField])) || clearingField,
-            }),
-          );
+          toast.success(`${FIELD_LABELS[clearingField] ?? clearingField} cleared`);
           setClearingField(null);
         },
         onError: (err) => toast.fromError(err),
@@ -94,8 +86,7 @@ export default function HashicorpVault() {
 
   const renderValue = (key: string) => {
     const value = rawValues[key];
-    if (!value)
-      return <span className="text-muted-foreground italic">{t("adminPanel.hashicorpVault.notConfigured")}</span>;
+    if (!value) return <span className="text-muted-foreground italic">Not configured</span>;
     if (!SENSITIVE_FIELDS.has(key)) return <span className="font-mono text-muted-foreground">{value}</span>;
 
     return (
@@ -105,9 +96,7 @@ export default function HashicorpVault() {
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label={t("adminPanel.hashicorpVault.actions.clearField", {
-            field: (Object.hasOwn(FIELD_LABELS, key) && t(FIELD_LABELS[key])) || key,
-          })}
+          aria-label={`Clear ${FIELD_LABELS[key] ?? key}`}
           onClick={() => setClearingField(key)}
         >
           <Trash2 className="size-3.5" />
@@ -121,7 +110,7 @@ export default function HashicorpVault() {
   return (
     <>
       {isLoading ? (
-        <Card role="status" aria-label={t("adminPanel.hashicorpVault.loadingAriaLabel")}>
+        <Card role="status" aria-label="Loading Hashicorp Vault configuration">
           <CardContent className="space-y-3">
             <Skeleton className="h-8 w-64" />
             <Skeleton className="h-40 w-full" />
@@ -131,7 +120,7 @@ export default function HashicorpVault() {
         <Card>
           <CardContent>
             <Alert variant="error">
-              <AlertTitle>{t("adminPanel.hashicorpVault.errors.loadFailed")}</AlertTitle>
+              <AlertTitle>Could not load Hashicorp Vault configuration</AlertTitle>
               {error instanceof Error && <AlertDescription>{error.message}</AlertDescription>}
             </Alert>
           </CardContent>
@@ -143,26 +132,24 @@ export default function HashicorpVault() {
               <KeyRound className="size-6 text-muted-foreground" />
               <div>
                 <CardTitle>
-                  <h3>{productNames.hashicorpVault}</h3>
+                  <h3>Hashicorp Vault</h3>
                 </CardTitle>
-                <CardDescription>{t("adminPanel.hashicorpVault.description")}</CardDescription>
+                <CardDescription>Manage secret manager configuration</CardDescription>
               </div>
             </div>
             {isConfigured && (
               <CardAction className="flex flex-wrap gap-2">
                 <Button type="button" variant="outline" disabled={isTesting} onClick={handleTestConnection}>
                   <PlugZap />
-                  {isTesting
-                    ? t("adminPanel.hashicorpVault.actions.testing")
-                    : t("adminPanel.hashicorpVault.actions.testConnection")}
+                  {isTesting ? "Testing..." : "Test Connection"}
                 </Button>
                 <Button type="button" variant="outline" onClick={() => setIsEditModalVisible(true)}>
                   <Edit />
-                  {t("adminPanel.hashicorpVault.actions.edit")}
+                  Edit Configuration
                 </Button>
                 <Button type="button" variant="destructive" onClick={() => setIsDeleteModalOpen(true)}>
                   <Trash2 />
-                  {t("adminPanel.hashicorpVault.actions.delete")}
+                  Delete Configuration
                 </Button>
               </CardAction>
             )}
@@ -171,7 +158,7 @@ export default function HashicorpVault() {
             {isConfigured && (
               <Alert variant="info">
                 <Info />
-                <AlertTitle>{t("adminPanel.hashicorpVault.secretsInfo.title")}</AlertTitle>
+                <AlertTitle>Secrets must be stored with the field name &quot;key&quot;</AlertTitle>
                 <AlertDescription>
                   <code className="block font-mono">vault kv put secret/SECRET_NAME key=secret_value</code>
                   <a
@@ -180,7 +167,7 @@ export default function HashicorpVault() {
                     rel="noreferrer"
                     className="inline-flex items-center gap-1"
                   >
-                    {t("adminPanel.hashicorpVault.secretsInfo.docsLink")}
+                    View documentation
                     <ExternalLink className="size-3" />
                   </a>
                 </AlertDescription>
@@ -190,11 +177,9 @@ export default function HashicorpVault() {
             {isConfigured ? (
               fieldsToShow.length > 0 && (
                 <dl className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  <DetailRow label={t("adminPanel.hashicorpVault.authMethodLabel")}>
-                    {detectAuthMethod(rawValues, t)}
-                  </DetailRow>
+                  <DetailRow label="Auth Method">{detectAuthMethod(rawValues)}</DetailRow>
                   {fieldsToShow.map(([key]) => (
-                    <DetailRow key={key} label={(Object.hasOwn(FIELD_LABELS, key) && t(FIELD_LABELS[key])) || key}>
+                    <DetailRow key={key} label={FIELD_LABELS[key] ?? key}>
                       {renderValue(key)}
                     </DetailRow>
                   ))}
@@ -214,32 +199,21 @@ export default function HashicorpVault() {
       />
       <DeleteResourceModal
         isOpen={isDeleteModalOpen}
-        title={t("adminPanel.hashicorpVault.deleteModal.title")}
-        message={t("adminPanel.hashicorpVault.deleteModal.message")}
-        resourceInformationTitle={t("adminPanel.hashicorpVault.deleteModal.resourceTitle")}
-        resourceInformation={[
-          { label: t("adminPanel.hashicorpVault.deleteModal.vaultAddress"), value: rawValues.vault_addr },
-        ]}
+        title="Delete Hashicorp Vault Configuration?"
+        message="Models using Vault secrets will lose access to their API keys until a new configuration is saved."
+        resourceInformationTitle="Vault Configuration"
+        resourceInformation={[{ label: "Vault Address", value: rawValues.vault_addr }]}
         onCancel={() => setIsDeleteModalOpen(false)}
         onOk={handleDelete}
         confirmLoading={isDeleting}
       />
       <DeleteResourceModal
         isOpen={clearingField !== null}
-        title={t("adminPanel.hashicorpVault.clearModal.title", {
-          field: clearingField
-            ? (Object.hasOwn(FIELD_LABELS, clearingField) && t(FIELD_LABELS[clearingField])) || clearingField
-            : "",
-        })}
-        message={t("adminPanel.hashicorpVault.clearModal.message")}
-        resourceInformationTitle={t("adminPanel.hashicorpVault.clearModal.resourceTitle")}
+        title={`Clear ${clearingField ? FIELD_LABELS[clearingField] ?? clearingField : ""}?`}
+        message="This will remove the stored value."
+        resourceInformationTitle="Field"
         resourceInformation={[
-          {
-            label: t("adminPanel.hashicorpVault.clearModal.fieldLabel"),
-            value: clearingField
-              ? (Object.hasOwn(FIELD_LABELS, clearingField) && t(FIELD_LABELS[clearingField])) || clearingField
-              : "",
-          },
+          { label: "Field", value: clearingField ? FIELD_LABELS[clearingField] ?? clearingField : "" },
         ]}
         onCancel={() => setClearingField(null)}
         onOk={handleClearField}

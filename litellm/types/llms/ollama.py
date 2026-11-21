@@ -1,6 +1,4 @@
 from typing_extensions import (
-    NotRequired,
-    ReadOnly,
     Required,
     TypedDict,
 )
@@ -14,7 +12,6 @@ class OllamaToolCallFunction(
 
 
 class OllamaToolCall(TypedDict):
-    id: NotRequired[ReadOnly[str]]
     function: OllamaToolCallFunction
 
 

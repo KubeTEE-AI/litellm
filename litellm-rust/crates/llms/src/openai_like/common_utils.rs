@@ -1,7 +1,7 @@
 //! Shared OpenAI-like credential and endpoint resolution, mirroring
 //! `litellm/llms/openai_like/common_utils.py`.
 
-use crate::{Error, ErrorDetail};
+use crate::Error;
 
 /// `OpenAILikeChatConfig._get_openai_compatible_provider_info`: the deployment's
 /// `api_base` wins over `OPENAI_LIKE_API_BASE`, and the deployment key over
@@ -31,7 +31,12 @@ pub fn complete_openai_like_url(
     env_lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Result<String, Error> {
     let (api_base, _) = openai_compatible_provider_info(api_base, None, env_lookup);
-    let api_base = api_base.ok_or(Error::InvalidRequest(ErrorDetail::MissingApiBase))?;
+    let api_base = api_base.ok_or_else(|| {
+        Error::InvalidRequest(
+            "Missing API Base - A call is being made to LLM Provider but no api base is set either in the environment variables ({LLM_PROVIDER}_API_KEY) or via params"
+                .into(),
+        )
+    })?;
     if custom_endpoint {
         return Ok(api_base);
     }

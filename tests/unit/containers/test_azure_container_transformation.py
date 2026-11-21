@@ -558,14 +558,13 @@ class TestAzureContainerKnownFailureRegressions:
         self, monkeypatch
     ):
         """Operations without container_id (create, list) must NOT route via
-        a deployment using a caller-supplied model_id.
+        _ageneric_api_call_with_fallbacks using a caller-supplied model_id.
 
         Security boundary: only the path that holds a validated container_id
         is trusted to fall back to the forwarded model_id.  A caller setting
         model_id without container_id on POST /v1/containers must not gain
         access to an arbitrary deployment UUID.
         """
-        import litellm.containers
         from litellm.router import Router
 
         router = Router(
@@ -583,27 +582,32 @@ class TestAzureContainerKnownFailureRegressions:
             ]
         )
 
-        called_with: dict = {}
+        fallback_called = {"called": False}
 
-        async def _capture(**kwargs):
-            called_with.update(kwargs)
+        async def _mock_fallback(original_function, **kwargs):
+            fallback_called["called"] = True
             return {}
 
-        monkeypatch.setattr(litellm.containers, "acreate_container", _capture)
+        monkeypatch.setattr(router, "_ageneric_api_call_with_fallbacks", _mock_fallback)
 
-        # No container_id — simulates create; caller injects a model_id
-        await router.acreate_container(
-            name="c",
+        original_called = {"called": False}
+
+        async def _noop(**kwargs):
+            original_called["called"] = True
+            return {}
+
+        # No container_id — simulates create/list; caller injects a model_id
+        await router._init_containers_api_endpoints(
+            original_function=_noop,
             model_id="deployment-uuid-123",
             custom_llm_provider="azure",
         )
 
-        assert called_with, "the container call must still run directly"
-        assert called_with.get("api_key") is None, (
-            "the deployment's credentials must NOT be applied when "
+        assert not fallback_called["called"], (
+            "_ageneric_api_call_with_fallbacks must NOT be called when "
             "container_id is absent, even if model_id is supplied"
         )
-        assert called_with.get("api_base") is None
+        assert original_called["called"], "original_function must be called directly"
 
     def test_regression_httpx_empty_params_strips_query_string(self):
         """httpx erases the URL query-string when params={} (empty dict) is passed.
@@ -970,10 +974,9 @@ class TestAzureContainerKnownFailureRegressions:
         self, monkeypatch
     ):
         """Native Azure container IDs (cntr_ + hex, no LiteLLM payload) must
-        still route through the deployment named by the model_id forwarded
-        from the proxy ownership check so that deployment credentials
-        (api_base) are applied."""
-        import litellm.containers
+        still route through _ageneric_api_call_with_fallbacks using the
+        model_id forwarded from the proxy ownership check so that deployment
+        credentials (api_base) are applied."""
         from litellm.router import Router
 
         router = Router(
@@ -993,22 +996,25 @@ class TestAzureContainerKnownFailureRegressions:
 
         called_with: dict = {}
 
-        async def _capture(**kwargs):
+        async def _mock_fallback(original_function, **kwargs):
             called_with.update(kwargs)
             return {}
 
-        monkeypatch.setattr(litellm.containers, "aretrieve_container", _capture)
+        monkeypatch.setattr(router, "_ageneric_api_call_with_fallbacks", _mock_fallback)
 
         native_azure_id = "cntr_6a058b43d24c8190a226cfb1d35405b20115fb7875ff11df"
 
-        await router.aretrieve_container(
+        async def _noop(**kwargs):
+            return {}
+
+        await router._init_containers_api_endpoints(
+            original_function=_noop,
             container_id=native_azure_id,
             model_id="deployment-uuid-123",
             custom_llm_provider="azure",
         )
 
-        assert called_with.get("api_base") == "https://my-resource.cognitiveservices.azure.com", (
-            "the forwarded model_id's deployment credentials must be applied "
-            "when the container_id carries no LiteLLM routing payload"
+        assert called_with.get("model") == "deployment-uuid-123", (
+            "_ageneric_api_call_with_fallbacks must be called with the forwarded "
+            "model_id when the container_id carries no LiteLLM routing payload"
         )
-        assert called_with.get("container_id") == native_azure_id

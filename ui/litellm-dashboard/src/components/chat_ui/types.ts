@@ -1,5 +1,4 @@
 import type { TokenUsage } from "./ResponseMetrics";
-import type { GatewayTrace } from "@/components/llm_calls/reply_trace";
 
 export interface VectorStoreSearchResult {
   score: number;
@@ -26,25 +25,6 @@ export interface A2ATaskMetadata {
   metadata?: Record<string, any>;
 }
 
-export type ReplyTrace = Partial<GatewayTrace> &
-  Readonly<{
-    endpoint: string;
-    requestedModel?: string;
-    responseId?: string;
-  }>;
-
-export type MessageAttachment = Readonly<{
-  name: string;
-  size: number;
-  kind: "image" | "pdf" | "audio";
-  previewUrl?: string;
-}>;
-
-export type McpToolCallDisplay = Readonly<{
-  tool: string;
-  arguments: Readonly<Record<string, unknown>>;
-}>;
-
 export interface MessageType {
   role: string;
   content: string | MultimodalContent[];
@@ -64,16 +44,10 @@ export interface MessageType {
   };
   searchResults?: VectorStoreSearchResponse[];
   a2aMetadata?: A2ATaskMetadata;
-  trace?: ReplyTrace;
-  attachments?: readonly MessageAttachment[];
-  mcpToolCall?: McpToolCallDisplay;
-  isError?: boolean;
 }
 
 export interface MultimodalContent {
-  type: "input_text" | "input_image" | "input_file";
-  filename?: string;
-  file_data?: string;
+  type: "input_text" | "input_image";
   text?: string;
   image_url?: string;
   detail?: "low" | "high" | "auto";

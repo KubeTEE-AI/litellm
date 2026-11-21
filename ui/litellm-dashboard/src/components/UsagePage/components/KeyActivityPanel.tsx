@@ -1,6 +1,5 @@
 import { KeyRound, Search, X } from "lucide-react";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
 
 import {
   formatCompact,
@@ -11,7 +10,6 @@ import { Panel, Sparkline, Stat } from "@/app/(dashboard)/usage/_components/comp
 import { ModelCollapsible, ModelSection } from "@/components/activity_metrics";
 import type { Team } from "@/components/key_team_helpers/key_list";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
-import i18n from "@/i18n/i18n";
 
 import type {
   DailyActivityKeyPageResponse,
@@ -61,10 +59,9 @@ type KeyDetailState =
   | { status: "loaded"; metrics: ModelActivityData | undefined };
 
 const keyCountText = (searching: boolean, isFiltering: boolean, shownKeys: number, total: number): string => {
-  if (searching) return i18n.t("usage.keyActivity.searching");
-  if (isFiltering)
-    return i18n.t("usage.keyActivity.matchingKeys", { count: shownKeys, value: shownKeys.toLocaleString() });
-  return i18n.t("usage.keyActivity.keyCount", { count: total, value: total.toLocaleString() });
+  if (searching) return "Searching...";
+  if (isFiltering) return `${shownKeys.toLocaleString()} matching keys`;
+  return `${total.toLocaleString()} keys`;
 };
 
 interface KeyDetailContentProps {
@@ -75,22 +72,21 @@ interface KeyDetailContentProps {
 }
 
 const KeyDetailContent: React.FC<KeyDetailContentProps> = ({ apiKey, detail, hidePromptCachingMetrics, onRetry }) => {
-  const { t } = useTranslation();
   if (detail?.status === "loading") {
-    return <p className="py-4 text-sm text-muted-foreground">{t("usage.keyActivity.loadingDetails")}</p>;
+    return <p className="py-4 text-sm text-muted-foreground">Loading key details...</p>;
   }
   if (detail?.status === "failed") {
     return (
       <p className="py-4 text-sm text-muted-foreground">
-        {t("usage.keyActivity.detailFailed")}{" "}
+        Could not load key details.{" "}
         <button type="button" className="font-medium text-foreground underline" onClick={onRetry}>
-          {t("usage.keyActivity.retry")}
+          Retry
         </button>
       </p>
     );
   }
   if (detail?.status !== "loaded" || detail.metrics === undefined) {
-    return <p className="py-4 text-sm text-muted-foreground">{t("usage.keyActivity.noDailyDetails")}</p>;
+    return <p className="py-4 text-sm text-muted-foreground">No daily details available</p>;
   }
   return (
     <ModelSection modelName={apiKey} metrics={detail.metrics} hidePromptCachingMetrics={hidePromptCachingMetrics} />
@@ -122,9 +118,8 @@ interface KeySummaryStripProps {
 }
 
 const KeySummaryStrip: React.FC<KeySummaryStripProps> = ({ summary, loading, hidePromptCachingMetrics }) => {
-  const { t } = useTranslation();
   const daily = useMemo(() => summarySeries(summary), [summary]);
-  const trend = (dataKey: "spend" | "requests" | "tokens") =>
+  const trend = (dataKey: string) =>
     loading || daily.length < 2 ? undefined : (
       <Sparkline data={daily} dataKey={dataKey} color={BRAND} className="h-12" />
     );
@@ -136,61 +131,51 @@ const KeySummaryStrip: React.FC<KeySummaryStripProps> = ({ summary, loading, hid
     >
       {loading ? (
         <span role="status" className="sr-only">
-          {t("usage.keyActivity.loadingChartData")}
+          Loading chart data...
         </span>
       ) : (
-        <h3 className="sr-only">{t("usage.keyActivity.overallUsage")}</h3>
+        <h3 className="sr-only">Overall Usage</h3>
       )}
       <StatCell trend={trend("spend")}>
-        <Stat label={t("usage.keyActivity.stats.spend")} value={formatUsd(summary.total_spend)} pending={loading} />
+        <Stat label="Spend" value={formatUsd(summary.total_spend)} pending={loading} />
       </StatCell>
       <StatCell trend={trend("requests")}>
-        <Stat
-          label={t("usage.keyActivity.stats.requests")}
-          value={summary.total_requests.toLocaleString()}
-          pending={loading}
-        />
+        <Stat label="Requests" value={summary.total_requests.toLocaleString()} pending={loading} />
         {!loading && (
           <div className="mt-0.5 flex gap-3 text-xs text-muted-foreground">
             <span>
-              <span className="text-success tabular-nums">{summary.total_successful_requests.toLocaleString()}</span>{" "}
-              {t("usage.keyActivity.stats.ok")}
+              <span className="text-success tabular-nums">{summary.total_successful_requests.toLocaleString()}</span> ok
             </span>
             <span>
               <span className={summary.total_failed_requests > 0 ? "text-destructive tabular-nums" : "tabular-nums"}>
                 {summary.total_failed_requests.toLocaleString()}
               </span>{" "}
-              {t("usage.keyActivity.stats.failed")}
+              failed
             </span>
           </div>
         )}
       </StatCell>
       <StatCell trend={trend("tokens")}>
         <Stat
-          label={t("usage.keyActivity.stats.tokens")}
+          label="Tokens"
           value={summary.total_tokens.toLocaleString()}
           pending={loading}
           hint={
             loading
               ? undefined
-              : t("usage.keyActivity.stats.tokensHint", {
-                  input: formatCompact(summary.prompt_tokens),
-                  output: formatCompact(summary.completion_tokens),
-                })
+              : `${formatCompact(summary.prompt_tokens)} in · ${formatCompact(summary.completion_tokens)} out`
           }
         />
       </StatCell>
       <StatCell>
         <Stat
-          label={t("usage.keyActivity.stats.avgCost")}
+          label="Avg cost / request"
           value={formatUsd(avgCost, 4)}
           pending={loading}
           hint={
             loading || hidePromptCachingMetrics
               ? undefined
-              : t("usage.keyActivity.stats.cacheReadHint", {
-                  value: formatCompact(summary.total_cache_read_input_tokens),
-                })
+              : `${formatCompact(summary.total_cache_read_input_tokens)} cache read tokens`
           }
         />
       </StatCell>
@@ -207,7 +192,6 @@ const KeyActivityPanel: React.FC<KeyActivityPanelProps> = ({
   teams,
   hidePromptCachingMetrics = false,
 }) => {
-  const { t } = useTranslation();
   const [queryState, setQueryState] = useState<{ scope: FetchKeyPage; value: string } | null>(null);
   const query = queryState?.scope === fetchKeyPage ? queryState.value : "";
   const updateQuery = useCallback((value: string) => setQueryState({ scope: fetchKeyPage, value }), [fetchKeyPage]);
@@ -373,7 +357,7 @@ const KeyActivityPanel: React.FC<KeyActivityPanelProps> = ({
   const visibleDetails = detailState?.scope === fetchKeyPage ? detailState.details : {};
   const keyCountLabel =
     searchSettled && searchFailed && shownKeys === 0
-      ? t("usage.keyActivity.searchFailed")
+      ? "Search failed"
       : keyCountText(searching, isFiltering, shownKeys, total);
 
   const retryFirstPage = () => {
@@ -399,16 +383,16 @@ const KeyActivityPanel: React.FC<KeyActivityPanelProps> = ({
   };
   const firstPageError = (
     <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-      {t("usage.keyActivity.firstPageFailed")}{" "}
+      Could not load keys for this range.{" "}
       <button type="button" className="font-medium text-foreground underline" onClick={retryFirstPage}>
-        {t("usage.keyActivity.retry")}
+        Retry
       </button>
     </p>
   );
   const emptyListBody = (() => {
     if (failed) return firstPageError;
     if (!loading) return null;
-    return <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t("usage.keyActivity.loadingKeys")}</p>;
+    return <p className="px-4 py-8 text-center text-sm text-muted-foreground">Loading keys...</p>;
   })();
   const maxSpend = Math.max(0, ...Object.values(filteredMetrics).map((metrics) => metrics.total_spend));
   const keyList = Object.entries(filteredMetrics).map(([apiKey, metrics]) => {
@@ -432,8 +416,7 @@ const KeyActivityPanel: React.FC<KeyActivityPanelProps> = ({
             </div>
             <span className="text-right text-sm tabular-nums text-foreground">{formatUsd(metrics.total_spend)}</span>
             <span className="text-right text-sm tabular-nums text-muted-foreground">
-              {metrics.total_requests.toLocaleString()}{" "}
-              <span className="sr-only">{t("usage.keyActivity.requestsSrOnly")}</span>
+              {metrics.total_requests.toLocaleString()} <span className="sr-only">requests</span>
             </span>
           </div>
         }
@@ -457,17 +440,14 @@ const KeyActivityPanel: React.FC<KeyActivityPanelProps> = ({
   const showSearchErrorNote = !noMatches && searchFailed && !searching;
   const searchRetryButton = (
     <button type="button" className="font-medium text-foreground underline" onClick={retrySearch}>
-      {t("usage.keyActivity.retrySearch")}
+      Retry search
     </button>
   );
   const emptyFilterBody = searchFailed ? (
-    <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-      {t("usage.keyActivity.searchKeysFailed")}
-      {searchRetryButton}
-    </p>
+    <p className="px-4 py-8 text-center text-sm text-muted-foreground">Could not search keys. {searchRetryButton}</p>
   ) : (
     <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-      <Trans i18nKey="usage.keyActivity.noMatches" components={{ query: <>{trimmedQuery}</> }} />
+      No keys match &quot;{trimmedQuery}&quot; in this date range
     </p>
   );
 
@@ -509,18 +489,14 @@ const KeyActivityPanel: React.FC<KeyActivityPanelProps> = ({
         <Search className="size-3.5 text-muted-foreground" />
       </InputGroupAddon>
       <InputGroupInput
-        aria-label={t("usage.keyActivity.searchLabel")}
-        placeholder={t("usage.keyActivity.searchPlaceholder")}
+        aria-label="Search keys"
+        placeholder="Search alias, hash, user ID, or email"
         value={query}
         onChange={(event) => updateQuery(event.target.value)}
       />
       {isFiltering && (
         <InputGroupAddon align="inline-end">
-          <InputGroupButton
-            size="icon-xs"
-            aria-label={t("usage.keyActivity.clearSearch")}
-            onClick={() => updateQuery("")}
-          >
+          <InputGroupButton size="icon-xs" aria-label="Clear key search" onClick={() => updateQuery("")}>
             <X />
           </InputGroupButton>
         </InputGroupAddon>
@@ -539,37 +515,27 @@ const KeyActivityPanel: React.FC<KeyActivityPanelProps> = ({
         )}
       </div>
       <KeySummaryStrip summary={summary} loading={summaryLoading} hidePromptCachingMetrics={hidePromptCachingMetrics} />
-      <Panel
-        icon={KeyRound}
-        title={t("usage.keyActivity.panelTitle")}
-        className="overflow-hidden"
-        bodyClassName="px-0 pt-3 pb-0"
-      >
+      <Panel icon={KeyRound} title="Virtual keys" className="overflow-hidden" bodyClassName="px-0 pt-3 pb-0">
         {showColumnHeaders && (
           <div
             aria-hidden="true"
             className={`${KEY_ROW_GRID} border-y bg-muted/40 py-2 pr-4 pl-10 text-xs font-medium text-muted-foreground`}
           >
-            <span>{t("usage.keyActivity.columns.key")}</span>
-            <span className="text-right">{t("usage.keyActivity.columns.spend")}</span>
-            <span className="text-right">{t("usage.keyActivity.columns.requests")}</span>
+            <span>Key</span>
+            <span className="text-right">Spend</span>
+            <span className="text-right">Requests</span>
           </div>
         )}
         <div className={showColumnHeaders ? undefined : "border-t"}>{noMatches ? emptyFilterBody : listBody}</div>
         {showFooter && (
           <div className="border-t px-4 py-2.5 text-xs text-muted-foreground">
-            {showSearchErrorNote && (
-              <p>
-                {t("usage.keyActivity.searchAllFailed")}
-                {searchRetryButton}
-              </p>
-            )}
-            {loadingMore && <p>{t("usage.keyActivity.loadingMore")}</p>}
+            {showSearchErrorNote && <p>Could not search all keys. {searchRetryButton}</p>}
+            {loadingMore && <p>Loading more keys...</p>}
             {showNextPageRetry && (
               <p>
-                {t("usage.keyActivity.loadMoreFailed")}{" "}
+                Could not load more keys.{" "}
                 <button type="button" className="font-medium text-foreground underline" onClick={retryNextPage}>
-                  {t("usage.keyActivity.retry")}
+                  Retry
                 </button>
               </p>
             )}

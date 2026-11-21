@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import {
   Combobox,
@@ -15,7 +14,6 @@ import {
   ComboboxValue,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
-import i18n from "@/i18n/i18n";
 
 export interface TagsInputOption {
   label: string;
@@ -48,13 +46,12 @@ export const TagsInput = ({
   onValueChange,
   options = [],
   placeholder,
-  emptyText = i18n.t("tagsInput.empty"),
+  emptyText = "No matching options",
   tokenSeparators = [],
   loading = false,
   disabled = false,
   id,
 }: TagsInputProps) => {
-  const { t } = useTranslation();
   const anchor = useComboboxAnchor();
   const [query, setQuery] = useState("");
 
@@ -121,7 +118,7 @@ export const TagsInput = ({
               ))}
               <ComboboxChipsInput
                 id={id}
-                placeholder={loading ? t("tagsInput.loading") : placeholder}
+                placeholder={loading ? "Loading..." : placeholder}
                 className="min-w-24"
                 onBlur={commitPending}
                 onKeyDown={handleKeyDown}

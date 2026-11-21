@@ -64,18 +64,25 @@ impl CyberArkSecretManager {
             }),
             ..config.clone()
         };
-        let client = pool
-            .client(&config, ClientVariant::Provider)
-            .map_err(|error| match error.tls_source() {
-                Some(TlsSource::ClientIdentity) => Error::ClientCertificate(error),
-                Some(TlsSource::CaBundle) | None => Error::Client(error),
-            })?;
+        let client =
+            pool.client(&config, ClientVariant::Provider)
+                .map_err(|error| match error {
+                    litellm_http::Error::Read {
+                        tls_source: TlsSource::ClientIdentity,
+                        ..
+                    }
+                    | litellm_http::Error::InvalidPem {
+                        tls_source: TlsSource::ClientIdentity,
+                        ..
+                    } => Error::ClientCertificate,
+                    other => Error::Client(Box::new(other)),
+                })?;
         let endpoint = reqwest::Url::parse(
             &environment
                 .get(CYBERARK_API_BASE)
                 .unwrap_or_else(|| DEFAULT_API_BASE.to_owned()),
         )
-        .map_err(Error::Endpoint)?;
+        .map_err(|_| Error::Endpoint)?;
         let account = environment
             .get(CYBERARK_ACCOUNT)
             .unwrap_or_else(|| DEFAULT_ACCOUNT.to_owned());
@@ -88,7 +95,7 @@ impl CyberArkSecretManager {
                 value
                     .parse::<u64>()
                     .map(Duration::from_secs)
-                    .map_err(Error::RefreshInterval)
+                    .map_err(|_| Error::RefreshInterval)
             })
             .transpose()?;
         Ok(Self::with_client(
@@ -108,7 +115,7 @@ impl CyberArkSecretManager {
                 self.account,
                 utf8_percent_encode(&self.username, SECRET_NAME_SAFE)
             ))
-            .map_err(Error::Endpoint)
+            .map_err(|_| Error::Endpoint)
     }
 
     pub(super) async fn authenticate(
@@ -128,14 +135,11 @@ impl CyberArkSecretManager {
             context,
         )
         .send()
-        .await
-        .map_err(litellm_http::Error::from)?;
+        .await?;
         if !response.status().is_success() {
             return Err(Error::AuthStatus(response.status().as_u16()));
         }
-        let token = SecretValue::new(
-            STANDARD.encode(response.text().await.map_err(litellm_http::Error::from)?),
-        );
+        let token = SecretValue::new(STANDARD.encode(response.text().await?));
         self.token.insert((), token.clone()).await;
         Ok(token)
     }

@@ -264,12 +264,7 @@ pub enum ThinkingDisplay {
 #[macro_rules_attribute::apply(crate::wire_type)]
 #[derive(Default)]
 pub struct EnabledThinking {
-    /// An explicit `null` stays `Unrecognized(Null)`: Python rejects it, but defaults a missing key to 0.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::recognized::present"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_tokens: Option<Recognized<u64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<Recognized<ThinkingDisplay>>,

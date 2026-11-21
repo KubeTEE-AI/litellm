@@ -1,11 +1,7 @@
 import { z } from "zod";
 
-import i18n from "@/i18n/i18n";
-
 const sharedShape = {
-  auto_router_name: z
-    .string()
-    .min(1, { error: () => i18n.t("editAutoRouter.editAutoRouterModal.errors.nameRequired") }),
+  auto_router_name: z.string().min(1, "Auto router name is required"),
   model_access_group: z.array(z.string()),
 };
 
@@ -26,19 +22,11 @@ const semanticRouterShape = {
   auto_router_default_model: z
     .string()
     .nullable()
-    .pipe(
-      z
-        .string({ error: () => i18n.t("editAutoRouter.editAutoRouterModal.errors.defaultModelRequired") })
-        .min(1, { error: () => i18n.t("editAutoRouter.editAutoRouterModal.errors.defaultModelRequired") }),
-    ),
+    .pipe(z.string({ error: "Default model is required" }).min(1, "Default model is required")),
   auto_router_embedding_model: z
     .string()
     .nullable()
-    .pipe(
-      z
-        .string({ error: () => i18n.t("editAutoRouter.editAutoRouterModal.errors.embeddingModelRequired") })
-        .min(1, { error: () => i18n.t("editAutoRouter.editAutoRouterModal.errors.embeddingModelRequired") }),
-    ),
+    .pipe(z.string({ error: "Embedding model is required" }).min(1, "Embedding model is required")),
 };
 
 export const complexityRouterSchema = z.object(complexityRouterShape);

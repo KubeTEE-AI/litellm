@@ -53,10 +53,7 @@ impl Embedder for FixedEmbedder {
             .lock()
             .unwrap()
             .push((input.to_owned(), metadata.cloned()));
-        self.vectors
-            .get(input)
-            .cloned()
-            .ok_or(Error::Unavailable(None))
+        self.vectors.get(input).cloned().ok_or(Error::Unavailable)
     }
 }
 
@@ -399,9 +396,9 @@ async fn lookup_reports_python_semantic_similarity(
 
 #[rstest]
 #[case::codec_decodes_the_payload(Some(json!("{\"a\":1}")), Ok(Some(json!({"a": 1}))))]
-#[case::undecodable_response(Some(json!("not json")), Err(Error::InvalidEntry(None)))]
-#[case::non_string_response(Some(json!(1)), Err(Error::InvalidEntry(None)))]
-#[case::missing_response(None, Err(Error::InvalidEntry(None)))]
+#[case::undecodable_response(Some(json!("not json")), Err(Error::InvalidEntry))]
+#[case::non_string_response(Some(json!(1)), Err(Error::InvalidEntry))]
+#[case::missing_response(None, Err(Error::InvalidEntry))]
 #[tokio::test(flavor = "multi_thread")]
 async fn stored_responses_go_through_the_codec(
     #[case] response: Option<JsonValue>,
@@ -422,12 +419,9 @@ async fn stored_responses_go_through_the_codec(
             .into(),
     });
 
-    let kind = |result: Result<Option<JsonValue>, Error>| {
-        result.map_err(|error| std::mem::discriminant(&error))
-    };
     assert_eq!(
-        kind(cache.async_get_cache("key", &context("hello")).await),
-        kind(expected)
+        cache.async_get_cache("key", &context("hello")).await,
+        expected
     );
     server.stop();
 }
@@ -440,7 +434,7 @@ async fn embedding_failures_propagate() {
 
     assert_eq!(
         cache.async_get_cache("key", &context("unknown")).await,
-        Err(Error::Unavailable(None))
+        Err(Error::Unavailable)
     );
     server.stop();
 }
@@ -499,10 +493,10 @@ async fn stopped_qdrant_server_maps_to_unavailable() {
     let cache = connect(&server, [("hello", vec![1.0, 0.0])]).await;
     server.stop();
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(matches!(
+    assert_eq!(
         cache.async_get_cache("key", &context("hello")).await,
-        Err(Error::Unavailable(Some(_)))
-    ));
+        Err(Error::Unavailable)
+    );
 }
 
 /// `_payload_matches_cache_key` compares `str(cached_key) == str(key)`, so a point whose stored

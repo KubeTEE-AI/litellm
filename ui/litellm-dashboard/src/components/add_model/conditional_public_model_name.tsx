@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useFormContext, useWatch } from "react-hook-form";
-import { Trans, useTranslation } from "react-i18next";
 import { DataTable } from "@/components/shared/DataTable";
 import { Input } from "@/components/ui/input";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -41,36 +40,18 @@ const ANTHROPIC_1M_HEADERS = JSON.stringify({ extra_headers: { "anthropic-beta":
 
 const publicNameTooltipContent = (
   <div className="flex flex-col gap-2 text-left font-normal">
+    <div>The name you specify in your API calls to LiteLLM Proxy</div>
     <div>
-      <Trans i18nKey="addModel.conditionalPublicModelName.publicNameDescription" />
+      <strong>Example:</strong> If you name your public model <code className={tooltipCodeClassName}>example-name</code>
+      , and choose <code className={tooltipCodeClassName}>openai/qwen-plus-latest</code> as the LiteLLM model
     </div>
     <div>
-      <Trans
-        i18nKey="addModel.conditionalPublicModelName.publicNameExample"
-        components={{
-          strong: <strong />,
-          publicName: <code className={tooltipCodeClassName}>example-name</code>,
-          litellmModel: <code className={tooltipCodeClassName}>openai/qwen-plus-latest</code>,
-        }}
-      />
+      <strong>Usage:</strong> You make an API call to the LiteLLM proxy with{" "}
+      <code className={tooltipCodeClassName}>model = &quot;example-name&quot;</code>
     </div>
     <div>
-      <Trans
-        i18nKey="addModel.conditionalPublicModelName.publicNameUsage"
-        components={{
-          strong: <strong />,
-          request: <code className={tooltipCodeClassName}>model = &quot;example-name&quot;</code>,
-        }}
-      />
-    </div>
-    <div>
-      <Trans
-        i18nKey="addModel.conditionalPublicModelName.publicNameResult"
-        components={{
-          strong: <strong />,
-          providerModel: <code className={tooltipCodeClassName}>qwen-plus-latest</code>,
-        }}
-      />
+      <strong>Result:</strong> LiteLLM sends <code className={tooltipCodeClassName}>qwen-plus-latest</code> to the
+      provider
     </div>
   </div>
 );
@@ -113,7 +94,7 @@ const columns: ColumnDef<ModelMapping>[] = [
     accessorKey: "public_name",
     header: () => (
       <span className="flex items-center">
-        <Trans i18nKey="addModel.conditionalPublicModelName.publicModelName" />
+        Public Model Name
         <SimpleTooltip content={publicNameTooltipContent} width="500px" />
       </span>
     ),
@@ -124,22 +105,14 @@ const columns: ColumnDef<ModelMapping>[] = [
     accessorKey: "litellm_model",
     header: () => (
       <span className="flex items-center">
-        <Trans i18nKey="addModel.conditionalPublicModelName.litellmModelName" />
-        <SimpleTooltip
-          content={
-            <div>
-              <Trans i18nKey="addModel.conditionalPublicModelName.litellmModelNameTooltip" />
-            </div>
-          }
-          width="360px"
-        />
+        LiteLLM Model Name
+        <SimpleTooltip content={<div>The model name LiteLLM will send to the LLM API</div>} width="360px" />
       </span>
     ),
   },
 ];
 
 const ConditionalPublicModelName: React.FC = () => {
-  const { t } = useTranslation();
   const form = useFormContext<MountedFormValues>();
 
   const modelValue = useWatch({ control: form.control, name: "model" }) || [];
@@ -232,8 +205,8 @@ const ConditionalPublicModelName: React.FC = () => {
       name="model_mappings"
       label={
         <span className="flex items-center">
-          {t("addModel.conditionalPublicModelName.modelMappings")}
-          <SimpleTooltip content={t("addModel.conditionalPublicModelName.modelMappingsTooltip")} />
+          Model Mappings
+          <SimpleTooltip content="Map public model names to LiteLLM model names for load balancing" />
         </span>
       }
       required

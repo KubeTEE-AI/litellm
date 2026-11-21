@@ -7,17 +7,14 @@ import {
   RowSelectionState,
   SortingState,
 } from "@tanstack/react-table";
-import type { ParseKeys } from "i18next";
 import { Users } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import { UserInfo } from "@/components/networking";
 import {
   DataTable,
   DataTableFilterDrawer,
   DataTableFilterField,
-  type FilterDraft,
   DataTableToolbar,
 } from "@/components/shared/DataTable";
 import { SearchSelect } from "@/components/shared/SearchSelect";
@@ -36,7 +33,6 @@ interface UsersTableProps {
   isLoading: boolean;
   possibleUIRoles: Record<string, Record<string, string>> | null;
   teams: UsersTableTeamOption[] | null;
-  canViewUserUsage: boolean;
   sorting: SortingState;
   onSortingChange: OnChangeFn<SortingState>;
   pagination: PaginationState;
@@ -53,22 +49,21 @@ interface UsersTableProps {
   onResetPassword: (userId: string) => void;
 }
 
-const FILTER_LABEL_KEYS: Readonly<Record<string, ParseKeys>> = {
-  user_id: "users.table.filters.userId",
-  sso_user_id: "users.table.filters.ssoId",
-  user_role: "users.table.filters.role",
-  team: "users.table.filters.team",
+const FILTER_LABELS: Record<string, string> = {
+  user_id: "User ID",
+  sso_user_id: "SSO ID",
+  user_role: "Role",
+  team: "Team",
 };
 
 function EmptyState() {
-  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-1 py-6">
       <div className="mb-1 flex size-10 items-center justify-center rounded-lg bg-muted">
         <Users className="size-5 text-muted-foreground" />
       </div>
-      <div className="text-sm font-medium text-foreground">{t("users.table.emptyState.title")}</div>
-      <div className="text-sm text-muted-foreground">{t("users.table.emptyState.description")}</div>
+      <div className="text-sm font-medium text-foreground">No users found</div>
+      <div className="text-sm text-muted-foreground">Try adjusting your search or filters.</div>
     </div>
   );
 }
@@ -79,7 +74,6 @@ export function UsersTable({
   isLoading,
   possibleUIRoles,
   teams,
-  canViewUserUsage,
   sorting,
   onSortingChange,
   pagination,
@@ -95,26 +89,18 @@ export function UsersTable({
   onDeleteUser,
   onResetPassword,
 }: UsersTableProps) {
-  const { t } = useTranslation();
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const columns = useMemo(() => {
     const columnDeps = {
       possibleUIRoles,
       includeSelection: selectionEnabled,
-      canViewUserUsage,
       onUserClick,
       onDeleteUser,
       onResetPassword,
-      t,
     };
     return getUsersTableColumns(columnDeps);
-  }, [possibleUIRoles, selectionEnabled, canViewUserUsage, onUserClick, onDeleteUser, onResetPassword, t]);
-
-  const filterLabels = useMemo(
-    () => Object.fromEntries(Object.entries(FILTER_LABEL_KEYS).map(([columnId, key]) => [columnId, t(key)])),
-    [t],
-  );
+  }, [possibleUIRoles, selectionEnabled, onUserClick, onDeleteUser, onResetPassword]);
 
   const roleOptions = useMemo(
     () =>
@@ -163,7 +149,7 @@ export function UsersTable({
       rowSelection={rowSelection}
       onRowSelectionChange={onRowSelectionChange}
       isLoading={isLoading}
-      loadingMessage={t("users.table.loading")}
+      loadingMessage="Loading users…"
       noDataMessage={<EmptyState />}
       size="compact"
       toolbar={(table) => (
@@ -172,52 +158,52 @@ export function UsersTable({
             table={table}
             searchValue={searchValue}
             onSearchChange={onSearchChange}
-            searchPlaceholder={t("users.table.searchPlaceholder")}
+            searchPlaceholder="Search by email or ID…"
             onOpenFilters={() => setFiltersOpen(true)}
-            filterLabels={filterLabels}
+            filterLabels={FILTER_LABELS}
             formatFilterValue={formatFilterValue}
           />
           <DataTableFilterDrawer
             table={table}
             open={filtersOpen}
             onOpenChange={setFiltersOpen}
-            title={t("users.table.filters.title")}
-            description={t("users.table.filters.description")}
+            title="Filters"
+            description="Narrow down your users"
           >
-            {({ get, set }: FilterDraft<"sso_user_id" | "team" | "user_id" | "user_role">) => (
+            {({ get, set }) => (
               <>
-                <DataTableFilterField label={t("users.table.filters.userId")}>
+                <DataTableFilterField label="User ID">
                   <Input
                     value={(get("user_id") as string) ?? ""}
                     onChange={(event) => set("user_id", event.target.value)}
-                    placeholder={t("users.table.filters.userIdPlaceholder")}
+                    placeholder="Enter user ID…"
                     data-testid="users-filter-user-id"
                   />
                 </DataTableFilterField>
-                <DataTableFilterField label={t("users.table.filters.ssoId")}>
+                <DataTableFilterField label="SSO ID">
                   <Input
                     value={(get("sso_user_id") as string) ?? ""}
                     onChange={(event) => set("sso_user_id", event.target.value)}
-                    placeholder={t("users.table.filters.ssoIdPlaceholder")}
+                    placeholder="Enter SSO ID…"
                     data-testid="users-filter-sso-id"
                   />
                 </DataTableFilterField>
-                <DataTableFilterField label={t("users.table.filters.role")}>
+                <DataTableFilterField label="Role">
                   <SearchSelect
                     options={roleOptions}
                     value={(get("user_role") as string) || undefined}
                     onValueChange={(value) => set("user_role", value ?? undefined)}
-                    placeholder={t("users.table.filters.rolePlaceholder")}
-                    emptyText={t("users.table.filters.roleEmpty")}
+                    placeholder="Select a role…"
+                    emptyText="No roles found"
                   />
                 </DataTableFilterField>
-                <DataTableFilterField label={t("users.table.filters.team")}>
+                <DataTableFilterField label="Team">
                   <SearchSelect
                     options={teamOptions}
                     value={(get("team") as string) || undefined}
                     onValueChange={(value) => set("team", value ?? undefined)}
-                    placeholder={t("users.table.filters.teamPlaceholder")}
-                    emptyText={t("users.table.filters.teamEmpty")}
+                    placeholder="Select a team…"
+                    emptyText="No teams found"
                   />
                 </DataTableFilterField>
               </>

@@ -3,8 +3,6 @@
 import { Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import i18n from "@/i18n/i18n";
-
 import {
   Combobox,
   ComboboxChip,
@@ -24,7 +22,7 @@ import { usePaginatedCombobox } from "./usePaginatedCombobox";
 
 interface PaginatedMultiSelectProps {
   options: SearchSelectOption[];
-  value?: readonly string[];
+  value?: string[];
   onValueChange: (value: string[]) => void;
   onSearchChange: (query: string) => void;
   onLoadMore: () => void;
@@ -52,10 +50,10 @@ export function PaginatedMultiSelect({
   hasNextPage = false,
   isLoading = false,
   isFetchingNextPage = false,
-  placeholder = i18n.t("shared.paginatedMultiSelect.placeholder"),
-  emptyText = i18n.t("shared.paginatedMultiSelect.empty"),
+  placeholder = "Search…",
+  emptyText = "No results",
   errorText,
-  loadingText = i18n.t("shared.paginatedMultiSelect.loading"),
+  loadingText = "Loading…",
   clearAllLabel,
   disabled = false,
   className,

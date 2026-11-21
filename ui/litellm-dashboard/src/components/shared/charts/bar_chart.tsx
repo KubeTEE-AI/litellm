@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useTranslation } from "react-i18next";
 import { Bar, BarChart as RechartsBarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, type ChartConfig } from "@/components/ui/chart";
 import { cn } from "@/lib/cva.config";
@@ -11,7 +10,6 @@ import { categoryFills, type ChartColor } from "./colors";
 export type BarChartProps<TDatum extends Record<string, unknown>> = {
   data: readonly TDatum[];
   index: string;
-  indexFormatter?: (value: string) => string;
   categories: readonly string[];
   colors?: readonly ChartColor[];
   colorByDatum?: boolean;
@@ -34,7 +32,6 @@ export type BarChartProps<TDatum extends Record<string, unknown>> = {
 export function BarChart<TDatum extends Record<string, unknown>>({
   data,
   index,
-  indexFormatter,
   categories,
   colors,
   colorByDatum = false,
@@ -53,14 +50,13 @@ export function BarChart<TDatum extends Record<string, unknown>>({
   className,
   style,
 }: BarChartProps<TDatum>) {
-  const { t } = useTranslation();
   if (data.length === 0) {
     return (
       <div
         className={cn("flex h-80 w-full items-center justify-center rounded-lg border border-dashed", className)}
         style={style}
       >
-        <p className="text-sm text-muted-foreground">{t("shared.charts.barChart.noData")}</p>
+        <p className="text-sm text-muted-foreground">No data</p>
       </div>
     );
   }
@@ -91,19 +87,10 @@ export function BarChart<TDatum extends Record<string, unknown>>({
             axisLine={false}
             minTickGap={tickGap}
             interval="equidistantPreserveStart"
-            tickFormatter={indexFormatter}
           />
         )}
         {vertical ? (
-          <YAxis
-            type="category"
-            dataKey={index}
-            width={yAxisWidth}
-            tickLine={false}
-            axisLine={false}
-            interval={0}
-            tickFormatter={indexFormatter}
-          />
+          <YAxis type="category" dataKey={index} width={yAxisWidth} tickLine={false} axisLine={false} interval={0} />
         ) : (
           <YAxis width={yAxisWidth} tickLine={false} axisLine={false} tickFormatter={valueFormatter} />
         )}

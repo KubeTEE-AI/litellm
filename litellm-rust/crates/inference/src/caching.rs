@@ -24,9 +24,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio_util::codec::Decoder;
 
-use crate::Error;
+use crate::RouteError;
 
-pub trait Cachable: Protocol<Error = Error> {
+pub trait Cachable: Protocol<Error = RouteError> {
     const SURFACE: &'static str;
 
     fn reusable(_response: &Self::Response) -> bool {
@@ -145,15 +145,15 @@ pub async fn execute_unary<P, F, Fut>(
     request: CacheRequest,
     cache: Option<Arc<dyn ResponseCacheService>>,
     options: Option<CacheOptions>,
-    interceptors: &impl Interceptors<Error>,
+    interceptors: &impl Interceptors<RouteError>,
     observers: Option<&ObservationSender>,
     provider: F,
-) -> Result<P::Response, Error>
+) -> Result<P::Response, RouteError>
 where
     P: Cachable,
     P::Response: Serialize + DeserializeOwned,
     F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<P::Response, Error>>,
+    Fut: Future<Output = Result<P::Response, RouteError>>,
 {
     let identity = request.identity.clone();
     crate::diagnostic::provider(&identity.model, &identity.provider);
@@ -191,15 +191,15 @@ pub async fn execute_streaming<P, F, Fut>(
     request: CacheRequest,
     cache: Option<Arc<dyn ResponseCacheService>>,
     options: Option<CacheOptions>,
-    interceptors: &impl Interceptors<Error>,
+    interceptors: &impl Interceptors<RouteError>,
     observers: Option<&ObservationSender>,
     provider: F,
-) -> Result<OutputOf<P>, Error>
+) -> Result<OutputOf<P>, RouteError>
 where
     P: StreamCachable,
     P::Response: Serialize + DeserializeOwned,
     F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<OutputOf<P>, Error>>,
+    Fut: Future<Output = Result<OutputOf<P>, RouteError>>,
 {
     let identity = request.identity.clone();
     crate::diagnostic::provider(&identity.model, &identity.provider);
@@ -299,9 +299,9 @@ impl<P: StreamCachable> CallCache<P> {
 }
 
 fn capture_stream<P: StreamCachable>(
-    chunks: futures_util::stream::BoxStream<'static, Result<P::Chunk, Error>>,
+    chunks: futures_util::stream::BoxStream<'static, Result<P::Chunk, RouteError>>,
     session: CacheSession,
-) -> futures_util::stream::BoxStream<'static, Result<P::Chunk, Error>> {
+) -> futures_util::stream::BoxStream<'static, Result<P::Chunk, RouteError>> {
     stream::try_unfold(
         (chunks, Some(Vec::<u8>::new()), session),
         |(mut chunks, captured, session)| async move {
@@ -330,7 +330,7 @@ fn capture_stream<P: StreamCachable>(
                     {
                         session.store(entry).await;
                     }
-                    Ok::<_, Error>(None)
+                    Ok::<_, RouteError>(None)
                 }
             }
         },
@@ -369,74 +369,13 @@ fn successful_stream(text: &str, terminal: &str) -> bool {
 
 async fn publish(
     facts: ExecutionFacts,
-    interceptors: &impl Interceptors<Error>,
+    interceptors: &impl Interceptors<RouteError>,
     observers: Option<&ObservationSender>,
-) -> Result<(), Error> {
+) -> Result<(), RouteError> {
     if let Some(observers) = observers {
         observers.emit(CallEvent::Execution(ExecutionEvent::ResultReady {
             facts: facts.clone(),
         }));
     }
-    let from_provider = facts.source == ResultSource::Provider;
-    interceptors.result_ready(facts).await.map_err(|error| {
-        if from_provider {
-            Error::post_call(error)
-        } else {
-            error
-        }
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use litellm_core_utils::decline::Decline;
-    use litellm_host::interceptors::{RawResponse, RequestContext, WireRequest};
-
-    use super::*;
-
-    struct RejectResult;
-
-    impl Interceptors<Error> for RejectResult {
-        async fn before_provider_request(
-            &self,
-            wire: WireRequest,
-            _: RequestContext,
-        ) -> Result<WireRequest, Error> {
-            Ok(wire)
-        }
-
-        async fn after_provider_response(&self, _: RawResponse) -> Result<(), Error> {
-            Ok(())
-        }
-
-        async fn result_ready(&self, _: ExecutionFacts) -> Result<(), Error> {
-            Err(Error::Declined(Decline::new("result rejected")))
-        }
-    }
-
-    #[rstest::rstest]
-    #[case::provider(ResultSource::Provider, false)]
-    #[case::cache(ResultSource::Cache { key: "cached".into() }, true)]
-    #[tokio::test]
-    async fn result_rejection_only_declines_without_a_provider_call(
-        #[case] source: ResultSource,
-        #[case] may_decline: bool,
-    ) {
-        let facts = ExecutionFacts {
-            provider: ProviderIdentity {
-                model: "model".into(),
-                provider: "provider".into(),
-            },
-            cost: Cost::settle(&source, None),
-            source,
-        };
-        let error = publish(facts, &RejectResult, None).await.unwrap_err();
-        assert_eq!(error.declined().is_some(), may_decline);
-        assert_eq!(error.dispatched(), !may_decline);
-        assert!(
-            litellm_error::Report::new(&error)
-                .to_string()
-                .contains("result rejected")
-        );
-    }
+    interceptors.result_ready(facts).await
 }

@@ -49,7 +49,7 @@ from integration.providers._cache_control_marks_support import (
 )
 from pydantic import JsonValue, TypeAdapter
 
-pytestmark: Final = [pytest.mark.timeout(2 * graceful_stop_seconds() + 120), pytest.mark.shares_worker_state]
+pytestmark: Final = pytest.mark.timeout(2 * graceful_stop_seconds() + 120)
 
 _JSON_OBJECT: Final = TypeAdapter(dict[str, JsonValue])
 _OWNED: Final = "bridge-mark-owned"

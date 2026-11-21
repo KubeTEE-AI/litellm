@@ -1,3 +1,4 @@
+use litellm_token_counter_fast::Error as BackendError;
 pub use litellm_token_counter_fast::FastTokenizer;
 
 use crate::{Error, TextCodec, TokenCounter, Tokenizer};
@@ -49,6 +50,17 @@ impl TokenCounter {
 impl Tokenizer for FastTokenizer {
     fn count_tokens(&self, text: &str) -> Result<usize, Error> {
         FastTokenizer::count_tokens(self, text).map_err(Error::from)
+    }
+}
+
+impl From<BackendError> for Error {
+    fn from(error: BackendError) -> Self {
+        match error {
+            BackendError::Load(source) => Self::Load(source),
+            BackendError::Ranks(source) => Self::Ranks(source.into()),
+            BackendError::UnicodeClasses => Self::UnicodeClasses,
+            BackendError::Encode(source) => Self::Encode(source),
+        }
     }
 }
 

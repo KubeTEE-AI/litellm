@@ -139,13 +139,17 @@ class PolicyValidator:
             return True  # Can't validate without router, assume valid
 
         try:
-            registry: Final = self.llm_router.registry()
             # Check if model is in router's model names
-            if model in registry.names(kind="group_set"):
+            if model in self.llm_router.model_names:
                 return True
 
             # Check if model matches any pattern via pattern router
-            return bool(registry.patterns().get_deployments_by_pattern(model=model))
+            if hasattr(self.llm_router, "pattern_router"):
+                pattern_deployments: Final = self.llm_router.pattern_router.get_deployments_by_pattern(model=model)
+                if pattern_deployments:
+                    return True
+
+            return False
         except Exception as e:
             verbose_proxy_logger.warning("Could not check model '%s': %s", model, e)
             return True  # Assume valid on error

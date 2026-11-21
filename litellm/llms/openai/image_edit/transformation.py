@@ -6,7 +6,6 @@ from httpx._types import RequestFiles
 
 import litellm
 from litellm.images.utils import ImageEditRequestUtils
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.image_edit.transformation import BaseImageEditConfig
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.images.main import (
@@ -96,7 +95,7 @@ class OpenAIImageEditConfig(BaseImageEditConfig):
         """
         # Build request params, only including non-None values
         request_params: Final = {
-            **({"model": model} if model else {}),
+            "model": model,
             **image_edit_optional_request_params,
         }
         if image is not None:
@@ -185,4 +184,7 @@ class OpenAIImageEditConfig(BaseImageEditConfig):
             or "https://api.openai.com/v1"
         )
 
-        return join_api_base(api_base, "images/edits")
+        # Remove trailing slashes
+        api_base = api_base.rstrip("/")
+
+        return f"{api_base}/images/edits"

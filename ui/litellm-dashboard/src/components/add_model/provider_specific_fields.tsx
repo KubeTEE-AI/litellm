@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Upload as UploadIcon } from "lucide-react";
 import React from "react";
 import { useFormContext } from "react-hook-form";
-import { Trans, useTranslation } from "react-i18next";
 import { requiredRule } from "../common_components/formRules";
 import {
   MountedFormField,
@@ -98,7 +97,6 @@ const ProviderSpecificFieldsContent: React.FC<ProviderSpecificFieldsProps> = ({
   onAuthTypeChange,
   fieldValidators,
 }) => {
-  const { t } = useTranslation();
   const selectedProviderEnum = Providers[selectedProvider as keyof typeof Providers] as Providers;
   const form = useFormContext<MountedFormValues>();
   const authTypes = authTypesFor(selectedProvider);
@@ -284,7 +282,7 @@ const ProviderSpecificFieldsContent: React.FC<ProviderSpecificFieldsProps> = ({
         <>
           <Button type="button" variant="outline" className="w-fit" onClick={() => credentialsFileRef.current?.click()}>
             <UploadIcon />
-            {t("addModel.providerSpecificFields.clickToUpload")}
+            Click to Upload
           </Button>
           <input
             ref={credentialsFileRef}
@@ -347,13 +345,10 @@ const ProviderSpecificFieldsContent: React.FC<ProviderSpecificFieldsProps> = ({
       {availableAuthTypes.length > 0 && selectedAuthType && (
         <div className="mb-4 flex flex-col gap-2">
           <label htmlFor={authTypeSelectId} className="text-sm font-medium">
-            {labelWithHint(
-              t("addModel.providerSpecificFields.authType"),
-              t("addModel.providerSpecificFields.authTypeHint"),
-            )}
+            {labelWithHint("Auth Type:", "Select how LiteLLM authenticates to this provider.")}
           </label>
           <Select
-            items={availableAuthTypes.map(({ id, labelKey }) => ({ value: id, label: t(labelKey) }))}
+            items={availableAuthTypes.map(({ id, label }) => ({ value: id, label }))}
             value={selectedAuthType.id}
             onValueChange={(value) => setSelectedAuthTypeId(value ?? "")}
           >
@@ -363,19 +358,19 @@ const ProviderSpecificFieldsContent: React.FC<ProviderSpecificFieldsProps> = ({
             <SelectContent>
               {availableAuthTypes.map((authType) => (
                 <SelectItem key={authType.id} value={authType.id}>
-                  {t(authType.labelKey)}
+                  {authType.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <p className="text-sm text-muted-foreground">{t(selectedAuthType.descriptionKey)}</p>
+          <p className="text-sm text-muted-foreground">{selectedAuthType.description}</p>
         </div>
       )}
       {credentialOnlySelected ? (
         <>
-          <p className="mb-4 text-sm">{t("addModel.providerSpecificFields.credentialOnlyHint")}</p>
+          <p className="mb-4 text-sm">This auth type is saved as an LLM credential and attached to this model.</p>
           <Button type="button" onClick={() => onCreateCredential?.(selectedAuthType.id)}>
-            {t("addModel.providerSpecificFields.createCredential")}
+            Create credential
           </Button>
         </>
       ) : (
@@ -385,12 +380,10 @@ const ProviderSpecificFieldsContent: React.FC<ProviderSpecificFieldsProps> = ({
           </MountedFormField>
         ))
       )}
-      {isLoading && allFields.length === 0 && (
-        <p className="text-sm mb-2">{t("addModel.providerSpecificFields.loadingFields")}</p>
-      )}
+      {isLoading && allFields.length === 0 && <p className="text-sm mb-2">Loading provider fields...</p>}
       {loadError && allFields.length === 0 && (
         <p className="text-sm mb-2 text-destructive">
-          {loadError instanceof Error ? loadError.message : t("addModel.providerSpecificFields.failedToLoadFields")}
+          {loadError instanceof Error ? loadError.message : "Failed to load provider credential fields"}
         </p>
       )}
       {allFields.map((field) => (
@@ -401,7 +394,7 @@ const ProviderSpecificFieldsContent: React.FC<ProviderSpecificFieldsProps> = ({
             required={field.required}
             rules={{
               validate: {
-                ...(field.required ? { required: requiredRule(t("addModel.providerSpecificFields.required")) } : {}),
+                ...(field.required ? { required: requiredRule("Required") } : {}),
                 ...(fieldValidators?.[field.key] ? { provider: fieldValidators[field.key] } : {}),
               },
             }}
@@ -412,26 +405,22 @@ const ProviderSpecificFieldsContent: React.FC<ProviderSpecificFieldsProps> = ({
 
           {/* Special case for Vertex Credentials help text */}
           {field.key === "vertex_credentials" && (
-            <p className="text-sm mb-3 mt-1">{t("addModel.providerSpecificFields.vertexCredentialsHelp")}</p>
+            <p className="text-sm mb-3 mt-1">Give a gcp service account(.json file)</p>
           )}
 
           {/* Special case for Azure Base Model help text */}
           {field.key === "base_model" && (
             <div className="grid grid-cols-24">
               <p className="col-start-11 col-span-10 text-sm mb-2">
-                <Trans
-                  i18nKey="addModel.providerSpecificFields.baseModelHelp"
-                  components={{
-                    docs: (
-                      <a
-                        href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary underline-offset-4 hover:underline"
-                      />
-                    ),
-                  }}
-                />
+                The actual model your azure deployment uses. Used for accurate cost tracking. Select name from{" "}
+                <a
+                  href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline-offset-4 hover:underline"
+                >
+                  here
+                </a>
               </p>
             </div>
           )}

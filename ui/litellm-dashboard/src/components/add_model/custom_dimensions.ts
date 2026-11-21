@@ -1,6 +1,4 @@
-import type { TFunction } from "i18next";
 import { z } from "zod";
-import i18n from "@/i18n/i18n";
 import { DIMENSION_LABELS } from "./heuristic_scoring_knobs";
 
 const customDimensionShape = {
@@ -27,28 +25,30 @@ export const serializeCustomDimensions = (rows: CustomDimensionRow[]): CustomDim
 export const customDimensionsError = (
   rows: CustomDimensionRow[] | undefined,
   builtinNames: string[] = Object.keys(DIMENSION_LABELS),
-  t: TFunction = i18n.t.bind(i18n),
 ): string | null => {
   if (!rows) return null;
-  if (rows.length > 16) return t("addModel.customDimensions.tooMany");
+  if (rows.length > 16) return "A router can have at most 16 custom dimensions";
   const names = rows.map((row) => row.name.toLowerCase());
   for (const [index, row] of rows.entries()) {
-    const prefix = t("addModel.customDimensions.prefix", { number: index + 1 });
-    if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(row.name)) return prefix + t("addModel.customDimensions.invalidName");
+    const prefix = `Custom dimension ${index + 1}: `;
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(row.name))
+      return (
+        prefix + "use a name starting with a letter, followed by letters, numbers or underscores (64 characters max)"
+      );
     if (builtinNames.some((name) => name.toLowerCase() === row.name.toLowerCase()))
-      return prefix + t("addModel.customDimensions.builtInName");
-    if (names.indexOf(row.name.toLowerCase()) !== index) return prefix + t("addModel.customDimensions.uniqueNames");
+      return prefix + "choose a name that is not already a built-in weight";
+    if (names.indexOf(row.name.toLowerCase()) !== index) return prefix + "names must be unique";
     if (!Number.isFinite(row.weight) || row.weight <= 0 || row.weight > 1)
-      return prefix + t("addModel.customDimensions.weightRange");
+      return prefix + "weight must be greater than 0 and at most 1";
     const matchers = [...(row.keywords ?? []), ...(row.patterns ?? [])];
     if (!matchers.length || matchers.some((matcher) => !matcher.trim()))
-      return prefix + t("addModel.customDimensions.matcherRequired");
+      return prefix + "add at least one nonblank keyword or pattern";
     if (
       matchers.length > 32 ||
       matchers.some((matcher) => [...matcher].length > 256) ||
       matchers.reduce((total, matcher) => total + [...matcher].length, 0) > 4096
     )
-      return prefix + t("addModel.customDimensions.matcherLimits");
+      return prefix + "use at most 32 matchers, 256 characters each and 4096 characters combined";
   }
   return null;
 };

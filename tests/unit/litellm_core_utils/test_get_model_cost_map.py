@@ -8,15 +8,10 @@ import asyncio, importlib, importlib.resources as importlib_get_model, json, lit
 import os
 import sys
 import threading
-from pathlib import Path
 from typing import Final
 
-import boto3
 import pytest
-from pydantic import ValidationError
-from typing_extensions import NotRequired, ReadOnly, TypedDict
 
-from litellm.litellm_core_utils import get_model_cost_map as get_model_cost_map_module
 from litellm.litellm_core_utils.fallback_generalizations import (
     get_fallback_generalization_rules,
     match_capability_generalizations,
@@ -128,30 +123,6 @@ def test_finalize_pops_key_and_installs_rules():
         assert match_routing_generalization("widget-9") == "openai"
     finally:
         set_fallback_generalizations(previous)
-
-
-def test_alias_of_rows_are_served_as_their_target_and_dangling_ones_are_dropped(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    raw: Final = {
-        "real": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 1e-6},
-        "other": {"litellm_provider": "openai", "mode": "chat", "aliases": ["twin-latest"]},
-        "real-latest": {"alias_of": "real"},
-        "twin-latest": {"alias_of": "real"},
-        "ghost-latest": {"alias_of": "ghost"},
-        "chain-latest": {"alias_of": "real-latest"},
-        "listed-latest": {"alias_of": "missing", "aliases": ["extra"]},
-    }
-    with caplog.at_level("WARNING"):
-        finalized: Final = _finalize_model_cost_map(raw)
-    assert finalized["real-latest"] == finalized["real"]
-    assert "alias_of" not in finalized["real"]
-    assert set(finalized) == {"real", "other", "real-latest", "twin-latest"}
-    assert finalized["real-latest"]["litellm_provider"] == "openai"
-    assert finalized["twin-latest"] == finalized["other"]
-    assert {"ghost-latest", "chain-latest", "listed-latest", "twin-latest"} == {
-        record.getMessage().split("'")[1] for record in caplog.records
-    }
 
 
 def test_finalize_with_no_block_clears_rules():
@@ -423,10 +394,9 @@ async def test_refetch_shrunk_map_fails_integrity_not_swapped_in():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("flag", ["LITELLM_LOCAL_MODEL_COST_MAP", "LITELLM_OFFLINE_MODE"])
-async def test_refetch_respects_local_env_override(monkeypatch, flag):
-    """LITELLM_LOCAL_MODEL_COST_MAP=True or LITELLM_OFFLINE_MODE=True short-circuits to the bundled backup, zero HTTP."""
-    monkeypatch.setenv(flag, "True")
+async def test_refetch_respects_local_env_override(monkeypatch):
+    """LITELLM_LOCAL_MODEL_COST_MAP=True short-circuits to the bundled backup, zero HTTP."""
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
     def _fail(request):
         raise AssertionError("no HTTP request should be made when local map is forced")
@@ -547,47 +517,6 @@ from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER
 from litellm.utils import _invalidate_model_cost_lowercase_map
 from tests._vcr_conftest_common import install_live_call_probe, record_vcr_outcome
 from unittest.mock import MagicMock, patch
-
-
-class _FakeS3Body:
-    def __init__(self, content: bytes) -> None:
-        self.content: Final = content
-
-    def read(self) -> bytes:
-        return self.content
-
-
-class _FakeS3GetObjectResponse(TypedDict):
-    Body: ReadOnly[_FakeS3Body]
-    ETag: NotRequired[ReadOnly[str]]
-
-
-class _FakeS3Client:
-    def __init__(self, content: bytes) -> None:
-        self.content: Final = content
-        self.calls: list[tuple[str, str]] = []
-
-    def get_object(self, *, Bucket: str, Key: str) -> _FakeS3GetObjectResponse:
-        self.calls.append((Bucket, Key))
-        return {"Body": _FakeS3Body(self.content), "ETag": '"fake-etag"'}
-
-
-def test_get_model_cost_map_fetches_s3_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
-    from litellm.litellm_core_utils import get_model_cost_map as module
-
-    source_info = module._cost_map_source_info
-    for name in ("source", "url", "is_env_forced", "fallback_reason", "loaded_at", "source_revision", "etag"):
-        monkeypatch.setattr(source_info, name, getattr(source_info, name))
-
-    s3_content: Final = _make_models(GetModelCostMap.get_backup_model_count())
-    s3_client: Final = _FakeS3Client(json.dumps(s3_content).encode())
-    monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: s3_client)
-
-    cost_map: Final = get_model_cost_map("s3://my-bucket/prices/model_prices.json")
-
-    assert cost_map == s3_content
-    assert s3_client.calls == [("my-bucket", "prices/model_prices.json")]
-    assert get_model_cost_map_source_info()["source"] == "remote"
 
 
 class _SyncSleepRecorder:
@@ -714,29 +643,9 @@ def test_boot_load_does_not_retry_non_retryable_failure():
     assert source["fallback_reason"] is not None
 
 
-def test_boot_load_falls_back_when_urlsplit_rejects_the_url():
-    client, calls = _mock_client([httpx.Response(200, content=_real_map_bytes())], client_cls=httpx.Client)
-    sleeper = _SyncSleepRecorder()
-
-    cost_map = get_model_cost_map(
-        url="http://[bad/model_prices.json",
-        sleep=sleeper,
-        rng=random.Random(0),
-        client=client,
-    )
-    assert calls["count"] == 0
-    assert sleeper.waits == []
-    assert _retry_threads() == []
-    assert cost_map.keys() >= _load_root_cost_map().keys() - {"sample_spec", FALLBACK_GENERALIZATIONS_KEY}
-    source = get_model_cost_map_source_info()
-    assert source["source"] == "local"
-    assert "invalid URL" in (source["fallback_reason"] or "")
-
-
-@pytest.mark.parametrize("flag", ["LITELLM_LOCAL_MODEL_COST_MAP", "LITELLM_OFFLINE_MODE"])
-def test_boot_load_respects_local_env_override(monkeypatch, flag):
-    """LITELLM_LOCAL_MODEL_COST_MAP=True or LITELLM_OFFLINE_MODE=True still short-circuits to the backup with zero HTTP."""
-    monkeypatch.setenv(flag, "True")
+def test_boot_load_respects_local_env_override(monkeypatch):
+    """LITELLM_LOCAL_MODEL_COST_MAP=True still short-circuits to the backup with zero HTTP."""
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
     def _fail(request):
         raise AssertionError("no HTTP request should be made when local map is forced")
@@ -830,7 +739,6 @@ def _vcr_outcome_gate(request, vcr):
     yield
     record_vcr_outcome(request, vcr)
 
-
 @pytest.fixture(scope="session")
 def event_loop():
     try:
@@ -839,7 +747,6 @@ def event_loop():
         loop = asyncio.new_event_loop()
     yield loop
     loop.close()
-
 
 @pytest.fixture(scope="function")
 def setup_and_teardown(event_loop):
@@ -874,7 +781,6 @@ def setup_and_teardown(event_loop):
     if pending:
         event_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
 
-
 _SCALAR_DEFAULTS = {
     "num_retries": getattr(litellm, "num_retries", None),
     "set_verbose": getattr(litellm, "set_verbose", False),
@@ -888,7 +794,6 @@ _SCALAR_DEFAULTS = {
     "api_key": getattr(litellm, "api_key", None),
     "cohere_key": getattr(litellm, "cohere_key", None),
 }
-
 
 @pytest.mark.usefixtures("_vcr_outcome_gate", "setup_and_teardown")
 class TestCheckIsValidDict:
@@ -913,7 +818,6 @@ class TestCheckIsValidDict:
     def test_should_accept_non_empty_dict(self):
         """Non-empty dict should pass."""
         assert GetModelCostMap._check_is_valid_dict({"model": {}}) is True
-
 
 @pytest.mark.usefixtures("_vcr_outcome_gate", "setup_and_teardown")
 class TestCheckModelCountNotReduced:
@@ -969,7 +873,6 @@ class TestCheckModelCountNotReduced:
             is True
         )
 
-
 @pytest.mark.usefixtures("_vcr_outcome_gate", "setup_and_teardown")
 class TestValidateModelCostMap:
     """Unit tests for validate_model_cost_map (combines both checks)."""
@@ -1005,7 +908,6 @@ class TestValidateModelCostMap:
             GetModelCostMap.validate_model_cost_map(fetched_map=fetched, backup_model_count=100, min_model_count=10)
             is True
         )
-
 
 def _fetch_with_single_outcome(monkeypatch, outcome):
     from litellm.litellm_core_utils import get_model_cost_map as module
@@ -1053,14 +955,6 @@ class TestGetModelCostMapFallback:
         assert result.keys() == _backup_keys()
         assert source["source"] == "local"
 
-    def test_should_fallback_when_fetched_json_is_not_object(self, monkeypatch):
-        result, fetches, source = _fetch_with_single_outcome(monkeypatch, httpx.Response(200, content=b"[]"))
-
-        assert fetches == 1
-        assert result.keys() == _backup_keys()
-        assert source["source"] == "local"
-        assert source["fallback_reason"] == f"Remote fetch failed: expected a JSON object from {_URL}, got list"
-
     def test_should_fallback_when_fetched_map_shrinks_dramatically(self, monkeypatch):
         """When upstream returns far fewer models than backup, should fall back."""
         tiny_map = {f"model-{i}": {"litellm_provider": "test"} for i in range(11)}
@@ -1082,7 +976,6 @@ class TestGetModelCostMapFallback:
         assert isinstance(result, dict)
         assert len(result) > 0
 
-
 @pytest.mark.usefixtures("_vcr_outcome_gate", "setup_and_teardown")
 class TestBackupModelCostMapExists:
     """Validates the local backup file is always present and valid."""
@@ -1097,7 +990,6 @@ class TestBackupModelCostMapExists:
         """The backup must contain a reasonable number of models."""
         backup = GetModelCostMap.load_local_model_cost_map()
         assert len(backup) > 100, f"Backup has only {len(backup)} models, expected > 100"
-
 
 @pytest.mark.usefixtures("_vcr_outcome_gate", "setup_and_teardown")
 class TestBadHostedModelCostMap:
@@ -1163,13 +1055,11 @@ class TestBadHostedModelCostMap:
         finally:
             litellm.model_cost = original
 
-
 @pytest.fixture()
 def _vcr_outcome_gate_local_testing(request, vcr):
     install_live_call_probe(request, vcr)
     yield
     record_vcr_outcome(request, vcr)
-
 
 @pytest.fixture(scope="function")
 def isolate_litellm_state():
@@ -1223,7 +1113,6 @@ def isolate_litellm_state():
             setattr(litellm, attr, original_value)
     _invalidate_model_cost_lowercase_map()
 
-
 _SCALAR_DEFAULTS_local_testing = {
     "num_retries": getattr(litellm, "num_retries", None),
     "num_retries_per_request": getattr(litellm, "num_retries_per_request", None),
@@ -1243,7 +1132,6 @@ _SCALAR_DEFAULTS_local_testing = {
     "api_base": getattr(litellm, "api_base", None),
     "api_key": getattr(litellm, "api_key", None),
 }
-
 
 @pytest.fixture(scope="module")
 def setup_and_teardown_local_testing():
@@ -1267,7 +1155,6 @@ def setup_and_teardown_local_testing():
             litellm.in_memory_llm_clients_cache.flush_cache()
     yield
 
-
 @pytest.mark.usefixtures(
     "_vcr_outcome_gate_local_testing",
     "isolate_litellm_state",
@@ -1279,7 +1166,6 @@ def test_get_model_cost_map():
     except Exception as e:
         pytest.fail(f"An exception occurred: {e}")
 
-
 @pytest.mark.usefixtures(
     "_vcr_outcome_gate_local_testing",
     "isolate_litellm_state",
@@ -1290,16 +1176,3 @@ def test_get_backup_model_cost_map():
         print("inside backup")
         content = json.load(f)
         print("content", content)
-
-
-@pytest.mark.parametrize("backup", [b'["only-in-the-backup"]', b'"only-in-the-backup"', b"null"])
-def test_a_bundled_backup_that_is_not_a_json_object_is_rejected_without_quoting_it(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, backup: bytes
-):
-    (tmp_path / "model_prices_and_context_window_backup.json").write_bytes(backup)
-    monkeypatch.setattr(get_model_cost_map_module, "files", lambda _package: tmp_path)
-
-    with pytest.raises(ValidationError) as rejected:
-        GetModelCostMap.load_local_model_cost_map_with_revision()
-
-    assert "only-in-the-backup" not in str(rejected.value)

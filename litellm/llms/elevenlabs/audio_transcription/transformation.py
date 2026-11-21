@@ -3,14 +3,13 @@ Translates from OpenAI's `/v1/audio/transcriptions` to ElevenLabs's `/v1/speech-
 """
 
 from collections.abc import Iterable, Mapping
-from typing import Final, Protocol
+from typing import Final
 
 from httpx import Headers, Response
 from pydantic import ConfigDict, TypeAdapter
 
 import litellm
 from litellm.litellm_core_utils.audio_utils.utils import process_audio_file
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.llms.openai import (
@@ -27,15 +26,6 @@ from ..common_utils import ElevenLabsException
 
 _JSON_OBJECT: Final = TypeAdapter(Mapping[str, object], config=ConfigDict(hide_input_in_errors=True))
 _JSON_OBJECTS: Final = TypeAdapter(Iterable[Mapping[str, object]], config=ConfigDict(hide_input_in_errors=True))
-_HIDDEN_PARAMS: Final = TypeAdapter(dict[str, object])
-
-
-class _JsonResponse(Protocol):
-    def json(self) -> object: ...
-
-
-def _json_body(response: _JsonResponse) -> object:
-    return response.json()
 
 
 class ElevenLabsAudioTranscriptionConfig(BaseAudioTranscriptionConfig):
@@ -129,7 +119,7 @@ class ElevenLabsAudioTranscriptionConfig(BaseAudioTranscriptionConfig):
         Transforms the raw response from ElevenLabs to the TranscriptionResponse format
         """
         try:
-            response_json: Final = _json_body(raw_response)
+            response_json: Final = raw_response.json()
             response_object: Final = _JSON_OBJECT.validate_python(response_json)
 
             # Extract the main transcript text
@@ -144,18 +134,20 @@ class ElevenLabsAudioTranscriptionConfig(BaseAudioTranscriptionConfig):
 
             # Map ElevenLabs words to OpenAI format
             if "words" in response_object:
-                response["words"] = [
-                    {
-                        "word": word_data.get("text", ""),
-                        "start": word_data.get("start", 0),
-                        "end": word_data.get("end", 0),
-                    }
-                    for word_data in _JSON_OBJECTS.validate_python(response_object["words"])
-                    if word_data.get("type") == "word"
-                ]
+                response["words"] = []
+                for word_data in _JSON_OBJECTS.validate_python(response_object["words"]):
+                    # Only include actual words, skip spacing and audio events
+                    if word_data.get("type") == "word":
+                        response["words"].append(
+                            {
+                                "word": word_data.get("text", ""),
+                                "start": word_data.get("start", 0),
+                                "end": word_data.get("end", 0),
+                            }
+                        )
 
             # Store full response in hidden params
-            response.hidden_params = _HIDDEN_PARAMS.validate_python(response_json)
+            response.hidden_params = response_json
 
             return response
 
@@ -173,7 +165,12 @@ class ElevenLabsAudioTranscriptionConfig(BaseAudioTranscriptionConfig):
     ) -> str:
         if api_base is None:
             api_base = get_secret_str("ELEVENLABS_API_BASE") or "https://api.elevenlabs.io"
-        return join_api_base(api_base, "v1/speech-to-text")
+        api_base = api_base.rstrip("/")  # Remove trailing slash if present
+
+        # ElevenLabs speech-to-text endpoint
+        url: Final = f"{api_base}/v1/speech-to-text"
+
+        return url
 
     def validate_environment(
         self,

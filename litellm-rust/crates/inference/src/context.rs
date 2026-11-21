@@ -1,11 +1,11 @@
 use litellm_cache_response::CachePolicy;
 use litellm_host::{
-    interceptors::{ExecutionFacts, Interceptors, RawResponse, ResultSource},
+    interceptors::{ExecutionFacts, Interceptors, RawResponse},
     lifecycle::{CallEvent, ExecutionEvent},
     observation::ObservationSender,
 };
 
-use crate::{CallOptions, Error};
+use crate::{CallOptions, RouteError};
 
 pub struct CallContext<'a, I> {
     pub interceptors: &'a I,
@@ -13,7 +13,7 @@ pub struct CallContext<'a, I> {
     pub cache: CachePolicy,
 }
 
-impl<'a, I: Interceptors<Error>> CallContext<'a, I> {
+impl<'a, I: Interceptors<RouteError>> CallContext<'a, I> {
     pub fn new(interceptors: &'a I, options: CallOptions) -> Self {
         Self {
             interceptors,
@@ -22,31 +22,19 @@ impl<'a, I: Interceptors<Error>> CallContext<'a, I> {
         }
     }
 
-    pub async fn result_ready(&self, facts: ExecutionFacts) -> Result<(), Error> {
+    pub async fn result_ready(&self, facts: ExecutionFacts) -> Result<(), RouteError> {
         if let Some(observers) = &self.observers {
             observers.emit(CallEvent::Execution(ExecutionEvent::ResultReady {
                 facts: facts.clone(),
             }));
         }
-        let from_provider = facts.source == ResultSource::Provider;
-        self.interceptors
-            .result_ready(facts)
-            .await
-            .map_err(|error| {
-                if from_provider {
-                    Error::post_call(error)
-                } else {
-                    error
-                }
-            })
+        self.interceptors.result_ready(facts).await
     }
 
-    pub async fn response_received(&self, body: &str) -> Result<(), Error> {
-        self.raw_response_received(RawResponse::new(body.to_owned()))
-            .await
-    }
-
-    pub async fn raw_response_received(&self, raw: RawResponse) -> Result<(), Error> {
+    pub async fn response_received(&self, body: &str) -> Result<(), RouteError> {
+        let raw = RawResponse {
+            body: body.to_owned(),
+        };
         if let Some(observers) = &self.observers {
             observers.emit(CallEvent::Execution(
                 ExecutionEvent::ProviderResponseReceived { raw: raw.clone() },
@@ -55,6 +43,6 @@ impl<'a, I: Interceptors<Error>> CallContext<'a, I> {
         self.interceptors
             .after_provider_response(raw)
             .await
-            .map_err(Error::post_call)
+            .map_err(RouteError::post_call)
     }
 }

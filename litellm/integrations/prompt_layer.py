@@ -4,12 +4,9 @@ import os
 import traceback
 from typing import Final
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 
 import litellm
-from litellm.litellm_core_utils.core_helpers import decoded_json_object
-
-_DECODED_JSON: Final = TypeAdapter(object)
 
 
 class PromptLayerLogger:
@@ -64,8 +61,8 @@ class PromptLayerLogger:
                 },
             )
 
-            response_json: Final = decoded_json_object(_DECODED_JSON.validate_python(request_response.json()))
-            if not response_json.get("success", False):
+            response_json: Final = request_response.json()
+            if not request_response.json().get("success", False):
                 raise Exception("Promptlayer did not successfully log the response!")
 
             print_verbose(f"Prompt Layer Logging: success - final response object: {request_response.text}")

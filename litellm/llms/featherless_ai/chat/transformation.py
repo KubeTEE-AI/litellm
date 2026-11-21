@@ -1,5 +1,3 @@
-from collections.abc import Mapping
-from types import MappingProxyType
 from typing import Final
 
 import litellm
@@ -44,7 +42,7 @@ class FeatherlessAIConfig(OpenAIGPTConfig):
         tool_choice: str | None = None,
         tools: list | None = None,
     ) -> None:
-        locals_: Final[Mapping[str, object]] = MappingProxyType(locals().copy())
+        locals_: Final = locals().copy()
         for key, value in locals_.items():
             if key != "self" and value is not None:
                 setattr(self.__class__, key, value)

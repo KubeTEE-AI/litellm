@@ -8,7 +8,6 @@ import { useTeamMetadataSchema } from "@/app/(dashboard)/hooks/teams/useTeamMeta
 import { toast } from "@/lib/toast";
 import { fetchAvailableModelsForTeamOrKey } from "./key_team_helpers/fetch_available_models_team_key";
 import { MODEL_MAX_BUDGET_PREMIUM_HINT } from "./key_team_helpers/ModelMaxBudgetEditor";
-import i18n from "@/i18n/i18n";
 import {
   fetchMCPAccessGroups,
   getDefaultTeamSettings,
@@ -731,9 +730,9 @@ describe("Teams - Reset Budget in team create", () => {
 
   it("should send an explicit null budget_duration when Never resets is selected", async () => {
     await openCreateModal();
-    await screen.findByText("Default: monthly (30d)");
 
-    await chooseSelectOption(userEvent, resetBudgetSelect(), "Never resets");
+    await userEvent.click(resetBudgetSelect());
+    await userEvent.click(await screen.findByText("Never resets"));
 
     const payload = await submitCreateModal();
 
@@ -753,7 +752,8 @@ describe("Teams - Reset Budget in team create", () => {
   it("should send the picked duration when one is selected", async () => {
     await openCreateModal();
 
-    await chooseSelectOption(userEvent, resetBudgetSelect(), "weekly");
+    await userEvent.click(resetBudgetSelect());
+    await userEvent.click(await screen.findByText("weekly"));
 
     const payload = await submitCreateModal();
 
@@ -768,18 +768,14 @@ describe("Teams - Reset Budget in team create", () => {
     });
   });
 
-  it("should offer a single Never resets option when no server default is configured", async () => {
+  it("should fall back to the n/a placeholder when the default settings fetch fails", async () => {
     vi.mocked(getDefaultTeamSettings).mockRejectedValue(new Error("Unauthorized"));
 
     await openCreateModal();
+
     await waitFor(() => {
-      expect(getDefaultTeamSettings).toHaveBeenCalled();
+      expect(screen.getByText("n/a")).toBeInTheDocument();
     });
-
-    await userEvent.click(resetBudgetSelect());
-
-    expect(await screen.findAllByRole("option", { name: "Never resets" })).toHaveLength(1);
-    expect(screen.queryByText("Not set")).not.toBeInTheDocument();
   });
 });
 
@@ -1547,7 +1543,7 @@ describe("Teams - the exact bytes the create call sends", () => {
     await openCreateModal({ premiumUser: false });
 
     expect(screen.getByRole("button", { name: /Add Model Budget/i })).toBeDisabled();
-    expect(screen.getByText(i18n.t(MODEL_MAX_BUDGET_PREMIUM_HINT))).toBeInTheDocument();
+    expect(screen.getByText(MODEL_MAX_BUDGET_PREMIUM_HINT)).toBeInTheDocument();
   });
 
   it("sends the per-model budget a licensed operator fills in, keyed by model", async () => {

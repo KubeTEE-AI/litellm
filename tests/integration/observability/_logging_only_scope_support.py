@@ -76,8 +76,6 @@ _AUDIT_POLICY_REQUEST_COUNT: Final[ContextVar[int]] = ContextVar("audit_policy_r
 
 _AUDIT_UPSTREAM_REQUEST_COUNT: Final[ContextVar[int]] = ContextVar("audit_upstream_request_count", default=0)
 
-_AUDIT_UPSTREAM_WINDOW_COUNT: Final[ContextVar[int]] = ContextVar("audit_upstream_window_count", default=0)
-
 
 @dataclass(frozen=True, slots=True)
 class CallerResult:
@@ -222,11 +220,7 @@ def _record_policy_request_count(count: int) -> None:
 
 
 def _record_upstream_request_count(count: int) -> None:
-    _AUDIT_UPSTREAM_WINDOW_COUNT.set(count)
-
-
-def _upstream_request_count() -> int:
-    return _AUDIT_UPSTREAM_REQUEST_COUNT.get() + _AUDIT_UPSTREAM_WINDOW_COUNT.get()
+    _AUDIT_UPSTREAM_REQUEST_COUNT.set(_AUDIT_UPSTREAM_REQUEST_COUNT.get() + count)
 
 
 @contextmanager
@@ -917,13 +911,7 @@ def _decryption_only_changes_encrypted_values(stored: JsonValue, decrypted: Json
     return stored == decrypted
 
 
-def _reset_upstream(upstream_url: str) -> None:
-    httpx.delete(f"{upstream_url.rstrip('/')}/__observations", trust_env=False, timeout=15).raise_for_status()
-    _AUDIT_UPSTREAM_REQUEST_COUNT.set(_upstream_request_count())
-    _AUDIT_UPSTREAM_WINDOW_COUNT.set(0)
-
-
-def _upstream_requests(upstream_url: str) -> tuple[dict[str, JsonValue], ...]:
+def _drain_upstream(upstream_url: str) -> tuple[dict[str, JsonValue], ...]:
     response: Final = httpx.get(f"{upstream_url.rstrip('/')}/__observations", trust_env=False, timeout=15)
     response.raise_for_status()
     requests: Final = object_value(JSON_OBJECT.validate_python(response.json())).get("requests")
@@ -953,9 +941,9 @@ def _record_audit_properties(
     response_ids_token: Final = _AUDIT_RESPONSE_IDS.set(())
     policy_count_token: Final = _AUDIT_POLICY_REQUEST_COUNT.set(0)
     upstream_count_token: Final = _AUDIT_UPSTREAM_REQUEST_COUNT.set(0)
-    upstream_window_token: Final = _AUDIT_UPSTREAM_WINDOW_COUNT.set(0)
     try:
-        _reset_upstream(gateway.upstream_url)
+        response: Final = httpx.get(f"{gateway.upstream_url.rstrip('/')}/__observations", trust_env=False, timeout=15)
+        response.raise_for_status()
         yield
     finally:
         node_id: Final = request.node.nodeid
@@ -964,11 +952,10 @@ def _record_audit_properties(
         record_property("inventory_id", inventory_ids[0] if inventory_ids else "support")
         record_property("response_ids", ",".join(_AUDIT_RESPONSE_IDS.get()))
         record_property("policy_edge_request_count", str(_AUDIT_POLICY_REQUEST_COUNT.get()))
-        record_property("upstream_request_count", str(_upstream_request_count()))
+        record_property("upstream_request_count", str(_AUDIT_UPSTREAM_REQUEST_COUNT.get()))
         _AUDIT_RESPONSE_IDS.reset(response_ids_token)
         _AUDIT_POLICY_REQUEST_COUNT.reset(policy_count_token)
         _AUDIT_UPSTREAM_REQUEST_COUNT.reset(upstream_count_token)
-        _AUDIT_UPSTREAM_WINDOW_COUNT.reset(upstream_window_token)
 
 
 def _policy_call_id_matches(payload: Mapping[str, JsonValue], call_id: str) -> bool:

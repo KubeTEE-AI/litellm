@@ -95,12 +95,7 @@ class AmazonInvokeNovaConfig(AmazonInvokeConfig, AmazonConverseConfig):
         model_info: Mapping[str, object] | None = None,
     ) -> dict:
         return AmazonConverseConfig.map_openai_params(
-            self,
-            {key: value for key, value in non_default_params.items() if key != "requestMetadata"},
-            optional_params,
-            model,
-            drop_params,
-            model_info,
+            self, non_default_params, optional_params, model, drop_params, model_info
         )
 
     def transform_request(
@@ -115,9 +110,7 @@ class AmazonInvokeNovaConfig(AmazonInvokeConfig, AmazonConverseConfig):
             self,
             model=model,
             messages=messages,
-            optional_params=_without_tool_config_injection_points(
-                {key: value for key, value in optional_params.items() if key != "requestMetadata"}
-            ),
+            optional_params=_without_tool_config_injection_points(optional_params),
             litellm_params=litellm_params,
             headers=headers,
         )

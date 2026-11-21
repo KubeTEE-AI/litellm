@@ -1,10 +1,10 @@
-use std::{collections::BTreeMap as Map, io::Read, path::Path, sync::Arc};
+use std::{collections::BTreeMap as Map, io::Read, path::Path};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use litellm_llms::base_llm::ocr::{error::Error, transformation::OCR_INLINE_MAX_BYTES};
 use litellm_llms_types::formats::ocr::OcrDocument;
 
-use crate::types::{LiteLLMOcrRequest, OcrDocumentInput, ResolvedOcrRequest};
+use crate::types::OcrDocumentInput;
 
 pub fn prepare_document(input: OcrDocumentInput) -> Result<OcrDocument, Error> {
     match input {
@@ -24,21 +24,6 @@ pub fn prepare_document(input: OcrDocumentInput) -> Result<OcrDocument, Error> {
     }
 }
 
-pub(crate) async fn resolve_document(
-    request: LiteLLMOcrRequest<OcrDocumentInput>,
-) -> Result<ResolvedOcrRequest, Error> {
-    if let OcrDocumentInput::Document(_) = &request.document {
-        return request.map_document(prepare_document);
-    }
-    let logger = litellm_tracing::Logger::current();
-    let span = tracing::Span::current();
-    tokio::task::spawn_blocking(move || {
-        logger.scope(|| span.in_scope(|| request.map_document(prepare_document)))
-    })
-    .await
-    .map_err(|error| Error::DocumentTask(Arc::new(error)))?
-}
-
 pub fn read_path_document(path: &Path, mime_type: Option<&str>) -> Result<OcrDocument, Error> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)
@@ -46,9 +31,9 @@ pub fn read_path_document(path: &Path, mime_type: Option<&str>) -> Result<OcrDoc
             file.take(OCR_INLINE_MAX_BYTES as u64 + 1)
                 .read_to_end(&mut bytes)
         })
-        .map_err(|cause| Error::FileRead {
+        .map_err(|source| Error::FileRead {
             path: path.to_owned(),
-            cause: std::sync::Arc::new(cause),
+            source: std::sync::Arc::new(source),
         })?;
     let name = path.file_name().map(|name| name.to_string_lossy());
     encode_file_document(&bytes, name.as_deref(), mime_type)
@@ -202,7 +187,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
 
         let missing = dir.join("missing.pdf");
-        let Err(super::Error::FileRead { path, cause, .. }) =
+        let Err(super::Error::FileRead { path, source, .. }) =
             prepare_document(OcrDocumentInput::Path {
                 path: missing.clone(),
                 mime_type: None,
@@ -211,7 +196,7 @@ mod tests {
             panic!("missing paths must surface a file read error");
         };
         assert_eq!(path, missing);
-        assert_eq!(cause.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
     }
 
     #[test]
@@ -243,16 +228,15 @@ mod tests {
     }
 
     #[test]
-    fn file_encoding_rejects_empty_bytes() {
+    fn file_encoding_rejects_empty_bytes_and_invalid_explicit_mime() {
         assert!(encode_file_document(b"", None, None).is_err());
-    }
-
-    #[rstest]
-    #[case::bad_parameter("text/plain;bad")]
-    #[case::extra_segment("text/plain/extra")]
-    #[case::leading_space(" text/plain")]
-    #[case::trailing_newline("text/plain\n")]
-    fn file_encoding_rejects_an_invalid_explicit_mime(#[case] mime: &str) {
-        assert!(encode_file_document(b"abc", None, Some(mime)).is_err());
+        for mime in [
+            "text/plain;bad",
+            "text/plain/extra",
+            " text/plain",
+            "text/plain\n",
+        ] {
+            assert!(encode_file_document(b"abc", None, Some(mime)).is_err());
+        }
     }
 }

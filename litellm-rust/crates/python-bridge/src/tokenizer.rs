@@ -8,18 +8,16 @@ use std::sync::Arc;
 #[cfg(feature = "fast")]
 use std::sync::OnceLock;
 
-use litellm_error::Report;
 use litellm_host_python::{enter_native, release_gil};
 #[cfg(feature = "fast")]
 use litellm_token_counter::fast::{FastCounter, FastTokenizer};
 use litellm_token_counter::{Error, TextCodec};
 use pyo3::{exceptions::PyUnicodeEncodeError, prelude::*, types::PyString};
 
+#[cfg(any(feature = "tiktoken", feature = "huggingface"))]
+use pyo3::exceptions::PyValueError;
 #[cfg(feature = "huggingface")]
-use pyo3::{
-    exceptions::{PyIOError, PyTypeError, PyValueError},
-    types::PyDict,
-};
+use pyo3::{exceptions::PyIOError, types::PyDict};
 #[cfg(feature = "tiktoken")]
 use pyo3::{
     exceptions::{PyKeyError, PyRuntimeError},
@@ -51,70 +49,6 @@ pub(crate) fn load_tiktoken(py: Python<'_>, encoding: &str) -> PyResult<Tiktoken
         })
     })
     .map_err(|error| token_count_error_to_pyerr(error.into()))
-}
-
-/// A tokenizer call the bridge rejects itself, mapped once onto the class each tokenizer
-/// library raises for it.
-#[derive(Debug, thiserror::Error)]
-enum TokenizerError {
-    #[cfg(not(all(feature = "tiktoken", feature = "huggingface")))]
-    #[error("tokenizer backend requires the {0} feature")]
-    MissingFeature(&'static str),
-    #[cfg(all(feature = "tiktoken", feature = "huggingface"))]
-    #[error("requires a tiktoken encoding")]
-    NotTiktoken,
-    #[cfg(all(feature = "tiktoken", feature = "huggingface"))]
-    #[error("requires a Hugging Face tokenizer")]
-    NotHuggingFace,
-    #[cfg(feature = "tiktoken")]
-    #[error("this encoding was built without its vocabulary")]
-    NoVocabulary,
-    #[cfg(feature = "tiktoken")]
-    #[error(transparent)]
-    EncodeSpecial(Error),
-    #[cfg(feature = "tiktoken")]
-    #[error(transparent)]
-    DecodeBytes(Error),
-    #[cfg(feature = "huggingface")]
-    #[error("input must match is_pretokenized")]
-    PretokenizedMismatch,
-    #[cfg(feature = "huggingface")]
-    #[error("invalid {what} direction {value:?}: expected 'left' or 'right'")]
-    Direction { what: &'static str, value: String },
-    #[cfg(feature = "huggingface")]
-    #[error("could not read the downloaded tokenizer")]
-    Download(#[source] std::io::Error),
-    #[cfg(feature = "huggingface")]
-    #[error(transparent)]
-    EncodingJson(Error),
-}
-
-impl From<TokenizerError> for PyErr {
-    fn from(error: TokenizerError) -> Self {
-        let message = Report::new(&error).to_string();
-        match error {
-            #[cfg(not(all(feature = "tiktoken", feature = "huggingface")))]
-            TokenizerError::MissingFeature(_) => RustBridgeDeclined::new_err(message),
-            #[cfg(all(feature = "tiktoken", feature = "huggingface"))]
-            TokenizerError::NotTiktoken | TokenizerError::NotHuggingFace => {
-                PyValueError::new_err(message)
-            }
-            #[cfg(feature = "tiktoken")]
-            TokenizerError::NoVocabulary | TokenizerError::EncodeSpecial(_) => {
-                PyRuntimeError::new_err(message)
-            }
-            #[cfg(feature = "tiktoken")]
-            TokenizerError::DecodeBytes(_) => PyKeyError::new_err(message),
-            #[cfg(feature = "huggingface")]
-            TokenizerError::Direction { .. } | TokenizerError::EncodingJson(_) => {
-                PyValueError::new_err(message)
-            }
-            #[cfg(feature = "huggingface")]
-            TokenizerError::PretokenizedMismatch => PyTypeError::new_err(message),
-            #[cfg(feature = "huggingface")]
-            TokenizerError::Download(_) => PyIOError::new_err(message),
-        }
-    }
 }
 
 pub(crate) enum Codec {
@@ -166,7 +100,9 @@ impl Tokenizer {
         #[cfg(not(feature = "tiktoken"))]
         {
             let _ = (py, encoding);
-            Err(TokenizerError::MissingFeature("tiktoken").into())
+            Err(RustBridgeDeclined::new_err(
+                "tokenizer backend requires the tiktoken feature",
+            ))
         }
     }
 
@@ -182,7 +118,9 @@ impl Tokenizer {
         #[cfg(not(feature = "huggingface"))]
         {
             let _ = (py, tokenizer_json);
-            Err(TokenizerError::MissingFeature("huggingface").into())
+            Err(RustBridgeDeclined::new_err(
+                "tokenizer backend requires the huggingface feature",
+            ))
         }
     }
 
@@ -206,14 +144,16 @@ impl Tokenizer {
                 .getattr("hf_hub_download")?
                 .call((), Some(&kwargs))?
                 .extract()?;
-            let json = release_gil(py, || std::fs::read_to_string(path))
-                .map_err(TokenizerError::Download)?;
+            let json =
+                release_gil(py, || std::fs::read_to_string(path)).map_err(PyIOError::new_err)?;
             Self::from_json(py, &json)
         }
         #[cfg(not(feature = "huggingface"))]
         {
             let _ = (py, identifier, revision, token);
-            Err(TokenizerError::MissingFeature("huggingface").into())
+            Err(RustBridgeDeclined::new_err(
+                "tokenizer backend requires the huggingface feature",
+            ))
         }
     }
 
@@ -259,7 +199,7 @@ impl Tokenizer {
         let tokenizer = self.tiktoken()?;
         let text = self.text(text)?;
         release_gil(py, || tokenizer.encode_special(&text, &allowed))
-            .map_err(|error| TokenizerError::EncodeSpecial(error.into()).into())
+            .map_err(PyRuntimeError::new_err)
     }
 
     /// tiktoken's `encode_with_unstable`: `(stable_tokens, completions)`.
@@ -318,8 +258,8 @@ impl Tokenizer {
     fn decode_bytes<'py>(&self, py: Python<'py>, ids: Vec<u32>) -> PyResult<Bound<'py, PyBytes>> {
         enter_native()?;
         let tokenizer = self.tiktoken()?;
-        let bytes = release_gil(py, || tokenizer.decode_bytes(&ids))
-            .map_err(|error| TokenizerError::DecodeBytes(error.into()))?;
+        let bytes =
+            release_gil(py, || tokenizer.decode_bytes(&ids)).map_err(PyKeyError::new_err)?;
         Ok(PyBytes::new(py, &bytes))
     }
 
@@ -540,16 +480,15 @@ impl Tokenizer {
         match *self.inner {
             Codec::Tiktoken(ref tokenizer) => Ok(tokenizer),
             #[cfg(feature = "huggingface")]
-            Codec::HuggingFace(_) => Err(TokenizerError::NotTiktoken.into()),
+            Codec::HuggingFace(_) => Err(PyValueError::new_err("requires a tiktoken encoding")),
         }
     }
 
     #[cfg(feature = "tiktoken")]
     fn vocabulary(&self) -> PyResult<&Vocabulary> {
-        Ok(self
-            .tiktoken()?
-            .vocabulary()
-            .ok_or(TokenizerError::NoVocabulary)?)
+        self.tiktoken()?.vocabulary().ok_or_else(|| {
+            PyRuntimeError::new_err("this encoding was built without its vocabulary")
+        })
     }
 
     #[cfg(feature = "huggingface")]
@@ -557,7 +496,7 @@ impl Tokenizer {
         match *self.inner {
             Codec::HuggingFace(ref tokenizer) => Ok(tokenizer),
             #[cfg(feature = "tiktoken")]
-            Codec::Tiktoken(_) => Err(TokenizerError::NotHuggingFace.into()),
+            Codec::Tiktoken(_) => Err(PyValueError::new_err("requires a Hugging Face tokenizer")),
         }
     }
 }
@@ -591,21 +530,21 @@ impl Sequence {
         match (self, is_pretokenized) {
             (Self::Text(text), false) => Ok(text.into()),
             (Self::Words(words), true) => Ok(words.into()),
-            _ => Err(TokenizerError::PretokenizedMismatch.into()),
+            _ => Err(pyo3::exceptions::PyTypeError::new_err(
+                "input must match is_pretokenized",
+            )),
         }
     }
 }
 
 #[cfg(feature = "huggingface")]
-fn direction<T>(value: &str, left: T, right: T, what: &'static str) -> PyResult<T> {
+fn direction<T>(value: &str, left: T, right: T, what: &str) -> PyResult<T> {
     match value {
         "left" => Ok(left),
         "right" => Ok(right),
-        other => Err(TokenizerError::Direction {
-            what,
-            value: other.to_owned(),
-        }
-        .into()),
+        other => Err(PyValueError::new_err(format!(
+            "invalid {what} direction {other:?}: expected 'left' or 'right'"
+        ))),
     }
 }
 
@@ -625,7 +564,7 @@ impl HuggingFaceEncoding {
     fn new(json: Option<&str>) -> PyResult<Self> {
         let inner = match json {
             Some(json) => encoding_from_json(json)
-                .map_err(|error| TokenizerError::EncodingJson(error.into()))?,
+                .map_err(|error| PyValueError::new_err(error.to_string()))?,
             None => Encoding::default(),
         };
         Ok(Self { inner })
@@ -647,7 +586,7 @@ impl HuggingFaceEncoding {
         py: Python<'py>,
     ) -> PyResult<(Bound<'py, pyo3::types::PyType>, (String,))> {
         let json = encoding_to_json(&self.inner)
-            .map_err(|error| TokenizerError::EncodingJson(error.into()))?;
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok((py.get_type::<Self>(), (json,)))
     }
 

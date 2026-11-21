@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
 import { CircleAlert } from "lucide-react";
 import { z } from "zod";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
@@ -18,23 +17,21 @@ import { useZodForm } from "@/lib/forms/useZodForm";
 import { toast } from "@/lib/toast";
 import { revokeSessionAndClearClientState } from "@/app/(dashboard)/hooks/useLogout";
 import { getLoginUrl } from "@/utils/returnUrlUtils";
-import i18n from "@/i18n/i18n";
 
 const changePasswordSchema = z
   .object({
-    currentPassword: z.string().min(1, { error: () => i18n.t("changePassword.schema.currentRequired") }),
-    newPassword: z.string().min(1, { error: () => i18n.t("changePassword.schema.newRequired") }),
-    confirmNewPassword: z.string().min(1, { error: () => i18n.t("changePassword.schema.confirmRequired") }),
+    currentPassword: z.string().min(1, "Current password is required"),
+    newPassword: z.string().min(1, "New password is required"),
+    confirmNewPassword: z.string().min(1, "Confirm your new password"),
   })
   .refine((values) => values.newPassword === values.confirmNewPassword, {
-    error: () => i18n.t("changePassword.schema.mismatch"),
+    message: "New passwords do not match",
     path: ["confirmNewPassword"],
   });
 
 type ChangePasswordValues = z.infer<typeof changePasswordSchema>;
 
 export function ChangePasswordForm() {
-  const { t } = useTranslation();
   const { accessToken, passwordResetRequired } = useAuthorized();
   const form = useZodForm(changePasswordSchema, {
     defaultValues: { currentPassword: "", newPassword: "", confirmNewPassword: "" },
@@ -52,12 +49,12 @@ export function ChangePasswordForm() {
         // The session key was minted restricted; only a fresh login lifts it.
         // Revoke it server-side too (best-effort) so it doesn't sit valid
         // until the expiry reaper gets to it.
-        toast.success(t("changePassword.form.toasts.updatedSignIn"));
+        toast.success("Password updated. Please log in with your new password.");
         await revokeSessionAndClearClientState(accessToken);
         window.location.replace(getUiPageUrl(getLoginUrl(getProxyBaseUrl())));
         return;
       }
-      toast.success(t("changePassword.form.toasts.updated"));
+      toast.success("Password updated");
       form.reset();
     } catch (error) {
       setSubmitError(extractProxyErrorMessage(error));
@@ -70,31 +67,34 @@ export function ChangePasswordForm() {
     <div className="mx-auto mt-10 w-full max-w-md">
       <Card>
         <CardContent>
-          <h3 className="text-2xl font-semibold text-foreground">{t("changePassword.form.title")}</h3>
-          <p className="text-sm text-muted-foreground">{t("changePassword.form.description")}</p>
+          <h3 className="text-2xl font-semibold text-foreground">Change Password</h3>
+          <p className="text-sm text-muted-foreground">
+            Enter your current password and choose a new one. The new password must meet this proxy&apos;s password
+            policy.
+          </p>
 
           {passwordResetRequired && (
             <Alert variant="warning" className="mt-4">
               <CircleAlert />
-              <AlertTitle>{t("changePassword.form.resetRequired")}</AlertTitle>
+              <AlertTitle>
+                Your password must be changed before you can use the dashboard: it was either found in a known data
+                breach or set by an administrator as a temporary password. After updating it, you will be signed out to
+                log in again.
+              </AlertTitle>
             </Alert>
           )}
 
           <form className="mb-2 mt-8" onSubmit={form.handleSubmit(handleSubmit)}>
             <FieldGroup>
-              <FormField control={form.control} name="currentPassword" label={t("changePassword.form.currentPassword")}>
+              <FormField control={form.control} name="currentPassword" label="Current Password">
                 {({ ref, ...field }) => <PasswordInput {...field} ref={ref} autoComplete="current-password" />}
               </FormField>
 
-              <FormField control={form.control} name="newPassword" label={t("changePassword.form.newPassword")}>
+              <FormField control={form.control} name="newPassword" label="New Password">
                 {({ ref, ...field }) => <PasswordInput {...field} ref={ref} autoComplete="new-password" />}
               </FormField>
 
-              <FormField
-                control={form.control}
-                name="confirmNewPassword"
-                label={t("changePassword.form.confirmNewPassword")}
-              >
+              <FormField control={form.control} name="confirmNewPassword" label="Confirm New Password">
                 {({ ref, ...field }) => <PasswordInput {...field} ref={ref} autoComplete="new-password" />}
               </FormField>
             </FieldGroup>
@@ -108,10 +108,8 @@ export function ChangePasswordForm() {
 
             <div className="mt-8">
               <Button type="submit" disabled={isPending}>
-                {isPending && (
-                  <UiLoadingSpinner className="size-4" role="img" aria-label={t("changePassword.form.loading")} />
-                )}
-                {t("changePassword.form.submit")}
+                {isPending && <UiLoadingSpinner className="size-4" role="img" aria-label="loading" />}
+                Change Password
               </Button>
             </div>
           </form>

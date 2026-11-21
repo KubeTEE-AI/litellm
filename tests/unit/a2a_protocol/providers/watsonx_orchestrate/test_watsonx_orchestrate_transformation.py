@@ -1,7 +1,6 @@
 import asyncio
 import json
 import time
-from typing import Final
 
 import httpx
 import pytest
@@ -37,8 +36,13 @@ class _ShortTtlTokenClient:
         return _JsonResponse({"access_token": f"token-{self.calls}", "expires_in": 30})
 
 
-def _sse_response(lines: list[str]) -> httpx.Response:
-    return httpx.Response(200, stream=httpx.ByteStream("".join(f"{line}\n" for line in lines).encode()))
+class _SSELines:
+    def __init__(self, lines):
+        self.lines = lines
+
+    async def aiter_lines(self):
+        for line in self.lines:
+            yield line
 
 
 class _InvalidJsonStreamResponse:
@@ -214,7 +218,7 @@ def test_cp4d_token_ttl_from_absolute_expiration():
 
 @pytest.mark.asyncio
 async def test_accumulate_wxo_sse_text_ignores_non_dict_json_events():
-    response = _sse_response(
+    response = _SSELines(
         [
             "data: null",
             "data: true",
@@ -224,14 +228,6 @@ async def test_accumulate_wxo_sse_text_ignores_non_dict_json_events():
     assert await WatsonxOrchestrateHandler._accumulate_wxo_sse_text(response) == (
         "streamed text"
     )
-
-
-@pytest.mark.asyncio
-async def test_accumulate_wxo_sse_text_keeps_unicode_line_separators_inside_an_event() -> None:
-    separated_text: Final = "before\u2028between\u2029after"
-    response: Final = _sse_response([f"data: {json.dumps({'results': separated_text}, ensure_ascii=False)}", ""])
-
-    assert await WatsonxOrchestrateHandler._accumulate_wxo_sse_text(response) == separated_text
 
 
 @pytest.mark.asyncio

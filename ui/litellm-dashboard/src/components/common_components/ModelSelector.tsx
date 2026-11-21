@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Bot } from "lucide-react";
 import { useDebouncedCallback } from "@tanstack/react-pacer/debouncer";
-import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { SearchSelect } from "@/components/shared/SearchSelect";
 import { fetchAvailableModels, ModelGroup } from "@/components/llm_calls/fetch_models";
-import i18n from "@/i18n/i18n";
 
 const MODEL_SELECT_DEBOUNCE_MS = 500;
 
@@ -24,15 +22,14 @@ interface ModelSelectorProps {
 const ModelSelector: React.FC<ModelSelectorProps> = ({
   accessToken,
   value,
-  placeholder = i18n.t("modelSelector.placeholder"),
+  placeholder = "Select a Model",
   onChange,
   disabled = false,
   style,
   className,
   showLabel = true,
-  labelText = i18n.t("modelSelector.label"),
+  labelText = "Select Model",
 }) => {
-  const { t } = useTranslation();
   const [selectedModel, setSelectedModel] = useState<string | null>(value ?? null);
   const [showCustomModelInput, setShowCustomModelInput] = useState<boolean>(false);
   const [modelInfo, setModelInfo] = useState<ModelGroup[]>([]);
@@ -94,7 +91,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
               value: model_group,
               label: model_group,
             })),
-            { value: "custom", label: t("modelSelector.customOption") },
+            { value: "custom", label: "Enter custom model" },
           ]}
           value={selectedModel}
           placeholder={placeholder}
@@ -105,7 +102,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
       {showCustomModelInput && (
         <Input
           className="mt-2"
-          placeholder={t("modelSelector.customPlaceholder")}
+          placeholder="Enter custom model name"
           onChange={(e) => debouncedSelect(e.target.value)}
           disabled={disabled}
         />

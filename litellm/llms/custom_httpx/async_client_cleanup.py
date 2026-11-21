@@ -20,7 +20,7 @@ async def close_litellm_async_clients():
 
     cache_dict: Final = getattr(litellm.in_memory_llm_clients_cache, "cache_dict", {})
 
-    for handler in cache_dict.values():
+    for key, handler in cache_dict.items():
         # Handle BaseLLMAIOHTTPHandler instances (aiohttp_openai provider)
         if isinstance(handler, BaseLLMAIOHTTPHandler) and hasattr(handler, "close"):
             try:

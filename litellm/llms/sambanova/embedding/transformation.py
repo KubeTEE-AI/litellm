@@ -10,7 +10,6 @@ import httpx
 from pydantic import ConfigDict, TypeAdapter
 
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
-from litellm.litellm_core_utils.url_utils import ensure_api_route
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.base_llm.embedding.transformation import BaseEmbeddingConfig
 from litellm.secret_managers.main import get_secret_str
@@ -38,7 +37,11 @@ class SambaNovaEmbeddingConfig(BaseEmbeddingConfig):
     ) -> str:
         if api_base is None:
             raise ValueError("api_base is required for SambaNova embeddings")
-        return ensure_api_route(api_base, "embeddings")
+        # Remove trailing slashes and ensure clean base URL
+        api_base = api_base.rstrip("/")
+        if not api_base.endswith("/embeddings"):
+            api_base = f"{api_base}/embeddings"
+        return api_base
 
     def validate_environment(
         self,

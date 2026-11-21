@@ -2,6 +2,7 @@ import asyncio
 import uuid
 
 import pytest
+import pytest_asyncio
 
 import litellm
 from litellm.integrations.custom_logger import CustomLogger
@@ -39,8 +40,9 @@ class SpendCapture(CustomLogger):
         await asyncio.wait_for(GLOBAL_LOGGING_WORKER.flush(), timeout=10.0)
 
 
-@pytest.fixture
-def spend_capture(monkeypatch) -> SpendCapture:
+@pytest_asyncio.fixture
+async def spend_capture(monkeypatch) -> SpendCapture:
+    GLOBAL_LOGGING_WORKER.start()  # rebinds the worker's queue to this test's event loop
     capture = SpendCapture(call_id=f"eden-{uuid.uuid4()}")
     monkeypatch.setattr(litellm, "callbacks", [capture])
     return capture

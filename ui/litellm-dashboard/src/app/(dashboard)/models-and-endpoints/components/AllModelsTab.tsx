@@ -6,7 +6,6 @@ import { useCredentials } from "@/app/(dashboard)/hooks/credentials/useCredentia
 import { credentialLabelsByName } from "@/components/shared/credentialOptions";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import DeleteResourceModal from "@/components/common_components/DeleteResourceModal";
-import i18n from "@/i18n/i18n";
 import ModelSettingsModal from "@/components/model_dashboard/ModelSettingsModal/ModelSettingsModal";
 import { ModelData } from "@/components/model_dashboard/types";
 import { toast } from "@/lib/toast";
@@ -19,7 +18,6 @@ import { ColumnFiltersState, functionalUpdate, OnChangeFn, PaginationState, Sort
 import { Info } from "lucide-react";
 import { createParser, parseAsInteger, parseAsString, parseAsStringLiteral, useQueryStates } from "nuqs";
 import { useCallback, useMemo, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
 
 import { useModelsInfo } from "../../hooks/models/useModels";
 import { ROUTING_STATUS_FILTER_ID, routingStatusToBlocked } from "../utils/routingStatus";
@@ -84,7 +82,6 @@ const AllModelsTab = ({
   setSelectedModelId,
   setSelectedTeamId,
 }: AllModelsTabProps) => {
-  const { t } = useTranslation();
   const { data: modelCostMapData, isLoading: isLoadingModelCostMap } = useModelCostMap();
   const { accessToken, userId, userRole, isViewOnly } = useAuthorized();
   const { data: teams, isLoading: isLoadingTeams } = useTeams();
@@ -243,7 +240,7 @@ const AllModelsTab = ({
 
   const teamOptions = useMemo(
     () => [
-      { value: PERSONAL_TEAM_VALUE, label: i18n.t("modelsAndEndpoints.allModelsTab.personalTeam") },
+      { value: PERSONAL_TEAM_VALUE, label: "Personal" },
       ...(teams ?? [])
         .filter((team) => team.team_id)
         .map((team) => ({ value: team.team_id, label: team.team_alias ? team.team_alias : team.team_id })),
@@ -266,7 +263,7 @@ const AllModelsTab = ({
     try {
       setDeleteLoading(true);
       await modelDeleteCall(accessToken, deleteModalModelId);
-      toast.success(t("modelsAndEndpoints.allModelsTab.toasts.deleted"));
+      toast.success("Model deleted successfully");
       queryClient.invalidateQueries({ queryKey: ["models", "list"] });
       refetchModels();
     } catch (error) {
@@ -284,11 +281,7 @@ const AllModelsTab = ({
       try {
         setPausingModelId(modelId);
         await modelPatchUpdateCall(accessToken, { blocked }, modelId);
-        toast.success(
-          blocked
-            ? i18n.t("modelsAndEndpoints.allModelsTab.toasts.paused")
-            : i18n.t("modelsAndEndpoints.allModelsTab.toasts.resumed"),
-        );
+        toast.success(blocked ? "Model paused" : "Model resumed");
         // invalidateQueries already schedules a refetch for active observers
         // on this key — no need to also call refetchModels() (would double-fetch).
         queryClient.invalidateQueries({ queryKey: ["models", "list"] });
@@ -359,22 +352,19 @@ const AllModelsTab = ({
             <Info className="mt-0.5 size-3.5 shrink-0" />
             {selectedTeamValue === PERSONAL_TEAM_VALUE ? (
               <span>
-                <Trans
-                  i18nKey="modelsAndEndpoints.allModelsTab.personalHint"
-                  components={{
-                    keys: <a href={uiHref("api-keys")} className="font-medium text-info hover:underline" />,
-                  }}
-                />
+                To access these models, create a Virtual Key without selecting a team on the{" "}
+                <a href={uiHref("api-keys")} className="font-medium text-info hover:underline">
+                  Virtual Keys page
+                </a>
+                .
               </span>
             ) : (
               <span>
-                <Trans
-                  i18nKey="modelsAndEndpoints.allModelsTab.teamHint"
-                  components={{
-                    team: <>{teamAccessLabel}</>,
-                    keys: <a href={uiHref("api-keys")} className="font-medium text-info hover:underline" />,
-                  }}
-                />
+                To access these models, create a Virtual Key and select Team as &quot;{teamAccessLabel}&quot; on the{" "}
+                <a href={uiHref("api-keys")} className="font-medium text-info hover:underline">
+                  Virtual Keys page
+                </a>
+                .
               </span>
             )}
           </div>
@@ -383,29 +373,28 @@ const AllModelsTab = ({
 
       <DeleteResourceModal
         isOpen={!!deleteModalModelId}
-        title={t("modelsAndEndpoints.allModelsTab.deleteModal.title")}
-        alertMessage={t("modelsAndEndpoints.allModelsTab.deleteModal.alert")}
-        message={t("modelsAndEndpoints.allModelsTab.deleteModal.message")}
-        resourceInformationTitle={t("modelsAndEndpoints.allModelsTab.deleteModal.informationTitle")}
+        title="Delete Model"
+        alertMessage="This action cannot be undone."
+        message="Are you sure you want to delete this model?"
+        resourceInformationTitle="Model Information"
         resourceInformation={
           modelToDelete
             ? [
                 {
-                  label: t("modelsAndEndpoints.allModelsTab.deleteModal.modelName"),
-                  value: modelToDelete.model_name || t("modelsAndEndpoints.allModelsTab.deleteModal.notSet"),
+                  label: "Model Name",
+                  value: modelToDelete.model_name || "Not Set",
                 },
                 {
-                  label: t("modelsAndEndpoints.allModelsTab.deleteModal.litellmModelName"),
-                  value: modelToDelete.litellm_model_name || t("modelsAndEndpoints.allModelsTab.deleteModal.notSet"),
+                  label: "LiteLLM Model Name",
+                  value: modelToDelete.litellm_model_name || "Not Set",
                 },
                 {
-                  label: t("modelsAndEndpoints.allModelsTab.deleteModal.provider"),
-                  value: modelToDelete.provider || t("modelsAndEndpoints.allModelsTab.deleteModal.notSet"),
+                  label: "Provider",
+                  value: modelToDelete.provider || "Not Set",
                 },
                 {
-                  label: t("modelsAndEndpoints.allModelsTab.deleteModal.createdBy"),
-                  value:
-                    modelToDelete.model_info?.created_by || t("modelsAndEndpoints.allModelsTab.deleteModal.notSet"),
+                  label: "Created By",
+                  value: modelToDelete.model_info?.created_by || "Not Set",
                 },
               ]
             : []

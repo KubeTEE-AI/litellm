@@ -19,8 +19,6 @@ from urllib.parse import quote
 from e2e_http import AuthHeaders, Success, get_external
 from pydantic import BaseModel
 
-from setup.series import Recorder, Series
-
 SELECTOR_ENV: Final = "E2E_PERF_GATEWAY_POD_SELECTOR"
 _SERVICE_ACCOUNT: Final = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 _INTERVAL_S: Final = 5.0
@@ -51,8 +49,7 @@ def cores(quantity: str) -> float:
 
 
 class GatewayCpuSampler:
-    """Integrates the matching pods' core use over the time it is running; `seconds` is CPU seconds and
-    `series` the CPU seconds of each sampling interval, stamped when the interval ended."""
+    """Integrates the matching pods' core use over the time it is running; `seconds` is CPU seconds."""
 
     def __init__(self, selector: str, namespace: str, token: str, ca_bundle: str) -> None:
         self._url: Final = (
@@ -63,15 +60,12 @@ class GatewayCpuSampler:
         self._ca_bundle: Final = ca_bundle
         self._stop: Final = threading.Event()
         self._thread: Final = threading.Thread(target=self._run, name="gateway-cpu-sampler", daemon=True)
-        self._intervals: Final[Recorder[float]] = Recorder()
+        self._cpu_seconds = 0.0
+        self._samples = 0
 
     @property
     def seconds(self) -> float | None:
-        return sum(sample.value for sample in self._intervals.series.samples) if len(self._intervals) else None
-
-    @property
-    def series(self) -> Series[float]:
-        return self._intervals.series
+        return self._cpu_seconds if self._samples > 0 else None
 
     def _read_cores(self) -> float | None:
         result: Final = get_external(
@@ -87,7 +81,8 @@ class GatewayCpuSampler:
             now: float = time.monotonic()
             current: float | None = self._read_cores()
             if current is not None:
-                self._intervals.record(current * (now - last))
+                self._cpu_seconds += current * (now - last)
+                self._samples += 1
             last = now  # rebind-ok: the sampling clock advances every tick
 
     def start(self) -> None:
@@ -100,7 +95,6 @@ class GatewayCpuSampler:
 
 class NoSampler:
     seconds: Final[None] = None
-    series: Final[None] = None
 
     def start(self) -> None:
         return None
@@ -109,7 +103,7 @@ class NoSampler:
         return None
 
 
-def in_cluster() -> tuple[str, str, str] | None:
+def _in_cluster() -> tuple[str, str, str] | None:
     token: Final = _SERVICE_ACCOUNT / "token"
     ca: Final = _SERVICE_ACCOUNT / "ca.crt"
     namespace: Final = _SERVICE_ACCOUNT / "namespace"
@@ -121,7 +115,7 @@ def in_cluster() -> tuple[str, str, str] | None:
 @contextmanager
 def gateway_cpu_sampler() -> Generator[GatewayCpuSampler | NoSampler]:
     selector: Final = os.environ.get(SELECTOR_ENV, "")
-    cluster: Final = in_cluster()
+    cluster: Final = _in_cluster()
     sampler: Final = (
         GatewayCpuSampler(selector, cluster[2], cluster[0], cluster[1]) if selector and cluster else NoSampler()
     )

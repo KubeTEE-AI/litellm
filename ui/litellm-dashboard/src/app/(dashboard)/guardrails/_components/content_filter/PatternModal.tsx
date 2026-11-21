@@ -1,5 +1,4 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -14,7 +13,7 @@ import {
 } from "@/components/ui/combobox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ACTION_ITEMS, translateOptions } from "./action_options";
+import { ACTION_ITEMS } from "./action_options";
 
 interface PrebuiltPattern {
   name: string;
@@ -56,8 +55,6 @@ const PatternModal: React.FC<PatternModalProps> = ({
   onAdd,
   onCancel,
 }) => {
-  const { t } = useTranslation();
-  const actionItems = translateOptions(ACTION_ITEMS, t);
   const selectedPattern = prebuiltPatterns.find((pattern) => pattern.name === selectedPatternName) ?? null;
   const patternGroups = categories
     .map((category) => ({
@@ -70,12 +67,12 @@ const PatternModal: React.FC<PatternModalProps> = ({
     <Dialog open={visible} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[800px]">
         <DialogHeader>
-          <DialogTitle>{t("guardrails.contentFilter.patternModal.title")}</DialogTitle>
+          <DialogTitle>Add prebuilt pattern</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6">
           <div>
-            <p className="font-semibold">{t("guardrails.contentFilter.patternModal.patternTypeLabel")}</p>
+            <p className="font-semibold">Pattern type</p>
             <Combobox
               items={patternGroups}
               value={selectedPattern}
@@ -83,12 +80,9 @@ const PatternModal: React.FC<PatternModalProps> = ({
               itemToStringLabel={(pattern: PrebuiltPattern) => pattern.display_name}
               filter={matchesPatternQuery}
             >
-              <ComboboxInput
-                className="mt-2 w-full"
-                placeholder={t("guardrails.contentFilter.patternModal.patternTypePlaceholder")}
-              />
+              <ComboboxInput className="mt-2 w-full" placeholder="Choose pattern type" />
               <ComboboxContent>
-                <ComboboxEmpty>{t("guardrails.contentFilter.patternModal.noMatches")}</ComboboxEmpty>
+                <ComboboxEmpty>No matching patterns</ComboboxEmpty>
                 <ComboboxList>
                   {(group: PatternGroup) => (
                     <ComboboxGroup key={group.category} items={group.items}>
@@ -108,20 +102,20 @@ const PatternModal: React.FC<PatternModalProps> = ({
           </div>
 
           <div>
-            <p className="font-semibold">{t("guardrails.contentFilter.patternModal.actionLabel")}</p>
+            <p className="font-semibold">Action</p>
             <p className="mt-1 mb-2 text-muted-foreground">
-              {t("guardrails.contentFilter.patternModal.actionDescription")}
+              Choose what action the guardrail should take when this pattern is detected
             </p>
             <Select
-              items={actionItems}
+              items={ACTION_ITEMS}
               value={patternAction}
               onValueChange={(value: string | null) => value && onActionChange(value as "BLOCK" | "MASK")}
             >
-              <SelectTrigger className="w-full" aria-label={t("guardrails.contentFilter.patternModal.actionLabel")}>
+              <SelectTrigger className="w-full" aria-label="Action">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {actionItems.map((item) => (
+                {ACTION_ITEMS.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>
@@ -133,9 +127,9 @@ const PatternModal: React.FC<PatternModalProps> = ({
 
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            {t("guardrails.contentFilter.patternModal.cancel")}
+            Cancel
           </Button>
-          <Button onClick={onAdd}>{t("guardrails.contentFilter.patternModal.add")}</Button>
+          <Button onClick={onAdd}>Add</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 
-from litellm.litellm_core_utils.url_utils import ensure_api_route, join_api_base
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.base_llm.text_to_speech.transformation import (
     BaseTextToSpeechConfig,
@@ -119,7 +118,9 @@ class MistralTextToSpeechConfig(BaseTextToSpeechConfig):
         api_base: str | None,
         litellm_params: Mapping[str, object],
     ) -> str:
-        return join_api_base(ensure_api_route(api_base or self.TTS_BASE_URL, "v1"), "audio/speech")
+        configured_base: Final = (api_base or self.TTS_BASE_URL).rstrip("/")
+        versioned_base: Final = configured_base if configured_base.endswith("/v1") else f"{configured_base}/v1"
+        return f"{versioned_base}/audio/speech"
 
     def transform_text_to_speech_request(
         self,

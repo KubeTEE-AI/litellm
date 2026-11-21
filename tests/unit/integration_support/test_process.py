@@ -409,16 +409,25 @@ def _private_state(directory: Path, inherited: Mapping[str, str]) -> Iterator[Pr
 @pytest.mark.parametrize(
     ("state", "overrides", "remove_environment", "marked", "private"),
     (
-        (None, {}, (), False, True),
-        (None, {"DATABASE_URL": "postgresql://admin@127.0.0.1/scratch"}, (), False, False),
-        (None, {}, ("DATABASE_URL",), False, False),
+        (None, {}, (), False, False),
+        (OwnedState.PRIVATE, {}, (), False, True),
+        (OwnedState.PRIVATE, {"DATABASE_URL": "postgresql://admin@127.0.0.1/scratch"}, (), False, False),
+        (OwnedState.PRIVATE, {}, ("DATABASE_URL",), False, False),
         (OwnedState.SHARED_WITH_WORKER, {}, (), False, False),
         (None, {}, (), True, False),
         (OwnedState.PRIVATE, {}, (), True, True),
     ),
-    ids=("default", "explicit-database", "stripped-database", "shared", "marked-module", "private-in-marked-module"),
+    ids=(
+        "default",
+        "private",
+        "explicit-database",
+        "stripped-database",
+        "shared",
+        "marked-module",
+        "private-in-marked-module",
+    ),
 )
-def test_an_owned_proxy_boots_private_state_unless_it_shares_or_brings_its_own_database(
+def test_an_owned_proxy_boots_private_state_only_when_asked_and_without_its_own_database(
     state: OwnedState | None,
     overrides: Mapping[str, str],
     remove_environment: tuple[str, ...],
@@ -430,10 +439,10 @@ def test_an_owned_proxy_boots_private_state_unless_it_shares_or_brings_its_own_d
     assert boots_private_state(state, overrides, remove_environment, inherited) is private
 
 
-def test_a_default_owned_proxy_runs_on_its_own_database_and_redis(tmp_path: Path) -> None:
+def test_a_private_owned_proxy_runs_on_its_own_database_and_redis(tmp_path: Path) -> None:
     with (
         httpx.Client(base_url="http://127.0.0.1:1", trust_env=False) as client,
-        owned_environment(tmp_path, {}, (), None, WORKER_STATE, _private_state) as owned,
+        owned_environment(tmp_path, {}, (), OwnedState.PRIVATE, WORKER_STATE, _private_state) as owned,
     ):
         environment: Final = _proxy_environment(
             Gateway(client, "owned-test-key", "http://127.0.0.1:1"), owned.overrides, (), WORKER_STATE
@@ -459,7 +468,9 @@ def test_a_private_owned_proxy_leaves_redis_to_a_caller_that_chose_it(
 ) -> None:
     with (
         httpx.Client(base_url="http://127.0.0.1:1", trust_env=False) as client,
-        owned_environment(tmp_path, overrides, remove_environment, None, WORKER_STATE, _private_state) as owned,
+        owned_environment(
+            tmp_path, overrides, remove_environment, OwnedState.PRIVATE, WORKER_STATE, _private_state
+        ) as owned,
     ):
         environment: Final = _proxy_environment(
             Gateway(client, "owned-test-key", "http://127.0.0.1:1"), owned.overrides, remove_environment, WORKER_STATE

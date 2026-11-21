@@ -1,13 +1,11 @@
 from typing import Final
 
-from litellm.litellm_core_utils.core_helpers import iter_items, subscript
-
 imported_openAIResponse = True
 try:
     import io
     import logging
     from collections.abc import Mapping
-    from typing import Literal, Protocol, TypeVar
+    from typing import Any, Literal, Protocol, TypeVar
 
     from wandb.sdk.data_types import trace_tree
 
@@ -27,7 +25,7 @@ try:
     class OpenAIRequestResponseResolver:
         def __call__(
             self,
-            request: Mapping[str, object],
+            request: dict[str, Any],
             response: OpenAIResponse,
             time_elapsed: float,
         ) -> trace_tree.WBTraceTree | None:
@@ -112,14 +110,14 @@ try:
 
         def _resolve_chat_completion(
             self,
-            request: Mapping[str, object],
+            request: dict[str, Any],
             response: OpenAIResponse,
             time_elapsed: float,
         ) -> trace_tree.WBTraceTree:
             """Resolves the request and response objects for `openai.Completion`."""
             prompt: Final = io.StringIO()
-            for message in iter_items(request["messages"]):
-                prompt.write(f"\n\n**{subscript(message, 'role')}**: {subscript(message, 'content')}\n")
+            for message in request["messages"]:
+                prompt.write(f"\n\n**{message['role']}**: {message['content']}\n")
             request_str: Final = prompt.getvalue()
 
             choices: Final = [

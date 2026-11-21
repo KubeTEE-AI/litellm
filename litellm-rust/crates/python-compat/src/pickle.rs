@@ -22,8 +22,10 @@ pub fn loads(data: &[u8]) -> Result<Value, Error> {
     let mut deserializer = serde_pickle::Deserializer::new(data, DeOptions::new());
     let value = Seed { depth: 0 }
         .deserialize(&mut deserializer)
-        .map_err(Error::InvalidPickle)?;
-    deserializer.end().map_err(Error::InvalidPickle)?;
+        .map_err(|error| Error::InvalidPickle(error.to_string()))?;
+    deserializer
+        .end()
+        .map_err(|error| Error::InvalidPickle(error.to_string()))?;
     Ok(value)
 }
 
@@ -31,7 +33,8 @@ pub fn loads(data: &[u8]) -> Result<Value, Error> {
 /// default. Sets and complex numbers are rejected rather than silently changing type.
 pub fn dumps(value: &Value) -> Result<Vec<u8>, Error> {
     check_picklable(value, 0)?;
-    serde_pickle::to_vec(&Pickled(value), SerOptions::new()).map_err(Error::PickleWrite)
+    serde_pickle::to_vec(&Pickled(value), SerOptions::new())
+        .map_err(|error| Error::InvalidPickle(error.to_string()))
 }
 
 fn check_picklable(value: &Value, depth: usize) -> Result<(), Error> {
@@ -63,7 +66,7 @@ impl Serialize for Pickled<'_> {
             Value::Bool(value) => serializer.serialize_bool(*value),
             Value::Int(value) => {
                 let value = i64::try_from(value)
-                    .map_err(|_| serde::ser::Error::custom(Error::IntegerOutOfRange))?;
+                    .map_err(|_| serde::ser::Error::custom("integer out of i64 range"))?;
                 serializer.serialize_i64(value)
             }
             Value::Float(value) => serializer.serialize_f64(*value),
@@ -91,7 +94,7 @@ impl Serialize for Pickled<'_> {
                 map.end()
             }
             value @ (Value::Set(_) | Value::Complex { .. }) => Err(serde::ser::Error::custom(
-                Error::NotPicklable(value.type_name()),
+                format!("{} cannot be pickled as plain data", value.type_name()),
             )),
         }
     }

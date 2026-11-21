@@ -13,7 +13,6 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { FormField } from "@/components/shared/form/FormField";
 import { SearchSelect, SearchSelectOption } from "@/components/shared/SearchSelect";
 import React, { useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { hasCapability } from "../../utils/capabilities";
 import { isProxyAdminRole, rolesWithWriteAccess } from "../../utils/roles";
 import AccessGroupSelector from "../common_components/AccessGroupSelector";
@@ -79,7 +78,6 @@ import { Tag } from "../tag_management/types";
 import EditLoggingSettings from "../team/EditLoggingSettings";
 import { useZodForm } from "@/lib/forms/useZodForm";
 import VectorStoreSelector from "../vector_store_management/VectorStoreSelector";
-import { codeSamples } from "@/i18n/untranslated/codeSamples";
 
 interface KeyEditViewProps {
   keyData: KeyResponse;
@@ -106,7 +104,6 @@ function KeyEditSession({
   userRole,
   premiumUser = false,
 }: KeyEditViewProps) {
-  const { t } = useTranslation();
   const canEditGuardrails = premiumUser || (userRole != null && rolesWithWriteAccess.includes(userRole));
   const canViewPolicies = hasCapability(userRole, "viewPolicies");
   const canViewPrompts = hasCapability(userRole, "viewPrompts");
@@ -117,7 +114,6 @@ function KeyEditSession({
     values: toKeyEditFormValues(keyData),
     resetOptions: { keepDirtyValues: true },
   });
-  const { dirtyFields } = form.formState;
   const [promptsList, setPromptsList] = useState<string[]>([]);
   const [tagsList, setTagsList] = useState<Record<string, Tag>>({});
   const team = teams?.find((team) => team.team_id === keyData.team_id);
@@ -127,6 +123,7 @@ function KeyEditSession({
       ? mapInternalToDisplayNames(keyData.metadata.litellm_disabled_callbacks)
       : [],
   );
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState<string | null>(keyData.organization_id || null);
   const [autoRotationEnabled, setAutoRotationEnabled] = useState<boolean>(keyData.auto_rotate || false);
   const [rotationInterval, setRotationInterval] = useState<string>(keyData.rotation_interval || "");
   const [neverExpire, setNeverExpire] = useState<boolean>(!keyData.expires);
@@ -150,11 +147,9 @@ function KeyEditSession({
   const { data: uiSettingsData } = useUISettings();
   const enableProjectsUI = Boolean(uiSettingsData?.values?.enable_projects_ui);
   const hasProject = Boolean(keyData.project_id);
-  const canChangeOrganization = userRole === "Admin" && !hasProject;
   const detachProject = hasProject && form.watch("project_id") === null;
   const canDetachProject = canDetachKeyProject(team, organizations, userID, userRole);
 
-  const selectedOrganizationId = form.watch("organization_id") ?? null;
   const allowedRoutesValue = form.watch("allowed_routes");
   const selectedModels = (form.watch("models") as string[] | undefined) ?? [];
   const allowedRoutes = parseAllowedRoutes(allowedRoutesValue);
@@ -219,11 +214,11 @@ function KeyEditSession({
         const response = await tagListCall(accessToken);
         setTagsList(response);
       } catch (error) {
-        toast.fromError(t("keyDetail.keyEditView.errors.fetchTags") + error);
+        toast.fromError("Error fetching tags: " + error);
       }
     };
     fetchTags();
-  }, [accessToken, t]);
+  }, [accessToken]);
 
   const handleSubmit = async (values: any) => {
     try {
@@ -323,7 +318,7 @@ function KeyEditSession({
           ...values,
           ...(detachProject && enableProjectsUI && canDetachProject ? { project_id: null } : {}),
         }),
-        [...Object.keys(dirtyFields), ...(budgetLimitsUnchanged ? [] : ["budget_limits"])],
+        [...Object.keys(form.formState.dirtyFields), ...(budgetLimitsUnchanged ? [] : ["budget_limits"])],
       );
     } finally {
       setIsKeySaving(false);
@@ -332,6 +327,7 @@ function KeyEditSession({
 
   const handleOrganizationChange = (setField: (value: string | null) => void, orgId: string | null) => {
     setField(orgId);
+    setSelectedOrganizationId(orgId);
     form.setValue("team_id", null, { shouldDirty: true });
   };
 
@@ -340,6 +336,7 @@ function KeyEditSession({
     clearMcpGrants(form.setValue);
     const organizationId = teams?.find((t) => t.team_id === teamId)?.organization_id;
     if (!organizationId) return;
+    setSelectedOrganizationId(organizationId);
     form.setValue("organization_id", organizationId, { shouldDirty: true });
   };
 
@@ -349,7 +346,7 @@ function KeyEditSession({
   };
 
   const modelOptions = [
-    ...modelSentinelOptions(keyData.team_id, team != null, t),
+    ...modelSentinelOptions(keyData.team_id, team != null),
     ...availableModels.map((model) => ({
       value: model,
       label: model,
@@ -357,10 +354,9 @@ function KeyEditSession({
     })),
   ];
 
-  const visibleTeams =
-    canChangeOrganization && selectedOrganizationId
-      ? teams?.filter((t) => t.organization_id === selectedOrganizationId)
-      : teams;
+  const visibleTeams = selectedOrganizationId
+    ? teams?.filter((t) => t.organization_id === selectedOrganizationId)
+    : teams;
 
   const teamOptionsFor = (selectedTeamId: string | null): SearchSelectOption[] => {
     const selectedTeamOutsideFilter = teams?.find((t) => t.team_id === selectedTeamId && !visibleTeams?.includes(t));
@@ -377,22 +373,22 @@ function KeyEditSession({
     <TooltipProvider>
       <form
         onSubmit={(event) => {
-          moveMetadataTagsToTagsField(form, t);
+          moveMetadataTagsToTagsField(form);
           return form.handleSubmit((values) =>
             handleSubmit(toSubmittedValues(values, { canViewPolicies, canViewPrompts })),
           )(event);
         }}
       >
         <FieldGroup>
-          <FormField control={form.control} name="key_alias" label={t("keyDetail.keyEditView.fields.keyAlias")}>
+          <FormField control={form.control} name="key_alias" label="Key Alias">
             {(field) => <Input {...field} value={(field.value as string | undefined) ?? ""} />}
           </FormField>
 
           <FormField
             control={form.control}
             name="models"
-            label={t("keyDetail.keyEditView.fields.models")}
-            description={isModelsDisabled ? t("keyDetail.keyEditView.fields.modelsDisabled") : undefined}
+            label="Models"
+            description={isModelsDisabled ? "Models field is disabled for this key type" : undefined}
           >
             {({ value, onChange, id }) => (
               <MultiSelect
@@ -409,13 +405,13 @@ function KeyEditSession({
                   }
                 }}
                 disabled={isModelsDisabled}
-                placeholder={t("keyDetail.keyEditView.fields.modelsPlaceholder")}
+                placeholder="Select models"
               />
             )}
           </FormField>
 
           <Field>
-            <FieldLabel htmlFor={keyTypeFieldId}>{t("keyDetail.keyEditView.fields.keyType")}</FieldLabel>
+            <FieldLabel htmlFor={keyTypeFieldId}>Key Type</FieldLabel>
             <KeyTypeSelect
               id={keyTypeFieldId}
               value={keyTypeFromRoutes(allowedRoutes)}
@@ -440,15 +436,15 @@ function KeyEditSession({
             control={form.control}
             name="allowed_routes"
             label={labelWithHint(
-              t("keyDetail.keyEditView.fields.allowedRoutes"),
-              t("keyDetail.keyEditView.fields.allowedRoutesHint"),
+              "Allowed Routes",
+              "List of allowed routes for the key (comma-separated). Can be specific routes (e.g., '/chat/completions') or route patterns (e.g., 'llm_api_routes', 'management_routes', '/keys/*'). Leave empty to allow all routes.",
             )}
           >
             {(field) => (
               <Input
                 {...field}
                 value={(field.value as string | undefined) ?? ""}
-                placeholder={t("keyDetail.keyEditView.fields.allowedRoutesPlaceholder")}
+                placeholder="Enter allowed routes (comma-separated). Special values: llm_api_routes, management_routes. Examples: llm_api_routes, /chat/completions, /keys/*. Leave empty to allow all routes"
               />
             )}
           </FormField>
@@ -456,28 +452,24 @@ function KeyEditSession({
           <KeyBudgetNumberField
             control={form.control}
             name="max_budget"
-            label={t("keyDetail.keyEditView.fields.maxBudget")}
-            placeholder={t("keyDetail.keyEditView.fields.maxBudgetPlaceholder")}
+            label="Max Budget (USD)"
+            placeholder="Enter a numerical value"
           />
 
           <KeyBudgetNumberField
             control={form.control}
             name="soft_budget"
-            label={t("keyDetail.keyEditView.fields.softBudget")}
-            placeholder={t("keyDetail.keyEditView.fields.softBudgetPlaceholder")}
+            label="Soft Budget (USD)"
+            placeholder="Get alerts when spend crosses this value, without blocking requests"
           />
 
-          <FormField
-            control={form.control}
-            name="budget_duration"
-            label={t("keyDetail.keyEditView.fields.resetBudget")}
-          >
+          <FormField control={form.control} name="budget_duration" label="Reset Budget">
             {({ value, onChange, id }) => (
               <BudgetDurationDropdown
                 id={id}
                 value={value as string | null}
                 onChange={(next) => onChange(next ?? null)}
-                placeholder={t("keyDetail.keyEditView.fields.resetBudgetPlaceholder")}
+                placeholder="Never resets"
               />
             )}
           </FormField>
@@ -485,8 +477,8 @@ function KeyEditSession({
           <Field>
             <FieldLabel>
               {labelWithHint(
-                t("keyDetail.keyEditView.fields.budgetWindows"),
-                t("keyDetail.keyEditView.fields.budgetWindowsHint"),
+                "Budget Windows",
+                "Set multiple independent budget windows (e.g., hourly $10 AND monthly $200). Each window tracks spend separately and resets on its own schedule.",
               )}
             </FieldLabel>
             <BudgetWindowsEditor value={budgetLimits} onChange={setBudgetLimits} />
@@ -499,14 +491,14 @@ function KeyEditSession({
             onChange={modelBudget.setValue}
             availableModels={availableModels}
             usage={keyData.model_max_budget_usage}
-            hint={t("keyDetail.keyEditView.fields.modelMaxBudgetHint")}
+            hint="Cap spend on individual models, each with its own reset window. Enforced across every request this key makes."
           />
 
           <Field>
             <FieldLabel>
               {labelWithHint(
-                t("keyDetail.keyEditView.fields.budgetFallbacks"),
-                t("keyDetail.keyEditView.fields.budgetFallbacksHint"),
+                "Budget Fallbacks",
+                "When a model exceeds its per-model budget, requests automatically reroute to fallback models instead of failing",
               )}
             </FieldLabel>
             <BudgetFallbacksEditor
@@ -519,7 +511,7 @@ function KeyEditSession({
           {keyOffersEndUserBudget(keyData.metadata) && (
             <Field>
               <FieldLabel htmlFor={endUserBudgetFieldId}>
-                {labelWithHint(t("keyDetail.keyEditView.fields.defaultCustomerBudget"), t(END_USER_BUDGET_HINT))}
+                {labelWithHint("Default Customer Budget", END_USER_BUDGET_HINT)}
               </FieldLabel>
               <EndUserBudgetSelect
                 id={endUserBudgetFieldId}
@@ -537,8 +529,8 @@ function KeyEditSession({
             control={form.control}
             name="throttle_on_budget_exceeded"
             label={labelWithHint(
-              t("keyDetail.keyEditView.fields.throttleOnBudgetExceeded"),
-              t("keyDetail.keyEditView.fields.throttleOnBudgetExceededHint"),
+              "Throttle on budget exceeded",
+              "When this key exceeds its max budget, throttle its TPM/RPM to the globally configured percentage instead of blocking access entirely. Requires budget_exceeded_throttle_percentage in litellm_settings and a TPM/RPM limit on the key.",
             )}
           >
             {({ value, onChange, ref: _ref, ...field }) => (
@@ -550,8 +542,8 @@ function KeyEditSession({
             control={form.control}
             name="enable_prompt_caching"
             label={labelWithHint(
-              t("keyDetail.keyEditView.fields.enablePromptCaching"),
-              t("keyDetail.keyEditView.fields.enablePromptCachingHint"),
+              "Enable Prompt Caching",
+              "Automatically add prompt caching breakpoints (cache_control markers) to requests made with this key, cutting input cost on repeated prompts. Applies to Anthropic and Bedrock Claude models; requests that already set their own cache_control markers are left untouched.",
             )}
           >
             {({ value, onChange, ref: _ref, ...field }) => (
@@ -559,40 +551,28 @@ function KeyEditSession({
             )}
           </FormField>
 
-          <FormField
-            control={form.control}
-            name="max_parallel_requests"
-            label={t("keyDetail.keyEditView.fields.maxParallelRequests")}
-          >
+          <FormField control={form.control} name="max_parallel_requests" label="Max Parallel Requests">
             {({ ref: _ref, ...field }) => <NumericalInput {...field} value={field.value ?? ""} min={0} />}
           </FormField>
 
-          <FormField
-            control={form.control}
-            name="model_tpm_limit"
-            label={t("keyDetail.keyEditView.fields.modelTpmLimit")}
-          >
+          <FormField control={form.control} name="model_tpm_limit" label="Model TPM Limit">
             {(field) => (
               <Textarea
                 {...field}
                 value={(field.value as string | undefined) ?? ""}
                 rows={4}
-                placeholder={codeSamples.models.perModelLimitsJson}
+                placeholder='{"gpt-4": 100, "claude-v1": 200}'
               />
             )}
           </FormField>
 
-          <FormField
-            control={form.control}
-            name="model_rpm_limit"
-            label={t("keyDetail.keyEditView.fields.modelRpmLimit")}
-          >
+          <FormField control={form.control} name="model_rpm_limit" label="Model RPM Limit">
             {(field) => (
               <Textarea
                 {...field}
                 value={(field.value as string | undefined) ?? ""}
                 rows={4}
-                placeholder={codeSamples.models.perModelLimitsJson}
+                placeholder='{"gpt-4": 100, "claude-v1": 200}'
               />
             )}
           </FormField>
@@ -600,7 +580,7 @@ function KeyEditSession({
           <FormField
             control={form.control}
             name="default_estimated_output_tokens"
-            label={labelWithHint(t("keyDetail.keyEditView.fields.estimatedOutputTokens"), estimateTooltip.estimate)}
+            label={labelWithHint("Estimated Output Tokens", estimateTooltip.estimate)}
           >
             {({ ref: _ref, ...field }) => (
               <NumericalInput {...field} value={field.value ?? ""} min={1} step={1} disabled={!canEditEstimates} />
@@ -610,17 +590,14 @@ function KeyEditSession({
           <FormField
             control={form.control}
             name="default_estimated_output_tokens_per_model"
-            label={labelWithHint(
-              t("keyDetail.keyEditView.fields.estimatedOutputTokensPerModel"),
-              estimateTooltip.perModel,
-            )}
+            label={labelWithHint("Estimated Output Tokens Per Model", estimateTooltip.perModel)}
           >
             {(field) => (
               <Textarea
                 {...field}
                 value={(field.value as string | undefined) ?? ""}
                 rows={4}
-                placeholder={codeSamples.models.perModelMaxTokensJson}
+                placeholder='{"gpt-4": 4096}'
                 disabled={!canEditEstimates}
               />
             )}
@@ -629,14 +606,14 @@ function KeyEditSession({
           <Field>
             <FieldLabel>
               {labelWithHint(
-                t("keyDetail.keyEditView.fields.perTagRateLimits"),
-                t("keyDetail.keyEditView.fields.perTagRateLimitsHint"),
+                "Per-Tag Rate Limits",
+                "Scope rate limits to a request tag so each tag (e.g. a cell or group) gets its own RPM counter. Requests without a matching tag fall back to the key-level limit.",
               )}
             </FieldLabel>
             <TagRateLimitEditor value={tagRateLimits} onChange={setTagRateLimits} />
           </Field>
 
-          <FormField control={form.control} name="guardrails" label={t("keyDetail.keyEditView.fields.guardrails")}>
+          <FormField control={form.control} name="guardrails" label="Guardrails">
             {({ value, onChange }) =>
               accessToken ? (
                 <GuardrailSelector
@@ -656,8 +633,8 @@ function KeyEditSession({
               control={form.control}
               name="disable_global_guardrails"
               label={labelWithHint(
-                t("keyDetail.keyEditView.fields.disableGlobalGuardrails"),
-                t("keyDetail.keyEditView.fields.disableGlobalGuardrailsHint"),
+                "Disable Global Guardrails",
+                "When enabled, this key will bypass any guardrails configured to run on every request (global guardrails)",
               )}
             >
               {({ value, onChange, ref: _ref, ...field }) => (
@@ -670,10 +647,7 @@ function KeyEditSession({
             <FormField
               control={form.control}
               name="policies"
-              label={labelWithHint(
-                t("keyDetail.keyEditView.fields.policies"),
-                t("keyDetail.keyEditView.fields.policiesHint"),
-              )}
+              label={labelWithHint("Policies", "Apply policies to this key to control guardrails and other settings")}
             >
               {({ value, onChange }) =>
                 accessToken ? (
@@ -690,14 +664,14 @@ function KeyEditSession({
             </FormField>
           )}
 
-          <FormField control={form.control} name="tags" label={t("keyDetail.keyEditView.fields.tags")}>
+          <FormField control={form.control} name="tags" label="Tags">
             {({ value, onChange, id }) => (
               <TagsInput
                 id={id}
                 value={(value as string[] | undefined) ?? []}
                 onValueChange={onChange}
                 options={Object.values(tagsList).map((tag) => ({ value: tag.name, label: tag.name }))}
-                placeholder={t("keyDetail.keyEditView.fields.tagsPlaceholder")}
+                placeholder="Select or enter tags"
               />
             )}
           </FormField>
@@ -706,14 +680,7 @@ function KeyEditSession({
             <FormField
               control={form.control}
               name="prompts"
-              label={
-                premiumUser
-                  ? t("keyDetail.keyEditView.fields.prompts")
-                  : labelWithHint(
-                      t("keyDetail.keyEditView.fields.prompts"),
-                      t("keyDetail.keyEditView.fields.promptsPremiumHint"),
-                    )
-              }
+              label={premiumUser ? "Prompts" : labelWithHint("Prompts", "Setting prompts by key is a premium feature")}
             >
               {({ value, onChange, id }) => (
                 <TagsInput
@@ -725,8 +692,8 @@ function KeyEditSession({
                   placeholder={currentValuePlaceholder(
                     premiumUser,
                     keyData.metadata?.prompts,
-                    t("keyDetail.keyEditView.fields.promptsPremiumPlaceholder"),
-                    t("keyDetail.keyEditView.fields.promptsPlaceholder"),
+                    "Premium feature - Upgrade to set prompts by key",
+                    "Select or enter prompts",
                   )}
                 />
               )}
@@ -737,15 +704,15 @@ function KeyEditSession({
             control={form.control}
             name="access_group_ids"
             label={labelWithHint(
-              t("keyDetail.keyEditView.fields.accessGroups"),
-              t("keyDetail.keyEditView.fields.accessGroupsHint"),
+              "Access Groups",
+              "Assign access groups to this key. Access groups control which models, MCP servers, and agents this key can use",
             )}
           >
             {({ value, onChange }) => (
               <AccessGroupSelector
                 value={value as string[] | undefined}
                 onChange={onChange}
-                placeholder={t("keyDetail.keyEditView.fields.accessGroupsPlaceholder")}
+                placeholder="Select access groups (optional)"
               />
             )}
           </FormField>
@@ -755,10 +722,10 @@ function KeyEditSession({
             name="allowed_passthrough_routes"
             label={
               premiumUser
-                ? t("keyDetail.keyEditView.fields.allowedPassThroughRoutes")
+                ? "Allowed Pass Through Routes"
                 : labelWithHint(
-                    t("keyDetail.keyEditView.fields.allowedPassThroughRoutes"),
-                    t("keyDetail.keyEditView.fields.allowedPassThroughRoutesPremiumHint"),
+                    "Allowed Pass Through Routes",
+                    "Setting allowed pass through routes by key is a premium feature",
                   )
             }
           >
@@ -770,37 +737,33 @@ function KeyEditSession({
                 placeholder={currentValuePlaceholder(
                   premiumUser,
                   keyData.metadata?.allowed_passthrough_routes,
-                  t("keyDetail.keyEditView.fields.allowedPassThroughRoutesPremiumPlaceholder"),
-                  t("keyDetail.keyEditView.fields.allowedPassThroughRoutesPlaceholder"),
+                  "Premium feature - Upgrade to set allowed pass through routes by key",
+                  "Select or enter allowed pass through routes",
                 )}
                 disabled={!premiumUser}
               />
             )}
           </FormField>
 
-          <FormField control={form.control} name="vector_stores" label={t("keyDetail.keyEditView.fields.vectorStores")}>
+          <FormField control={form.control} name="vector_stores" label="Vector Stores">
             {({ value, onChange }) => (
               <VectorStoreSelector
                 onChange={onChange}
                 value={value as string[] | undefined}
                 accessToken={accessToken || ""}
-                placeholder={t("keyDetail.keyEditView.fields.vectorStoresPlaceholder")}
+                placeholder="Select vector stores"
               />
             )}
           </FormField>
 
-          <FormField
-            control={form.control}
-            name="mcp_servers_and_groups"
-            label={t("keyDetail.keyEditView.fields.mcpServers")}
-          >
+          <FormField control={form.control} name="mcp_servers_and_groups" label="MCP Servers / Access Groups">
             {({ value, onChange }) => (
               <MCPServerSelector
                 onChange={onChange}
                 value={value as McpServersAndGroups | undefined}
                 accessToken={accessToken || ""}
                 {...mcpScope}
-                placeholder={t("keyDetail.keyEditView.fields.mcpServersPlaceholder")}
+                placeholder="Select MCP servers or access groups (optional)"
                 allowNoMcpServers
               />
             )}
@@ -823,10 +786,10 @@ function KeyEditSession({
             control={form.control}
             name="organization_id"
             label={labelWithHint(
-              t("keyDetail.keyEditView.fields.organization"),
-              t("keyDetail.keyEditView.fields.organizationHint"),
+              "Organization",
+              "The organization this key belongs to. Selecting an organization filters the available teams.",
             )}
-            description={hasProject ? t("keyDetail.keyEditView.fields.organizationLocked") : undefined}
+            description={hasProject ? "Organization is locked because this key belongs to a project" : undefined}
           >
             {({ value, onChange, id }) => (
               <OrganizationDropdown
@@ -834,7 +797,7 @@ function KeyEditSession({
                 value={value}
                 organizations={organizations}
                 loading={isOrganizationsLoading}
-                disabled={!canChangeOrganization}
+                disabled={userRole !== "Admin" || hasProject}
                 onChange={(orgId) => handleOrganizationChange(onChange, orgId)}
               />
             )}
@@ -843,8 +806,8 @@ function KeyEditSession({
           <FormField
             control={form.control}
             name="team_id"
-            label={t("keyDetail.keyEditView.fields.team")}
-            description={hasProject ? t("keyDetail.keyEditView.fields.teamLocked") : undefined}
+            label="Team"
+            description={hasProject ? "Team is locked because this key belongs to a project" : undefined}
           >
             {({ value, onChange, id }) => (
               <SearchSelect
@@ -853,8 +816,8 @@ function KeyEditSession({
                 onValueChange={(teamId) => handleTeamChange(onChange, teamId)}
                 disabled={hasProject}
                 inputId={id}
-                placeholder={t("keyDetail.keyEditView.fields.teamPlaceholder")}
-                emptyText={t("keyDetail.keyEditView.fields.teamEmpty")}
+                placeholder="Select team"
+                emptyText="No teams found"
               />
             )}
           </FormField>
@@ -872,7 +835,7 @@ function KeyEditSession({
           )}
 
           <Field>
-            <FieldLabel>{t("keyDetail.keyEditView.fields.routerSettings")}</FieldLabel>
+            <FieldLabel>Router Settings</FieldLabel>
             <RouterSettingsAccordion
               ref={routerSettingsRef}
               accessToken={accessToken || ""}
@@ -881,11 +844,7 @@ function KeyEditSession({
             />
           </Field>
 
-          <FormField
-            control={form.control}
-            name="logging_settings"
-            label={t("keyDetail.keyEditView.fields.loggingSettings")}
-          >
+          <FormField control={form.control} name="logging_settings" label="Logging Settings">
             {({ value, onChange }) => (
               <EditLoggingSettings
                 value={(value as unknown[] | undefined) ?? []}
@@ -920,11 +879,11 @@ function KeyEditSession({
         <div className="sticky z-chrome bg-background p-4 border-t border-border -bottom-6 -inset-x-6">
           <div className="flex justify-end items-center gap-2">
             <Button type="button" variant="secondary" onClick={onCancel} disabled={isKeySaving}>
-              {t("keyDetail.keyEditView.actions.cancel")}
+              Cancel
             </Button>
             <Button type="submit" disabled={isKeySaving} aria-busy={isKeySaving}>
               {isKeySaving && <UiLoadingSpinner className="size-4" />}
-              {t("keyDetail.keyEditView.actions.save")}
+              Save Changes
             </Button>
           </div>
         </div>

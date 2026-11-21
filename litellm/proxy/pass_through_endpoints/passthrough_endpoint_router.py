@@ -1,5 +1,4 @@
 import json
-import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
@@ -13,24 +12,13 @@ from litellm.integrations.vector_store_integrations.vector_store_pre_call_hook i
 )
 from litellm.litellm_core_utils.credential_accessor import CredentialAccessor
 from litellm.llms.azure.ptu_capacity import is_str_keyed_mapping
-from litellm.secret_managers.main import (
-    GOOGLE_OIDC_SECRET_PREFIX,
-    UnresolvableSecretReference,
-    get_secret_str,
-    resolve_local_oidc_reference,
-)
+from litellm.secret_managers.main import get_secret_str
 from litellm.types.llms.vertex_ai import VERTEX_CREDENTIALS_TYPES
 from litellm.types.passthrough_endpoints.vertex_ai import VertexPassThroughCredentials
 from litellm.types.router import DeploymentTypedDict, LiteLLMParamsTypedDict
 
 if TYPE_CHECKING:
     from litellm.router import Router
-
-
-@dataclass(frozen=True, slots=True)
-class _PassThroughCredentials:
-    api_key: str
-    api_base: str | None
 
 
 def _get_proxy_llm_router() -> "Router | None":
@@ -58,25 +46,28 @@ def _credential_identity(credentials: VERTEX_CREDENTIALS_TYPES | None) -> str | 
     return credentials
 
 
+# Network I/O prohibited; get_credentials() is synchronous inside async routes.
+# oidc/env_path/ is excluded because it bypasses the oidc/file/ credential-directory allowlist.
+_LOCAL_OIDC_PREFIXES: Final = ("oidc/file/", "oidc/env/")
+
+
 def _resolve_oidc_reference(credential: str | None) -> str | None:
-    if credential is None:
-        return None
-    if credential.startswith(GOOGLE_OIDC_SECRET_PREFIX):
+    """Resolve local ``oidc/...`` credentials on every call to pick up rotated tokens."""
+    if credential is None or not credential.startswith(_LOCAL_OIDC_PREFIXES):
+        return credential
+    try:
+        return get_secret_str(credential)
+    except (OSError, ValueError) as exc:
         raise HTTPException(
             status_code=401,
-            detail=(
-                "pass-through credential oidc/google secret reference could not be resolved: pass-through routes "
-                "do not fetch Google ID tokens. Use a static key, oidc/file/<absolute path> or oidc/env/<VARIABLE_NAME>."
-            ),
-        )
-    match resolve_local_oidc_reference(credential):
-        case UnresolvableSecretReference(kind=kind, reason=reason):
-            raise HTTPException(
-                status_code=401,
-                detail=f"pass-through credential {kind} secret reference could not be resolved: {reason}",
-            )
-        case str() as resolved:
-            return resolved
+            detail=f"pass-through credential {credential} could not be resolved: {exc}",
+        ) from exc
+
+
+@dataclass(frozen=True, slots=True)
+class _PassThroughCredentials:
+    api_key: str
+    api_base: str | None
 
 
 class PassthroughEndpointRouter:
@@ -97,13 +88,12 @@ class PassthroughEndpointRouter:
         custom_llm_provider: str,
         region_name: str | None,
     ) -> str | None:
-        deployment_credentials: Final = self._get_deployment_credentials(
+        deployment_api_key: Final = self._get_deployment_api_key(
             custom_llm_provider=custom_llm_provider,
             region_name=region_name,
-            include_team_deployments=True,
         )
-        if deployment_credentials is not None:
-            return _resolve_oidc_reference(deployment_credentials.api_key)
+        if deployment_api_key is not None:
+            return _resolve_oidc_reference(deployment_api_key)
         verbose_router_logger.debug(
             "No pass-through deployment credentials found for %s, looking for env variable", custom_llm_provider
         )
@@ -112,69 +102,52 @@ class PassthroughEndpointRouter:
         )
         return _resolve_oidc_reference(get_secret_str(_env_variable_name))
 
-    def get_proxy_wide_credentials(self, custom_llm_provider: str) -> _PassThroughCredentials | None:
-        deployment_credentials: Final = self._get_deployment_credentials(
-            custom_llm_provider=custom_llm_provider,
-            region_name=None,
-            include_team_deployments=False,
-        )
-        api_key: Final = _resolve_oidc_reference(
-            deployment_credentials.api_key
-            if deployment_credentials is not None
-            else get_secret_str(
-                self._get_default_env_variable_name_passthrough_endpoint(custom_llm_provider=custom_llm_provider)
-            )
-        )
-        if not api_key:
-            return None
-        return _PassThroughCredentials(
-            api_key=api_key,
-            api_base=deployment_credentials.api_base if deployment_credentials is not None else None,
-        )
-
     def get_proxy_wide_deployment_credentials(self, custom_llm_provider: str) -> _PassThroughCredentials | None:
-        deployment_credentials: Final = self._get_deployment_credentials(
-            custom_llm_provider=custom_llm_provider,
-            region_name=None,
-            include_team_deployments=False,
-        )
-        if deployment_credentials is None:
-            return None
-        api_key: Final = _resolve_oidc_reference(deployment_credentials.api_key)
-        if not api_key:
-            return None
-        return _PassThroughCredentials(api_key=api_key, api_base=deployment_credentials.api_base)
-
-    def has_credentials(self, custom_llm_provider: str) -> bool:
-        if (
-            self._get_deployment_credentials(
-                custom_llm_provider=custom_llm_provider, region_name=None, include_team_deployments=True
-            )
-            is not None
-        ):
-            return True
-        env_variable_name: Final = self._get_default_env_variable_name_passthrough_endpoint(
-            custom_llm_provider=custom_llm_provider,
-        )
-        return bool(os.environ.get(env_variable_name))
-
-    def _get_deployment_credentials(
-        self,
-        custom_llm_provider: str,
-        region_name: str | None,
-        include_team_deployments: bool,
-    ) -> _PassThroughCredentials | None:
         llm_router: Final = self.llm_router_getter()
         if llm_router is None:
             return None
-        deployments: Final = llm_router.registry().deployments() or ()
+        for deployment in llm_router.get_model_list() or ():
+            if _is_team_deployment(deployment):
+                continue
+            litellm_params: LiteLLMParamsTypedDict = deployment["litellm_params"]
+            api_key: str | None = self._resolve_matching_deployment_api_key(
+                litellm_params=litellm_params,
+                custom_llm_provider=custom_llm_provider,
+                region_name=None,
+            )
+            if api_key is None:
+                continue
+            resolved_api_key: str | None = _resolve_oidc_reference(api_key)
+            if not resolved_api_key:
+                return None
+            return _PassThroughCredentials(
+                api_key=resolved_api_key,
+                api_base=self._resolve_matching_deployment_api_base(litellm_params),
+            )
+        return None
+
+    def _resolve_matching_deployment_api_base(self, litellm_params: LiteLLMParamsTypedDict) -> str | None:
+        credential_name: Final = litellm_params.get("litellm_credential_name")
+        credential_values: Final = (
+            CredentialAccessor.get_credential_values(credential_name) if credential_name is not None else None
+        )
+        return _get_str_value(credential_values, "api_base") or litellm_params.get("api_base")
+
+    def _get_deployment_api_key(
+        self,
+        custom_llm_provider: str,
+        region_name: str | None,
+    ) -> str | None:
+        llm_router: Final = self.llm_router_getter()
+        if llm_router is None:
+            return None
+        deployments: Final = llm_router.get_model_list() or ()
         return next(
             (
-                credentials
+                api_key
                 for deployment in deployments
-                if (include_team_deployments or not _is_team_deployment(deployment))
-                and (
-                    credentials := self._resolve_matching_deployment_credentials(
+                if (
+                    api_key := self._resolve_matching_deployment_api_key(
                         litellm_params=deployment["litellm_params"],
                         custom_llm_provider=custom_llm_provider,
                         region_name=region_name,
@@ -185,12 +158,12 @@ class PassthroughEndpointRouter:
             None,
         )
 
-    def _resolve_matching_deployment_credentials(
+    def _resolve_matching_deployment_api_key(
         self,
         litellm_params: LiteLLMParamsTypedDict,
         custom_llm_provider: str,
         region_name: str | None,
-    ) -> _PassThroughCredentials | None:
+    ) -> str | None:
         if litellm_params.get("use_in_pass_through") is not True:
             return None
         if self._get_deployment_provider(litellm_params) != custom_llm_provider:
@@ -206,8 +179,7 @@ class PassthroughEndpointRouter:
         )
         if deployment_region != region_name:
             return None
-        api_key: Final = _get_str_value(credential_values, "api_key") or litellm_params.get("api_key")
-        return _PassThroughCredentials(api_key=api_key, api_base=api_base) if api_key is not None else None
+        return _get_str_value(credential_values, "api_key") or litellm_params.get("api_key")
 
     def _get_deployment_provider(self, litellm_params: LiteLLMParamsTypedDict) -> str | None:
         model: Final = litellm_params.get("model")
@@ -237,7 +209,7 @@ class PassthroughEndpointRouter:
             return None
         resolved: Final = tuple(
             (deployment, credentials)
-            for deployment in (llm_router.registry().deployments() or ())
+            for deployment in (llm_router.get_model_list() or ())
             if (credentials := self._resolve_vertex_deployment_credentials(deployment["litellm_params"])) is not None
         )
         matched: Final = next(

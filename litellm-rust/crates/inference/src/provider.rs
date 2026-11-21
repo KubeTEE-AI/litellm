@@ -2,7 +2,7 @@ use litellm_core_utils::get_llm_provider_logic::{
     CustomLlmProvider, LlmProviders, get_custom_llm_provider,
 };
 
-use crate::error::Error;
+use crate::error::RouteError as Error;
 
 #[derive(Debug)]
 pub struct ResolvedProvider<'a> {
@@ -25,7 +25,11 @@ pub fn resolve_llm_provider<'a>(
                 custom_llm_provider: provider,
             })
         })
-        .ok_or(Error::UnresolvedProvider { route })?;
+        .ok_or_else(|| {
+            Error::InvalidProvider(format!(
+                "unable to resolve custom_llm_provider for {route} request"
+            ))
+        })?;
     let provider = custom_llm_provider
         .parse()
         .map_err(|_| Error::InvalidProvider(custom_llm_provider.to_string()))?;

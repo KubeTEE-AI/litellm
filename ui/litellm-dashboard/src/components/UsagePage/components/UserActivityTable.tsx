@@ -1,5 +1,4 @@
 import React from "react";
-import { Trans, useTranslation } from "react-i18next";
 
 import { formatCompact } from "@/app/(dashboard)/usage/_components/components/overview/overviewData";
 
@@ -41,24 +40,23 @@ const UserActivityTable: React.FC<UserActivityTableProps> = ({
   onRetryFirstPage,
   onRetryNextPage,
 }) => {
-  const { t } = useTranslation();
   const firstPageFailed = failed && rows.length === 0;
   const body = (() => {
     if (firstPageFailed) {
       return (
         <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-          {t("usage.userActivity.firstPageFailed")}{" "}
+          Could not load users for this range.{" "}
           <button type="button" className="font-medium text-foreground underline" onClick={onRetryFirstPage}>
-            {t("usage.userActivity.retry")}
+            Retry
           </button>
         </p>
       );
     }
     if (loading) {
-      return <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t("usage.userActivity.loading")}</p>;
+      return <p className="px-4 py-8 text-center text-sm text-muted-foreground">Loading users...</p>;
     }
     if (rows.length === 0) {
-      return <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t("usage.userActivity.empty")}</p>;
+      return <p className="px-4 py-8 text-center text-sm text-muted-foreground">No user activity in this date range</p>;
     }
     return (
       <div className="overflow-x-auto">
@@ -67,12 +65,12 @@ const UserActivityTable: React.FC<UserActivityTableProps> = ({
             aria-hidden="true"
             className={`${USER_ROW_GRID} border-y bg-muted/40 py-2 pl-10 pr-4 text-xs font-medium text-muted-foreground`}
           >
-            <span>{t("usage.userActivity.columns.user")}</span>
-            <span className="text-right">{t("usage.userActivity.columns.spend")}</span>
-            <span className="text-right">{t("usage.userActivity.columns.requests")}</span>
-            <span className="text-right">{t("usage.userActivity.columns.successful")}</span>
-            <span className="text-right">{t("usage.userActivity.columns.failed")}</span>
-            <span className="text-right">{t("usage.userActivity.columns.totalTokens")}</span>
+            <span>User</span>
+            <span className="text-right">Spend</span>
+            <span className="text-right">Requests</span>
+            <span className="text-right">Successful</span>
+            <span className="text-right">Failed</span>
+            <span className="text-right">Total tokens</span>
           </div>
           <ul>
             {rows.map((row) => (
@@ -109,28 +107,24 @@ const UserActivityTable: React.FC<UserActivityTableProps> = ({
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
-          <Trans
-            i18nKey="usage.userActivity.userCount"
-            count={total}
-            components={{ value: <>{total.toLocaleString()}</> }}
-          />
+          {total.toLocaleString()} users
         </span>
       </div>
       <div>{body}</div>
       {showFooter && (
         <div className="border-t px-4 py-2.5 text-xs text-muted-foreground">
-          {loadingMore && <p>{t("usage.userActivity.loadingMore")}</p>}
+          {loadingMore && <p>Loading more users...</p>}
           {failed && !firstPageFailed && (
             <p>
-              {t("usage.userActivity.loadMoreFailed")}{" "}
+              Could not load more users.{" "}
               <button type="button" className="font-medium text-foreground underline" onClick={onRetryNextPage}>
-                {t("usage.userActivity.retry")}
+                Retry
               </button>
             </p>
           )}
           {canLoadMore && (
             <button type="button" className="font-medium text-foreground underline" onClick={onLoadMore}>
-              {t("usage.userActivity.loadMore")}
+              Load more
             </button>
           )}
         </div>

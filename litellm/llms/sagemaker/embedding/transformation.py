@@ -4,8 +4,7 @@ Translate from OpenAI's `/v1/embeddings` to Sagemaker's `/invoke`
 In the Huggingface TGI format.
 """
 
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
@@ -16,7 +15,6 @@ from httpx._models import Headers, Response
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.base_llm.embedding.transformation import BaseEmbeddingConfig
 from litellm.llms.voyage.embedding.transformation import VoyageEmbeddingConfig
-from litellm.types.llms.openai import AllMessageValues
 from litellm.types.utils import EmbeddingResponse, Usage
 
 from ..common_utils import SagemakerError
@@ -160,7 +158,7 @@ class SagemakerEmbeddingConfig(BaseEmbeddingConfig):
         self,
         headers: dict,
         model: str,
-        messages: Sequence[AllMessageValues],
+        messages: list[Any],
         optional_params: dict,
         litellm_params: dict,
         api_key: str | None = None,

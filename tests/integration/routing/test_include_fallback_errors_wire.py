@@ -61,10 +61,10 @@ _PROVIDERS: Final = MappingProxyType(
 )
 _STREAMING: Final = (pytest.param(False, id="non-stream"), pytest.param(True, id="stream"))
 _NON_BOOLEAN_FLAGS: Final = (
-    pytest.param(1, id="int"),
-    pytest.param("", id="empty-string"),
-    pytest.param([], id="list"),
-    pytest.param("x" * 5120, id="five-kilobytes"),
+    pytest.param(1, True, id="int"),
+    pytest.param("", False, id="empty-string"),
+    pytest.param([], False, id="list"),
+    pytest.param("x" * 5120, True, id="five-kilobytes"),
 )
 _OPENAI_UNAUTHORIZED: Final = Reply(
     status=401,
@@ -326,8 +326,10 @@ def test_default_gateway_keeps_the_flag_off_the_wire_on_a_fallback(
         assert observed.attempted == "1", observed
 
 
-@pytest.mark.parametrize("value", _NON_BOOLEAN_FLAGS)
-def test_default_gateway_keeps_a_non_boolean_flag_off_the_wire(registered: _Registered, value: JsonValue) -> None:
+@pytest.mark.parametrize(("value", "errors_reported"), _NON_BOOLEAN_FLAGS)
+def test_default_gateway_keeps_a_non_boolean_flag_off_the_wire(
+    registered: _Registered, value: JsonValue, errors_reported: bool
+) -> None:
     sent: Final = _send(
         registered.gateway,
         _PATHS["chat"],
@@ -495,9 +497,9 @@ def test_exposed_chat_without_a_fallback_keeps_the_flag_off_the_wire_and_the_err
     assert observed.errors_header is None, observed
 
 
-@pytest.mark.parametrize("value", _NON_BOOLEAN_FLAGS)
-def test_exposed_chat_keeps_a_non_boolean_flag_off_the_wire_and_reports_no_errors(
-    exposed: _Exposed, value: JsonValue
+@pytest.mark.parametrize(("value", "errors_reported"), _NON_BOOLEAN_FLAGS)
+def test_exposed_chat_keeps_a_non_boolean_flag_off_the_wire_and_the_errors_header_follows_its_truthiness(
+    exposed: _Exposed, value: JsonValue, errors_reported: bool
 ) -> None:
     sent: Final = _send(
         exposed.proxy,
@@ -513,7 +515,7 @@ def test_exposed_chat_keeps_a_non_boolean_flag_off_the_wire_and_reports_no_error
     assert observed.leaks == (), observed
     assert observed.hit == (_EXPOSED_OPENAI_PRIMARY, _EXPOSED_OPENAI_BACKUP), observed
     assert observed.attempted == "1", observed
-    assert observed.errors_header is None, observed
+    assert _errors_mention_the_outage(observed.errors_header) is errors_reported, observed
 
 
 def test_exposed_proxy_rejects_an_unauthenticated_flagged_request_before_the_wire(exposed: _Exposed) -> None:

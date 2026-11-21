@@ -26,18 +26,12 @@ export const testQueryClient = new QueryClient({
 interface ProviderOptions {
   searchParams?: string | Record<string, string> | URLSearchParams;
   onUrlUpdate?: OnUrlUpdateFunction;
-  resetUrlUpdateQueueOnMount?: boolean;
 }
 
 export const renderWithProviders = (ui: React.ReactElement, options?: RenderOptions & ProviderOptions) => {
-  const { searchParams, onUrlUpdate, resetUrlUpdateQueueOnMount, ...renderOptions } = options ?? {};
+  const { searchParams, onUrlUpdate, ...renderOptions } = options ?? {};
   const Providers: React.FC<PropsWithChildren> = ({ children }) => (
-    <NuqsTestingAdapter
-      searchParams={searchParams}
-      onUrlUpdate={onUrlUpdate}
-      resetUrlUpdateQueueOnMount={resetUrlUpdateQueueOnMount}
-      hasMemory
-    >
+    <NuqsTestingAdapter searchParams={searchParams} onUrlUpdate={onUrlUpdate} hasMemory>
       <QueryClientProvider client={testQueryClient}>
         <HotkeysProvider>{children}</HotkeysProvider>
       </QueryClientProvider>

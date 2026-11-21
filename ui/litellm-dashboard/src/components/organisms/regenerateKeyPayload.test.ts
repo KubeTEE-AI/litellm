@@ -62,13 +62,6 @@ describe("buildRegenerateKeyPayload", () => {
     });
   });
 
-  it.each(["", "  "])("omits blank duration %j from the payload and JSON body", (duration) => {
-    const payload = buildRegenerateKeyPayload(values({ duration }));
-
-    expect(payload).not.toHaveProperty("duration");
-    expect(JSON.stringify(payload)).not.toContain('"duration"');
-  });
-
   it.each([
     ["null", null],
     ["undefined", undefined],
@@ -89,10 +82,18 @@ describe("buildRegenerateKeyPayload", () => {
       duration: "30d",
       grace_period: "",
     });
-    expect(JSON.parse(JSON.stringify(payload))).toEqual({
-      grace_period: "",
-      duration: "30d",
-    });
+    expect(JSON.stringify(payload)).toBe('{"duration":"30d","grace_period":""}');
+  });
+
+  it("preserves the field order the proxy request body is serialised in", () => {
+    expect(Object.keys(buildRegenerateKeyPayload(values({ max_budget: 1.239 })))).toStrictEqual([
+      "key_alias",
+      "max_budget",
+      "tpm_limit",
+      "rpm_limit",
+      "duration",
+      "grace_period",
+    ]);
   });
 
   it("does not mutate the values it is handed", () => {

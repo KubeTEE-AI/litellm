@@ -1,6 +1,5 @@
 import { Info } from "lucide-react";
 import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { AUTH_TYPE, OAUTH_FLOW } from "@/components/mcp_tools/types";
@@ -36,7 +35,6 @@ const OpenAPIFormSection: React.FC<OpenAPIFormSectionProps> = ({
   onLogoUrlChange,
   onOAuthDocsUrlChange,
 }) => {
-  const { t } = useTranslation();
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
 
   const handlePresetSelect = (entry: OpenAPIRegistryEntry) => {
@@ -70,15 +68,15 @@ const OpenAPIFormSection: React.FC<OpenAPIFormSectionProps> = ({
       <MountedFormField
         label={
           <span className="text-sm font-medium text-foreground flex items-center">
-            {t("mcpServers.openApiFormSection.specUrl.label")}
-            <SimpleTooltip content={t("mcpServers.openApiFormSection.specUrl.tooltip")}>
+            OpenAPI Spec URL
+            <SimpleTooltip content="URL to an OpenAPI specification (JSON or YAML). MCP tools will be automatically generated from the API endpoints defined in the spec.">
               <Info className="ml-2 size-4 text-info hover:text-info/80 cursor-help" />
             </SimpleTooltip>
           </span>
         }
         name="spec_path"
         required
-        rules={{ validate: { required: requiredRule(t("mcpServers.openApiFormSection.specUrl.required")) } }}
+        rules={{ validate: { required: requiredRule("Please enter an OpenAPI spec URL") } }}
       >
         {(control) => (
           <Input

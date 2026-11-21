@@ -1,5 +1,4 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
@@ -88,7 +87,6 @@ const ComplexityRouterAdvancedSections: React.FC<ComplexityRouterAdvancedSection
   tierRows,
   customTierSet,
 }) => {
-  const { t } = useTranslation();
   const classifierType = effectiveClassifierType(value);
   const classificationProps = {
     advancedOnly: true,
@@ -106,11 +104,7 @@ const ComplexityRouterAdvancedSections: React.FC<ComplexityRouterAdvancedSection
       ? [
           {
             key: "classifier",
-            label: (
-              <strong className="text-foreground font-semibold">
-                {t("addModel.complexityRouterAdvancedSections.sections.classifierTuning")}
-              </strong>
-            ),
+            label: <strong className="text-foreground font-semibold">Classifier tuning</strong>,
             children: (
               <ForecastClassifierConfig
                 section="advanced"
@@ -127,11 +121,7 @@ const ComplexityRouterAdvancedSections: React.FC<ComplexityRouterAdvancedSection
       ? [
           {
             key: "classifier",
-            label: (
-              <strong className="text-foreground font-semibold">
-                {t("addModel.complexityRouterAdvancedSections.sections.classificationMethod")}
-              </strong>
-            ),
+            label: <strong className="text-foreground font-semibold">Classification Method</strong>,
             children: <ClassificationMethodConfig {...classificationProps} section="classifier" />,
           },
         ]
@@ -140,126 +130,78 @@ const ComplexityRouterAdvancedSections: React.FC<ComplexityRouterAdvancedSection
       ? [
           {
             key: "heuristic",
-            label: (
-              <strong className="text-foreground font-semibold">
-                {t("addModel.complexityRouterAdvancedSections.sections.heuristicTuning")}
-              </strong>
-            ),
+            label: <strong className="text-foreground font-semibold">Heuristic tuning</strong>,
             children: <ClassificationMethodConfig {...classificationProps} section="heuristic" />,
           },
         ]
       : []),
     {
       key: "adaptive",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.adaptiveRouting")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Adaptive Routing</strong>,
       children: (
-        <Restricted by={restrictedBy(value, "adaptive", t)}>
+        <Restricted by={restrictedBy(value, "adaptive")}>
           <AdaptiveRoutingConfig value={value} onChange={onChange} />
         </Restricted>
       ),
     },
     {
       key: "affinity",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.affinity")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Affinity</strong>,
       children: <AffinityControls value={value} onChange={onChange} />,
     },
     {
       key: "cache-aware",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.cacheAwareRouting")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Cache-aware routing</strong>,
       children: <CacheAwareRoutingConfig value={value} onChange={onChange} />,
     },
     {
       key: "modality",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.modalityRouting")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Modality Routing</strong>,
       children: <ModalityRoutingControls value={value} onChange={onChange} />,
     },
     {
       key: "plan-mode",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.planModeOverride")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Plan-Mode Override</strong>,
       children: (
         <PlanModeOverrideControls value={value} onChange={onChange} planModeTierOptions={planModeTierOptions} />
       ),
     },
     {
       key: "housekeeping",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.housekeepingRouting")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Housekeeping Routing</strong>,
       children: <HousekeepingRoutingControls value={value} onChange={onChange} />,
     },
     {
       key: "reminder-markers",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.ignoreCustomTags")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Ignore Custom Tags</strong>,
       children: <ReminderMarkers value={value} onChange={onChange} showValidationErrors={showValidationErrors} />,
     },
     {
       key: "context-window",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.contextWindowEscalation")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Context Window Escalation</strong>,
       children: <ContextWindowEscalationConfig value={value} onChange={onChange} />,
     },
     {
       key: "stall-escalation",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.stalledTaskEscalation")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Stalled Task Escalation</strong>,
       children: (
-        <Restricted by={restrictedBy(value, "stallEscalation", t)}>
+        <Restricted by={restrictedBy(value, "stallEscalation")}>
           <StallEscalationConfig value={value} onChange={onChange} />
         </Restricted>
       ),
     },
     {
       key: "response",
-      label: (
-        <strong className="text-foreground font-semibold">
-          {t("addModel.complexityRouterAdvancedSections.sections.responseFormat")}
-        </strong>
-      ),
+      label: <strong className="text-foreground font-semibold">Response Format</strong>,
       children: <ResponseFormatControls value={value} onChange={onChange} />,
     },
     ...(onEscalationKeywordsChange
       ? [
           {
             key: "escalation",
-            label: (
-              <strong className="text-foreground font-semibold">
-                {t("addModel.complexityRouterAdvancedSections.sections.escalationKeywords")}
-              </strong>
-            ),
+            label: <strong className="text-foreground font-semibold">Escalation Keywords</strong>,
             children: (
-              <Restricted by={restrictedBy(value, "escalation", t)}>
+              <Restricted by={restrictedBy(value, "escalation")}>
                 <EscalationKeywords keywords={escalationKeywords} onChange={onEscalationKeywordsChange} />
               </Restricted>
             ),
@@ -270,11 +212,7 @@ const ComplexityRouterAdvancedSections: React.FC<ComplexityRouterAdvancedSection
       ? [
           {
             key: "compression",
-            label: (
-              <strong className="text-foreground font-semibold">
-                {t("addModel.complexityRouterAdvancedSections.sections.compression")}
-              </strong>
-            ),
+            label: <strong className="text-foreground font-semibold">Compression</strong>,
             children: <CompressionControls value={autoRouterCompression} onChange={onAutoRouterCompressionChange} />,
           },
         ]
@@ -283,11 +221,7 @@ const ComplexityRouterAdvancedSections: React.FC<ComplexityRouterAdvancedSection
       ? [
           {
             key: "keyword-semantic",
-            label: (
-              <strong className="text-foreground font-semibold">
-                {t("addModel.complexityRouterAdvancedSections.sections.keywordSemanticMatching")}
-              </strong>
-            ),
+            label: <strong className="text-foreground font-semibold">Keyword/Semantic Matching</strong>,
             children: (
               <>
                 {onKeywordTierRulesChange && (
@@ -319,16 +253,11 @@ const ComplexityRouterAdvancedSections: React.FC<ComplexityRouterAdvancedSection
   ];
 
   const groups = [
-    { label: t("addModel.complexityRouterAdvancedSections.groups.heuristicTuning"), keys: ["heuristic"] },
+    { label: "Heuristic tuning", keys: ["heuristic"] },
+    { label: usesLlmClassifier(classifierType) ? "LLM tuning" : "Classifier tuning", keys: ["classifier"] },
+    { label: "Request preprocessing", keys: ["reminder-markers"] },
     {
-      label: usesLlmClassifier(classifierType)
-        ? t("addModel.complexityRouterAdvancedSections.groups.llmTuning")
-        : t("addModel.complexityRouterAdvancedSections.groups.classifierTuning"),
-      keys: ["classifier"],
-    },
-    { label: t("addModel.complexityRouterAdvancedSections.groups.requestPreprocessing"), keys: ["reminder-markers"] },
-    {
-      label: t("addModel.complexityRouterAdvancedSections.groups.routingRulesAndRecovery"),
+      label: "Routing rules and recovery",
       keys: [
         "modality",
         "plan-mode",
@@ -339,11 +268,8 @@ const ComplexityRouterAdvancedSections: React.FC<ComplexityRouterAdvancedSection
         "keyword-semantic",
       ],
     },
-    {
-      label: t("addModel.complexityRouterAdvancedSections.groups.sessionsAndEfficiency"),
-      keys: ["affinity", "adaptive", "cache-aware", "compression"],
-    },
-    { label: t("addModel.complexityRouterAdvancedSections.groups.compatibility"), keys: ["response"] },
+    { label: "Sessions and efficiency", keys: ["affinity", "adaptive", "cache-aware", "compression"] },
+    { label: "Compatibility", keys: ["response"] },
   ].filter(
     (group) =>
       !(hideClassifier && group.keys.includes("classifier")) && sections.some(({ key }) => group.keys.includes(key)),

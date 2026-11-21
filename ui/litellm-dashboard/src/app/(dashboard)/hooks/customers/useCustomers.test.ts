@@ -2,9 +2,9 @@ import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useCustomers, type EndUser } from "./useCustomers";
 
-const useInfiniteQueryMock = vi.fn();
+const useQueryMock = vi.fn();
 vi.mock("@/lib/http/api", () => ({
-  $api: { useInfiniteQuery: (...args: unknown[]) => useInfiniteQueryMock(...args) },
+  $api: { useQuery: (...args: unknown[]) => useQueryMock(...args) },
 }));
 
 const mockUseAuthorized = vi.fn();
@@ -14,31 +14,23 @@ vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
 
 const authorized = { accessToken: "test-access-token", userRole: "Admin" };
 
-type QueryOptions = {
-  enabled: boolean;
-  getNextPageParam: (lastPage: EndUser[], pages: EndUser[][], lastPageParam: number) => number | undefined;
-};
+type QueryOptions = { enabled: boolean; select: (data: EndUser[] | undefined) => EndUser[] };
 
 const lastCallOptions = (): QueryOptions => {
-  const calls = useInfiniteQueryMock.mock.calls;
+  const calls = useQueryMock.mock.calls;
   return calls[calls.length - 1][3] as QueryOptions;
 };
 
 describe("useCustomers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useInfiniteQueryMock.mockReturnValue({ data: [] });
+    useQueryMock.mockReturnValue({ data: [] });
     mockUseAuthorized.mockReturnValue(authorized);
   });
 
-  it("includes page size and search in the request identity", () => {
-    renderHook(() => useCustomers(20, "customer-50"));
-    expect(useInfiniteQueryMock).toHaveBeenCalledWith(
-      "get",
-      "/customer/list",
-      { params: { query: { page_size: 20, search: "customer-50" } } },
-      expect.any(Object),
-    );
+  it("queries GET /customer/list with a derived key (no hand-written queryKey)", () => {
+    renderHook(() => useCustomers());
+    expect(useQueryMock).toHaveBeenCalledWith("get", "/customer/list", {}, expect.any(Object));
   });
 
   it("enables the query only for an admin holding an access token", () => {
@@ -58,14 +50,17 @@ describe("useCustomers", () => {
     expect(lastCallOptions().enabled).toBe(false);
   });
 
-  it("offers the next page only when the current page is full", () => {
+  it("selects an empty list when the response body is missing", () => {
+    renderHook(() => useCustomers());
+    expect(lastCallOptions().select(undefined)).toEqual([]);
+  });
+
+  it("selects the customer list through unchanged", () => {
     const customers: EndUser[] = [
       { user_id: "customer-1", alias: "Test Customer 1", spend: 150.5, blocked: false },
       { user_id: "customer-2", alias: null, spend: 0, blocked: true },
     ];
-    renderHook(() => useCustomers(2));
-    expect(lastCallOptions().getNextPageParam(customers, [customers], 1)).toBe(2);
-    expect(lastCallOptions().getNextPageParam(customers.slice(0, 1), [customers], 2)).toBeUndefined();
-    expect(lastCallOptions().getNextPageParam([], [customers], 3)).toBeUndefined();
+    renderHook(() => useCustomers());
+    expect(lastCallOptions().select(customers)).toEqual(customers);
   });
 });

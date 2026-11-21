@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { CodeIcon, CopyIcon } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { coy } from "react-syntax-highlighter/dist/esm/styles/prism";
 
@@ -39,7 +38,6 @@ const PromptCodeSnippets: React.FC<PromptCodeSnippetsProps> = ({
   environment,
   proxySettings,
 }) => {
-  const { t } = useTranslation();
   const syntaxTheme = useSyntaxTheme(coy);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<"curl" | "python" | "javascript">("curl");
@@ -254,18 +252,18 @@ main();`;
     <>
       <Button variant="outline" onClick={showModal}>
         <CodeIcon />
-        {t("prompts.codeSnippets.trigger")}
+        Get Code
       </Button>
 
       <Dialog open={isModalVisible} onOpenChange={(open) => !open && handleCancel()}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{t("prompts.codeSnippets.title")}</DialogTitle>
+            <DialogTitle>Generated Code</DialogTitle>
           </DialogHeader>
           <div className="flex justify-between items-center mb-4">
             <div>
               <label htmlFor="prompt-code-language" className="font-medium block mb-1 text-foreground">
-                {t("prompts.codeSnippets.language")}
+                Language
               </label>
               <Select
                 items={LANGUAGE_ITEMS}
@@ -288,19 +286,19 @@ main();`;
               variant="outline"
               onClick={() => {
                 navigator.clipboard.writeText(generatedCode);
-                toast.success(t("prompts.codeSnippets.copied"));
+                toast.success("Copied to clipboard!");
               }}
             >
               <CopyIcon />
-              {t("prompts.codeSnippets.copy")}
+              Copy to Clipboard
             </Button>
           </div>
 
           <Tabs value={selectedTab} onValueChange={(value) => setSelectedTab(String(value))}>
-            <TabsList aria-label={t("prompts.codeSnippets.typeLabel")}>
-              <TabsTrigger value="basic">{t("prompts.codeSnippets.tabs.basic")}</TabsTrigger>
-              <TabsTrigger value="messages">{t("prompts.codeSnippets.tabs.messages")}</TabsTrigger>
-              <TabsTrigger value="version">{t("prompts.codeSnippets.tabs.version")}</TabsTrigger>
+            <TabsList aria-label="Generated code type">
+              <TabsTrigger value="basic">Basic</TabsTrigger>
+              <TabsTrigger value="messages">With Messages</TabsTrigger>
+              <TabsTrigger value="version">With Version</TabsTrigger>
             </TabsList>
           </Tabs>
 

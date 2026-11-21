@@ -1,4 +1,3 @@
-import type { ParseKeys } from "i18next";
 import { MCPServer } from "@/components/mcp_tools/types";
 import { ApiError, deriveErrorMessage, unwrapProxyErrorMessage } from "@/lib/http/client";
 
@@ -39,7 +38,7 @@ export function findDuplicateMcpServer(
   return null;
 }
 
-export const DUPLICATE_IDENTIFIER_MESSAGE_KEY: ParseKeys = "mcpServers.duplicateServerCheck.duplicateIdentifier";
+export const DUPLICATE_IDENTIFIER_MESSAGE = "An MCP server with this name/alias already exists.";
 
 export const mcpSubmitErrorReason = (error: unknown): string => {
   if (error instanceof ApiError) {

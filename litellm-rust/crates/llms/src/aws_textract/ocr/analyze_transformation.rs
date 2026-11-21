@@ -123,7 +123,7 @@ impl BaseOcrConfig for TextractAnalyzeDocumentConfig {
         &self,
         error_message: String,
         status_code: u16,
-        headers: reqwest::header::HeaderMap,
+        headers: Vec<(String, String)>,
     ) -> Error {
         error_class(error_message, status_code, headers)
     }

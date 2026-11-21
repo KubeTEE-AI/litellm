@@ -1,29 +1,16 @@
 pub mod types;
-pub use litellm_inference::Error;
+pub use litellm_inference::RouteError as Error;
 mod constants;
 mod handler;
-
+mod prepare;
+pub use handler::execute_audio_transcription_provider_call;
 use litellm_auth::AuthServices;
-use litellm_core_utils::get_llm_provider_logic::LlmProviders;
-use litellm_inference::provider::resolve_llm_provider;
-use litellm_llms::{
-    base_llm::audio_transcription::transformation::BaseAudioTranscriptionConfig,
-    bedrock::audio_transcription::BEDROCK_AUDIO_TRANSCRIPTION_CONFIG,
-};
 use litellm_secrets::source::SecretSource;
+pub use prepare::prepare_audio_transcription_provider_call;
 use serde_json::Value;
 use std::sync::Arc;
 
 use crate::types::AudioTranscriptionRequest;
-
-fn audio_transcription_provider(
-    provider: LlmProviders,
-) -> Option<&'static dyn BaseAudioTranscriptionConfig> {
-    match provider {
-        LlmProviders::Bedrock => Some(&BEDROCK_AUDIO_TRANSCRIPTION_CONFIG),
-        _ => None,
-    }
-}
 
 #[derive(Clone)]
 pub struct AudioTranscriptionRoute {
@@ -45,10 +32,6 @@ impl AudioTranscriptionRoute {
         }
     }
 
-    pub async fn execute(&self, request: AudioTranscriptionRequest<'_>) -> Result<Value, Error> {
-        self.run(request).await
-    }
-
     #[tracing::instrument(name = "litellm.route", skip_all, fields(
         route = "audio_transcription",
         model = request.model,
@@ -57,23 +40,13 @@ impl AudioTranscriptionRoute {
         stream = false,
         outcome
     ))]
-    async fn run(&self, request: AudioTranscriptionRequest<'_>) -> Result<Value, Error> {
+    pub async fn execute(&self, request: AudioTranscriptionRequest<'_>) -> Result<Value, Error> {
         litellm_inference::diagnostic::unary(async {
-            let provider = resolve_llm_provider(
-                request.model,
-                request.custom_llm_provider,
-                "audio transcription",
-            )?;
-            let config = audio_transcription_provider(provider.provider).ok_or_else(|| {
-                Error::InvalidProvider(<&str>::from(provider.provider).to_string())
-            })?;
-            litellm_inference::diagnostic::provider(
-                provider.model,
-                <&'static str>::from(provider.provider),
-            );
-            let secrets = self.secrets.resolve(&config.secret_names()).await?;
+            let request =
+                prepare_audio_transcription_provider_call(request, self.secrets.as_ref()).await?;
+            litellm_inference::diagnostic::provider(&request.model, &request.custom_llm_provider);
             let execute: futures_util::future::BoxFuture<'_, Result<Value, Error>> = Box::pin(
-                handler::execute(&self.http, &self.auth, config, provider, request, secrets),
+                execute_audio_transcription_provider_call(&self.http, &self.auth, request),
             );
             execute.await
         })

@@ -3,8 +3,6 @@
 import { Loader2 } from "lucide-react";
 import { useMemo, useRef, useState, type SyntheticEvent } from "react";
 
-import i18n from "@/i18n/i18n";
-
 import {
   Combobox,
   ComboboxContent,
@@ -66,10 +64,10 @@ export function PaginatedSearchSelect({
   hasNextPage = false,
   isLoading = false,
   isFetchingNextPage = false,
-  placeholder = i18n.t("shared.paginatedSearchSelect.placeholder"),
-  emptyText = i18n.t("shared.paginatedSearchSelect.empty"),
+  placeholder = "Search…",
+  emptyText = "No results",
   errorText,
-  loadingText = i18n.t("shared.paginatedSearchSelect.loading"),
+  loadingText = "Loading…",
   autoHighlight = false,
   disabled = false,
   className,

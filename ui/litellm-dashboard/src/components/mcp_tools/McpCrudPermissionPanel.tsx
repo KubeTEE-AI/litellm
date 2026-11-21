@@ -10,7 +10,6 @@
  */
 
 import React, { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { CrudOp, MCPToolEntry, CRUD_GROUP_META, groupToolsByCrud } from "../../utils/mcpToolCrudClassification";
@@ -77,7 +76,6 @@ const McpCrudPermissionPanel: React.FC<McpCrudPermissionPanelProps> = ({
   readOnly = false,
   searchFilter = "",
 }) => {
-  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState<Record<CrudOp, boolean>>({
     read: false,
     create: false,
@@ -181,36 +179,29 @@ const McpCrudPermissionPanel: React.FC<McpCrudPermissionPanelProps> = ({
                 ) : (
                   <ChevronDownIcon className="w-4 h-4 text-muted-foreground shrink-0" />
                 )}
-                <span className="font-semibold text-foreground text-sm">{t(meta.label)}</span>
+                <span className="font-semibold text-foreground text-sm">{meta.label}</span>
                 <span className={`text-xs px-2 py-0.5 rounded-full ${RISK_BADGE[meta.risk]}`}>
                   {meta.risk === "high"
-                    ? t("mcpTools.crudPermissionPanel.risk.high")
+                    ? "High Risk"
                     : meta.risk === "medium"
-                      ? t("mcpTools.crudPermissionPanel.risk.medium")
+                      ? "Medium Risk"
                       : meta.risk === "low"
-                        ? t("mcpTools.crudPermissionPanel.risk.low")
-                        : t("mcpTools.crudPermissionPanel.risk.unknown")}
+                        ? "Safe"
+                        : "Unclassified"}
                 </span>
                 <span className="text-xs text-muted-foreground ml-1">
-                  {t("mcpTools.crudPermissionPanel.allowedCount", {
-                    allowed: group.filter((tool) => effectiveAllowed.has(tool.name)).length,
-                    total: group.length,
-                  })}
+                  {group.filter((t) => effectiveAllowed.has(t.name)).length}/{group.length} allowed
                 </span>
               </button>
 
               {!readOnly && (
                 <div className="flex items-center gap-2 ml-4">
                   <p className="text-xs text-muted-foreground">
-                    {fullyAllowed
-                      ? t("mcpTools.crudPermissionPanel.groupState.allOn")
-                      : partial
-                        ? t("mcpTools.crudPermissionPanel.groupState.partial")
-                        : t("mcpTools.crudPermissionPanel.groupState.allOff")}
+                    {fullyAllowed ? "All on" : partial ? "Partial" : "All off"}
                   </p>
                   {/* Checkbox supports `indeterminate`; Switch does not. */}
                   <Checkbox
-                    aria-label={t("mcpTools.crudPermissionPanel.allowAllAria", { label: t(meta.label) })}
+                    aria-label={`Allow all ${meta.label} tools`}
                     checked={fullyAllowed}
                     indeterminate={partial}
                     onCheckedChange={(checked) => toggleGroup(op, checked)}
@@ -223,7 +214,7 @@ const McpCrudPermissionPanel: React.FC<McpCrudPermissionPanelProps> = ({
             {/* Description row */}
             {!isCollapsed && (
               <div className="px-4 pt-2 pb-1 text-xs text-muted-foreground bg-card border-b border-border">
-                {t(meta.description)}
+                {meta.description}
               </div>
             )}
 
@@ -265,9 +256,7 @@ const McpCrudPermissionPanel: React.FC<McpCrudPermissionPanelProps> = ({
                             allowed ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"
                           }`}
                         >
-                          {allowed
-                            ? t("mcpTools.crudPermissionPanel.toolState.on")
-                            : t("mcpTools.crudPermissionPanel.toolState.off")}
+                          {allowed ? "on" : "off"}
                         </span>
                       </div>
                     );

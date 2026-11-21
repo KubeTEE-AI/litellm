@@ -3,8 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use futures_util::future::{BoxFuture, try_join_all};
 use litellm_core_utils::settings::Lookup;
 
-use crate::{Error, SecretResolver};
-use litellm_secret_value::SecretValue;
+use crate::{Error, SecretResolver, SecretValue};
 
 pub type Secrets = Arc<dyn Lookup + Send + Sync>;
 

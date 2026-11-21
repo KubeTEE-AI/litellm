@@ -1,20 +1,16 @@
 import json
 import os
-from collections.abc import Iterator
-from typing import Final, Literal, Protocol, get_args, runtime_checkable
+from typing import Final, Literal, Protocol, get_args
 
 import httpx
-from pydantic import TypeAdapter
 
 import litellm
-from litellm.litellm_core_utils.core_helpers import as_object_list, iter_items, json_contains
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.custom_httpx.http_handler import (
     AsyncHTTPHandler,
     HTTPHandler,
     get_async_httpx_client,
 )
-from litellm.llms.openai.common_utils import decoded_json_object
 from litellm.types.utils import EmbeddingResponse
 
 from ...base import BaseLLM
@@ -24,8 +20,6 @@ from .transformation import HuggingFaceEmbeddingConfig
 config: Final = HuggingFaceEmbeddingConfig()
 
 HF_HUB_URL: Final = "https://huggingface.co"
-
-_DECODED_JSON: Final = TypeAdapter(object)
 
 hf_tasks_embeddings: Final = (
     Literal[  # pipeline tags + hf tei endpoints - https://huggingface.github.io/text-embeddings-inference/#/
@@ -40,31 +34,7 @@ class _SupportsTokenEncode(Protocol):
     def encode(self, text: str) -> list[int]: ...
 
 
-@runtime_checkable
-class _SupportsGetItem(Protocol):
-    def __getitem__(self, key: str | int, /) -> object: ...
-
-
-def _subscript(value: object, key: str | int) -> object:
-    if isinstance(value, _SupportsGetItem):
-        return value[key]
-    raise TypeError(f"'{type(value).__name__}' object is not subscriptable")
-
-
-def _unpack_pair(value: object) -> tuple[object, object]:
-    if not hasattr(value, "__iter__") and not hasattr(value, "__getitem__"):
-        raise TypeError(f"cannot unpack non-iterable {type(value).__name__} object")
-    first, second = iter_items(value)
-    return first, second
-
-
-def _pairs(value: object) -> Iterator[tuple[object, object]]:
-    return (_unpack_pair(item) for item in iter_items(value))
-
-
-def get_hf_task_embedding_for_model(
-    model: str, task_type: str | None, api_base: str, timeout: float | httpx.Timeout | None = None
-) -> object:
+def get_hf_task_embedding_for_model(model: str, task_type: str | None, api_base: str) -> str | None:
     if task_type is not None:
         if task_type in get_args(hf_tasks_embeddings):
             return task_type
@@ -72,16 +42,16 @@ def get_hf_task_embedding_for_model(
             raise Exception(f"Invalid task_type={task_type}. Expected one of={hf_tasks_embeddings}")
     http_client: Final = HTTPHandler(concurrent_limit=1)
 
-    model_info: Final = http_client.get(url=f"{api_base}/api/models/{model}", timeout=timeout)
+    model_info: Final = http_client.get(url=f"{api_base}/api/models/{model}")
 
-    model_info_dict: Final = decoded_json_object(_DECODED_JSON.validate_python(model_info.json()))
+    model_info_dict: Final = model_info.json()
 
-    pipeline_tag: Final = model_info_dict.get("pipeline_tag", None)
+    pipeline_tag: Final[str | None] = model_info_dict.get("pipeline_tag", None)
 
     return pipeline_tag
 
 
-async def async_get_hf_task_embedding_for_model(model: str, task_type: str | None, api_base: str) -> object:
+async def async_get_hf_task_embedding_for_model(model: str, task_type: str | None, api_base: str) -> str | None:
     if task_type is not None:
         if task_type in get_args(hf_tasks_embeddings):
             return task_type
@@ -93,9 +63,9 @@ async def async_get_hf_task_embedding_for_model(model: str, task_type: str | Non
 
     model_info: Final = await http_client.get(url=f"{api_base}/api/models/{model}")
 
-    model_info_dict: Final = decoded_json_object(_DECODED_JSON.validate_python(model_info.json()))
+    model_info_dict: Final = model_info.json()
 
-    pipeline_tag: Final = model_info_dict.get("pipeline_tag", None)
+    pipeline_tag: Final[str | None] = model_info_dict.get("pipeline_tag", None)
 
     return pipeline_tag
 
@@ -107,7 +77,7 @@ class HuggingFaceEmbedding(BaseLLM):
     def __init__(self) -> None:
         super().__init__()
 
-    def _transform_input_on_pipeline_tag(self, input: list, pipeline_tag: object) -> dict:
+    def _transform_input_on_pipeline_tag(self, input: list, pipeline_tag: str | None) -> dict:
         if pipeline_tag is None:
             return {"inputs": input}
         if pipeline_tag == "sentence-similarity" or pipeline_tag == "similarity":
@@ -174,7 +144,6 @@ class HuggingFaceEmbedding(BaseLLM):
         call_type: Literal["sync", "async"],
         optional_params: dict,
         embed_url: str,
-        timeout: float | httpx.Timeout | None = None,
     ) -> dict:
         data: dict = {}
 
@@ -192,9 +161,7 @@ class HuggingFaceEmbedding(BaseLLM):
             task_type: Final = optional_params.pop("input_type", None)
 
             if call_type == "sync":
-                hf_task: Final = get_hf_task_embedding_for_model(
-                    model=model, task_type=task_type, api_base=HF_HUB_URL, timeout=timeout
-                )
+                hf_task: Final = get_hf_task_embedding_for_model(model=model, task_type=task_type, api_base=HF_HUB_URL)
             elif call_type == "async":
                 return self._async_transform_input(model=model, task_type=task_type, embed_url=embed_url, input=input)
 
@@ -207,15 +174,15 @@ class HuggingFaceEmbedding(BaseLLM):
 
     def _process_embedding_response(
         self,
-        embeddings: object,
+        embeddings: dict,
         model_response: EmbeddingResponse,
         model: str,
         input: list,
         encoding: _SupportsTokenEncode,
     ) -> EmbeddingResponse:
         output_data: Final = []
-        if json_contains(embeddings, "similarities"):
-            for idx, embedding in _pairs(_subscript(embeddings, "similarities")):
+        if "similarities" in embeddings:
+            for idx, embedding in embeddings["similarities"]:
                 output_data.append(
                     {
                         "object": "embedding",
@@ -224,9 +191,8 @@ class HuggingFaceEmbedding(BaseLLM):
                     }
                 )
         else:
-            for idx, embedding in enumerate(iter_items(embeddings)):
-                embedding_list = as_object_list(embedding)
-                if isinstance(embedding, float) or embedding_list is not None and isinstance(embedding_list[0], float):
+            for idx, embedding in enumerate(embeddings):
+                if isinstance(embedding, float) or isinstance(embedding, list) and isinstance(embedding[0], float):
                     output_data.append(
                         {
                             "object": "embedding",
@@ -239,7 +205,7 @@ class HuggingFaceEmbedding(BaseLLM):
                         {
                             "object": "embedding",
                             "index": idx,
-                            "embedding": _subscript(_subscript(embedding, 0), 0),  # flatten list returned from hf
+                            "embedding": embedding[0][0],  # flatten list returned from hf
                         }
                     )
         model_response.object = "list"
@@ -283,7 +249,6 @@ class HuggingFaceEmbedding(BaseLLM):
             call_type="sync",
             optional_params=optional_params,
             embed_url=api_base,
-            timeout=timeout,
         )
 
         ## LOGGING
@@ -300,10 +265,9 @@ class HuggingFaceEmbedding(BaseLLM):
         if client is None:
             client = get_async_httpx_client(
                 llm_provider=litellm.LlmProviders.HUGGINGFACE,
-                params={"timeout": timeout},
             )
 
-        response: Final = await client.post(api_base, headers=headers, data=json.dumps(data), timeout=timeout)
+        response: Final = await client.post(api_base, headers=headers, data=json.dumps(data))
 
         ## LOGGING
         logging_obj.post_call(
@@ -313,10 +277,10 @@ class HuggingFaceEmbedding(BaseLLM):
             original_response=response,
         )
 
-        embeddings: Final = _DECODED_JSON.validate_python(response.json())
+        embeddings: Final = response.json()
 
-        if json_contains(embeddings, "error"):
-            raise HuggingFaceError(status_code=500, message=_subscript(embeddings, "error"))
+        if "error" in embeddings:
+            raise HuggingFaceError(status_code=500, message=embeddings["error"])
 
         ## PROCESS RESPONSE ##
         return self._process_embedding_response(
@@ -353,9 +317,7 @@ class HuggingFaceEmbedding(BaseLLM):
             litellm_params=litellm_params,
         )
         task_type: Final = optional_params.get("input_type", None)
-        task: Final = get_hf_task_embedding_for_model(
-            model=model, task_type=task_type, api_base=HF_HUB_URL, timeout=timeout
-        )
+        task: Final = get_hf_task_embedding_for_model(model=model, task_type=task_type, api_base=HF_HUB_URL)
         # print_verbose(f"{model}, {task}")
         embed_url = ""
         if model.startswith(("http://", "https://")):
@@ -393,7 +355,6 @@ class HuggingFaceEmbedding(BaseLLM):
             call_type="sync",
             optional_params=optional_params,
             embed_url=embed_url,
-            timeout=timeout,
         )
 
         ## LOGGING
@@ -409,7 +370,7 @@ class HuggingFaceEmbedding(BaseLLM):
         ## COMPLETION CALL
         if client is None or not isinstance(client, HTTPHandler):
             client = HTTPHandler(concurrent_limit=1)
-        response: Final = client.post(embed_url, headers=headers, data=json.dumps(data), timeout=timeout)
+        response: Final = client.post(embed_url, headers=headers, data=json.dumps(data))
 
         ## LOGGING
         logging_obj.post_call(
@@ -419,10 +380,10 @@ class HuggingFaceEmbedding(BaseLLM):
             original_response=response,
         )
 
-        embeddings: Final = _DECODED_JSON.validate_python(response.json())
+        embeddings: Final = response.json()
 
-        if json_contains(embeddings, "error"):
-            raise HuggingFaceError(status_code=500, message=_subscript(embeddings, "error"))
+        if "error" in embeddings:
+            raise HuggingFaceError(status_code=500, message=embeddings["error"])
 
         ## PROCESS RESPONSE ##
         return self._process_embedding_response(

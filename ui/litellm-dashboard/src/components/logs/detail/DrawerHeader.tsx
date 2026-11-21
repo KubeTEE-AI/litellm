@@ -1,8 +1,6 @@
-import { copyToClipboard } from "@/utils/dataUtils";
 import { type ReactNode, useState } from "react";
 import { ArrowLeft, Check, ChevronDown, ChevronUp, Copy, X } from "lucide-react";
 import moment from "moment";
-import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -55,7 +53,6 @@ export function DrawerHeader({
   onToggleSidebar,
   backTo,
 }: DrawerHeaderProps) {
-  const { t } = useTranslation();
   const provider = log.custom_llm_provider || "";
   const providerInfo = provider ? getProviderLogoAndName(provider) : null;
   const showToggleWithProvider = isSidebarCollapsed && Boolean(providerInfo || log.model);
@@ -78,7 +75,7 @@ export function DrawerHeader({
         <Button variant="outline" size="sm" onClick={onClose} className="mb-3 max-w-full">
           <ArrowLeft data-icon="inline-start" />
           {backTo.icon}
-          <span className="truncate">{t("logs.detail.header.backTo", { label: backTo.label })}</span>
+          <span className="truncate">Back to {backTo.label}</span>
         </Button>
       )}
       {/* Row 0: Model + Provider with Logo */}
@@ -105,7 +102,7 @@ export function DrawerHeader({
       >
         {showToggleWithRequestId && <SidebarToggle isCollapsed onToggle={onToggleSidebar} />}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <CopyableId value={log.request_id} label={t("logs.detail.header.requestId")} fontSize={FONT_SIZE_HEADER} />
+          <CopyableId value={log.request_id} label="Request ID" fontSize={FONT_SIZE_HEADER} />
           {callId && (
             <div className="flex items-center gap-1">
               <span
@@ -143,13 +140,12 @@ function ModelProviderSection({
   providerLogo?: string;
   providerName?: string;
 }) {
-  const { t } = useTranslation();
   return (
     <div className="flex min-w-0 items-center gap-2">
       {providerLogo && (
         <img
           src={providerLogo}
-          alt={providerName || t("logs.detail.header.provider")}
+          alt={providerName || "Provider"}
           style={{ width: 24, height: 24 }}
           onError={(e) => {
             const target = e.target as HTMLImageElement;
@@ -185,12 +181,14 @@ function CopyableId({
   muted?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
-  const { t } = useTranslation();
 
   const handleCopy = async () => {
-    if (await copyToClipboard(value)) {
+    try {
+      await navigator.clipboard.writeText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* clipboard unavailable in non-secure contexts */
     }
   };
 
@@ -215,7 +213,7 @@ function CopyableId({
           {value}
           <button
             type="button"
-            aria-label={copied ? t("logs.detail.header.copied") : t("logs.detail.header.copyLabel", { label })}
+            aria-label={copied ? "Copied!" : `Copy ${label}`}
             onClick={handleCopy}
             className="ml-1 align-middle text-muted-foreground hover:text-foreground"
           >
@@ -241,7 +239,6 @@ function NavigationSection({
   onNext: () => void;
   onClose: () => void;
 }) {
-  const { t } = useTranslation();
   const keyboardShortcutStyle = {
     border: "1px solid var(--color-border)",
     borderRadius: 4,
@@ -270,7 +267,7 @@ function NavigationSection({
           <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={onClose} />}>
             <X className="size-4" />
           </TooltipTrigger>
-          <TooltipContent>{t("logs.detail.header.escToClose")}</TooltipContent>
+          <TooltipContent>ESC to close</TooltipContent>
         </Tooltip>
       </TooltipProvider>
     </div>
@@ -291,11 +288,10 @@ function StatusBar({
   statusColor: "error" | "success";
   environment: string;
 }) {
-  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-3">
       <Badge variant={statusColor === "error" ? "destructive" : "secondary"}>{statusLabel}</Badge>
-      <Badge variant="outline">{t("logs.detail.header.environment", { environment })}</Badge>
+      <Badge variant="outline">Env: {environment}</Badge>
       <div className="flex items-center gap-2">
         <span className="text-muted-foreground" style={{ fontSize: FONT_SIZE_MEDIUM }}>
           {moment(log.startTime).format("MMM D, YYYY h:mm:ss A")}

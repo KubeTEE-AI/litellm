@@ -2,8 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, CircleAlert, CircleCheck, Info, Link as LinkIcon, RotateCw, Search, X } from "lucide-react";
-import { Trans, useTranslation } from "react-i18next";
-import i18n from "@/i18n/i18n";
 
 import { useDebouncedCallback } from "@tanstack/react-pacer/debouncer";
 import { DiscoveredAgentCard, discoverAgentCardCall } from "@/components/networking";
@@ -65,7 +63,6 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
   discoveryRequest,
   savedAgentCard,
 }) => {
-  const { t } = useTranslation();
   // When the parent drives discovery, ``manualUrl`` is unused — the URL
   // comes from ``discoveryRequest.url`` directly. When the parent hasn't
   // supplied a plan, the admin types into this field manually.
@@ -120,16 +117,14 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
 
   const handleDiscover = useCallback(async () => {
     if (!accessToken) {
-      setError(i18n.t("agents.cardDiscovery.errors.noAccessToken"));
+      setError("No access token available");
       onApplyRef.current(null);
       return;
     }
     const trimmed = effectiveUrl.trim();
     if (!trimmed) {
       setError(
-        isParentDriven
-          ? i18n.t("agents.cardDiscovery.errors.fillConnectionDetails")
-          : i18n.t("agents.cardDiscovery.errors.enterBaseUrl"),
+        isParentDriven ? "Fill in the agent's connection details above first" : "Enter the agent's base URL first",
       );
       setCard(null);
       onApplyRef.current(null);
@@ -157,7 +152,7 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
       resetSelections(response.agent_card);
     } catch (e: any) {
       if (requestId !== discoverRequestIdRef.current) return;
-      setError(e?.message ? String(e.message) : i18n.t("agents.cardDiscovery.errors.discoverFailed"));
+      setError(e?.message ? String(e.message) : "Failed to discover agent card");
       setCard(null);
       lastSyncedSelectionRef.current = null;
       onApplyRef.current(null);
@@ -252,13 +247,13 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
     if (card) return <RotateCw />;
     return <Search />;
   };
-  const discoverLabel = card ? t("agents.cardDiscovery.rediscover") : t("agents.cardDiscovery.discover");
+  const discoverLabel = card ? "Re-discover" : "Discover";
 
   return (
     <div className="mb-4 rounded-lg border border-border bg-muted/50 p-4">
       <div className="mb-2 flex items-center gap-2">
         <LinkIcon className="size-4 text-primary" />
-        <span className="text-sm font-medium text-foreground">{t("agents.cardDiscovery.title")}</span>
+        <span className="text-sm font-medium text-foreground">Discover from agent URL</span>
         <TooltipProvider delay={300}>
           <Tooltip>
             <TooltipTrigger
@@ -269,17 +264,20 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
               }
             />
             <TooltipContent>
-              {t("agents.cardDiscovery.titleHint", { path: "/.well-known/agent-card.json" })}
+              LiteLLM will fetch /.well-known/agent-card.json from this URL and let you pick which skills and
+              capabilities to expose through the proxy.
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
       {isParentDriven ? (
         <>
-          <p className="mb-2 text-xs text-muted-foreground">{t("agents.cardDiscovery.parentDrivenIntro")}</p>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Using the connection details you entered above. We&apos;ll fetch:
+          </p>
           <div className="mb-3 rounded-sm border border-border bg-background px-3 py-2 font-mono text-xs break-all text-foreground">
             {discoveryRequest!.display_url || effectiveUrl || (
-              <span className="text-muted-foreground italic">{t("agents.cardDiscovery.fillFieldsFirst")}</span>
+              <span className="text-muted-foreground italic">Fill in the fields above first</span>
             )}
           </div>
           <div className="flex justify-end">
@@ -292,14 +290,8 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
       ) : (
         <>
           <p className="mb-3 text-xs text-muted-foreground">
-            <Trans
-              i18nKey="agents.cardDiscovery.manualIntro"
-              components={{
-                cardfile: <code>/.well-known/agent-card.json</code>,
-                agentfile: <code>/.well-known/agent.json</code>,
-                rootfile: <code>/agent.json</code>,
-              }}
-            />
+            Paste the upstream agent&apos;s base URL. We&apos;ll try <code>/.well-known/agent-card.json</code>,{" "}
+            <code>/.well-known/agent.json</code>, and <code>/agent.json</code> in order.
           </p>
 
           <div className="flex w-full items-center gap-2">
@@ -323,15 +315,10 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
       {error && (
         <Alert variant="destructive" className="mt-3">
           <CircleAlert />
-          <AlertTitle>{t("agents.cardDiscovery.failedTitle")}</AlertTitle>
+          <AlertTitle>Discovery failed</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
           <AlertAction>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label={t("agents.cardDiscovery.dismissError")}
-              onClick={() => setError(null)}
-            >
+            <Button variant="ghost" size="icon-xs" aria-label="Dismiss error" onClick={() => setError(null)}>
               <X />
             </Button>
           </AlertAction>
@@ -348,7 +335,7 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
         <div className="mt-4 rounded-lg border border-border bg-background p-4">
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <CircleCheck className="size-4 text-success" />
-            <span className="text-sm font-medium text-foreground">{t("agents.cardDiscovery.cardLoaded")}</span>
+            <span className="text-sm font-medium text-foreground">Upstream card loaded</span>
             {card.version && <Badge variant="secondary">v{card.version}</Badge>}
             {card.provider?.organization && <Badge variant="secondary">{card.provider.organization}</Badge>}
           </div>
@@ -356,24 +343,18 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
           <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                {t("agents.cardDiscovery.nameLabel")}
+                Name (shown to API clients)
               </label>
-              <Input
-                value={editedName}
-                onChange={(e) => setEditedName(e.target.value)}
-                placeholder={t("agents.cardDiscovery.namePlaceholder")}
-              />
+              <Input value={editedName} onChange={(e) => setEditedName(e.target.value)} placeholder="Agent name" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                {t("agents.cardDiscovery.descriptionLabel")}
-              </label>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Description</label>
               <Textarea
                 className="field-sizing-fixed min-h-0"
                 value={editedDescription}
                 onChange={(e) => setEditedDescription(e.target.value)}
                 rows={2}
-                placeholder={t("agents.cardDiscovery.descriptionPlaceholder")}
+                placeholder="What this agent does"
               />
             </div>
           </div>
@@ -385,19 +366,17 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
                   render={
                     <button type="button" className="group flex items-center gap-2">
                       <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[panel-open]:rotate-180" />
-                      <span className="text-sm font-medium text-foreground">{t("agents.cardDiscovery.skills")}</span>
+                      <span className="text-sm font-medium text-foreground">Skills</span>
                     </button>
                   }
                 />
                 <Badge variant="secondary">
-                  {t("agents.cardDiscovery.skillsSelected", { selected: selectedSkillCount, total: skillCount })}
+                  {selectedSkillCount} / {skillCount} selected
                 </Badge>
               </div>
               <CollapsibleContent className="pt-2">
                 {skillCount === 0 ? (
-                  <div className="py-6 text-center text-sm text-muted-foreground">
-                    {t("agents.cardDiscovery.noSkills")}
-                  </div>
+                  <div className="py-6 text-center text-sm text-muted-foreground">Upstream card has no skills</div>
                 ) : (
                   <div className="space-y-2">
                     {(card.skills ?? []).map((skill, idx) => {
@@ -415,9 +394,9 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-sm font-medium text-foreground">{skill.name || id}</span>
                               {skill.id && <Badge variant="secondary">{skill.id}</Badge>}
-                              {(skill.tags ?? []).map((tag: string) => (
-                                <Badge key={tag} variant="outline">
-                                  {tag}
+                              {(skill.tags ?? []).map((t: string) => (
+                                <Badge key={t} variant="outline">
+                                  {t}
                                 </Badge>
                               ))}
                             </div>
@@ -439,9 +418,7 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
                   render={
                     <button type="button" className="group flex items-center gap-2">
                       <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[panel-open]:rotate-180" />
-                      <span className="text-sm font-medium text-foreground">
-                        {t("agents.cardDiscovery.capabilities")}
-                      </span>
+                      <span className="text-sm font-medium text-foreground">Capabilities</span>
                     </button>
                   }
                 />
@@ -454,7 +431,10 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
                         </span>
                       }
                     />
-                    <TooltipContent>{t("agents.cardDiscovery.capabilitiesHint")}</TooltipContent>
+                    <TooltipContent>
+                      Only capabilities LiteLLM can faithfully proxy today are listed. Others (push notifications,
+                      extensions) are coming soon.
+                    </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
@@ -469,7 +449,7 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
                       >
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-foreground capitalize">{key}</span>
-                          {!upstreamHas && <Badge variant="outline">{t("agents.cardDiscovery.notAdvertised")}</Badge>}
+                          {!upstreamHas && <Badge variant="outline">not advertised upstream</Badge>}
                         </div>
                         <Switch
                           checked={Boolean(selectedCapabilities[key])}

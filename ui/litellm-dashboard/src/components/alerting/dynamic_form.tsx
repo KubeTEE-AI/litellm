@@ -1,6 +1,5 @@
 import React from "react";
 import { useForm } from "react-hook-form";
-import { useTranslation } from "react-i18next";
 import { CircleCheck, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,7 +33,6 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
   handleSubmit,
   premiumUser,
 }) => {
-  const { t } = useTranslation();
   const form = useForm<AlertingFormValues>({ defaultValues: {} });
 
   const onFinish = (formData: AlertingFormValues) => {
@@ -99,7 +97,7 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
             <TableCell>
               <Button className="flex items-center justify-center">
                 <a href="https://forms.gle/W3U4PZpJGFHWtHyA9" target="_blank">
-                  {t("loggingAndAlerts.alerting.enterpriseFeature")}
+                  ✨ Enterprise Feature
                 </a>
               </Button>
             </TableCell>
@@ -110,12 +108,12 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
             {value.stored_in_db == true ? (
               <Badge variant="secondary">
                 <CircleCheck />
-                {t("loggingAndAlerts.alerting.storage.inDb")}
+                In DB
               </Badge>
             ) : value.stored_in_db == false ? (
-              <Badge variant="outline">{t("loggingAndAlerts.alerting.storage.inConfig")}</Badge>
+              <Badge variant="outline">In Config</Badge>
             ) : (
-              <Badge variant="outline">{t("loggingAndAlerts.alerting.storage.notSet")}</Badge>
+              <Badge variant="outline">Not Set</Badge>
             )}
           </TableCell>
           <TableCell>
@@ -123,7 +121,7 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label={t("loggingAndAlerts.alerting.resetField", { field: value.field_name })}
+              aria-label={`Reset ${value.field_name}`}
               onClick={() => handleResetField(value.field_name, index)}
               className="text-destructive"
             >
@@ -133,7 +131,7 @@ const DynamicForm: React.FC<DynamicFormProps> = ({
         </TableRow>
       ))}
       <div>
-        <Button type="submit">{t("loggingAndAlerts.alerting.submit")}</Button>
+        <Button type="submit">Update Settings</Button>
       </div>
     </form>
   );

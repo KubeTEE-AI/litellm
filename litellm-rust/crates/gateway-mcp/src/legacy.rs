@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use axum::{
-    Router,
-    extract::{FromRequest, Request, State},
+    Json, Router,
+    extract::{Query, Request, State},
     http::{StatusCode, request::Parts},
     response::{
         IntoResponse, Response, Sse,
@@ -18,11 +18,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::{
-    Context, Error, HttpConfig, McpServer, Operations,
-    request::{Json, Query},
-    sessions::fingerprint,
-};
+use crate::{Context, HttpConfig, McpServer, Operations, sessions::fingerprint};
 
 #[derive(Clone)]
 struct Session {
@@ -67,13 +63,13 @@ pub(crate) fn router(
 }
 
 impl Legacy {
-    fn validate(&self, parts: &Parts) -> Result<(), Error> {
+    fn validate(&self, parts: &Parts) -> Result<(), StatusCode> {
         let host = parts
             .headers
             .get("host")
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<http::uri::Authority>().ok())
-            .ok_or(Error::HostNotAllowed)?;
+            .ok_or(StatusCode::FORBIDDEN)?;
         let allowed = self.hosts.iter().any(|allowed| {
             host.as_str().eq_ignore_ascii_case(allowed)
                 || host
@@ -82,16 +78,17 @@ impl Legacy {
                     .eq_ignore_ascii_case(allowed)
         });
         if !allowed {
-            return Err(Error::HostNotAllowed);
+            return Err(StatusCode::FORBIDDEN);
         }
-        if let Some(origin) = parts.headers.get("origin")
-            && !origin.to_str().is_ok_and(|origin| {
-                self.origins
-                    .iter()
-                    .any(|allowed| same_origin(origin, allowed))
-            })
-        {
-            return Err(Error::OriginNotAllowed);
+        if let Some(origin) = parts.headers.get("origin") {
+            let origin = origin.to_str().map_err(|_| StatusCode::FORBIDDEN)?;
+            if !self
+                .origins
+                .iter()
+                .any(|allowed| same_origin(origin, allowed))
+            {
+                return Err(StatusCode::FORBIDDEN);
+            }
         }
         Ok(())
     }
@@ -114,22 +111,27 @@ fn same_origin(value: &str, allowed: &str) -> bool {
     }
 }
 
-async fn connect(State(state): State<Legacy>, request: Request) -> Result<Response, Error> {
+async fn connect(State(state): State<Legacy>, request: Request) -> Response {
     let owner = fingerprint(&request);
     let (parts, _) = request.into_parts();
-    state.validate(&parts)?;
-    state
+    if let Err(status) = state.validate(&parts) {
+        return status.into_response();
+    }
+    if let Err(error) = state
         .operations
         .authorize(Context {
             parts,
             server: None,
             mcp: None,
         })
-        .await?;
+        .await
+    {
+        return error.into_response();
+    }
     let connection = start_session(state, owner).await;
-    Ok(Sse::new(connection.events())
+    Sse::new(connection.events())
         .keep_alive(KeepAlive::default())
-        .into_response())
+        .into_response()
 }
 
 struct Connection {
@@ -214,21 +216,29 @@ async fn message(
     State(state): State<Legacy>,
     Query(query): Query<SessionQuery>,
     request: Request,
-) -> Result<Response, Error> {
+) -> Response {
     let owner = fingerprint(&request);
     let (parts, body) = request.into_parts();
-    state.validate(&parts)?;
-    let session = state
-        .sessions
-        .get(&query.session_id)
-        .await
-        .ok_or(Error::UnknownSession)?;
-    if session.owner != owner {
-        return Err(Error::ForeignSession);
+    if let Err(status) = state.validate(&parts) {
+        return status.into_response();
     }
+    let Some(session) = state.sessions.get(&query.session_id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if session.owner != owner {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = Request::from_parts(parts.clone(), body);
     let Json(mut message) =
-        Json::<ClientJsonRpcMessage>::from_request(Request::from_parts(parts.clone(), body), &())
-            .await?;
+        match <Json<ClientJsonRpcMessage> as axum::extract::FromRequest<()>>::from_request(
+            request,
+            &(),
+        )
+        .await
+        {
+            Ok(message) => message,
+            Err(error) => return error.into_response(),
+        };
     match &mut message {
         ClientJsonRpcMessage::Request(request) => {
             request.request.extensions_mut().insert(parts);
@@ -239,8 +249,8 @@ async fn message(
         _ => (),
     }
     match session.sender.try_send(message) {
-        Ok(()) => Ok((StatusCode::ACCEPTED, "Accepted").into_response()),
-        Err(mpsc::error::TrySendError::Full(_)) => Err(Error::SessionBusy),
-        Err(mpsc::error::TrySendError::Closed(_)) => Err(Error::UnknownSession),
+        Ok(()) => (StatusCode::ACCEPTED, "Accepted").into_response(),
+        Err(mpsc::error::TrySendError::Full(_)) => StatusCode::TOO_MANY_REQUESTS.into_response(),
+        Err(mpsc::error::TrySendError::Closed(_)) => StatusCode::NOT_FOUND.into_response(),
     }
 }

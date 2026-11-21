@@ -1,15 +1,9 @@
-import { copyToClipboard } from "@/utils/dataUtils";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import moment from "moment";
 import { AuditLogDrawer } from "./AuditLogDrawer";
 import { AuditLogEntry } from "../AuditLogsTableColumns";
-
-vi.mock("@/utils/dataUtils", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/utils/dataUtils")>()),
-  copyToClipboard: vi.fn(),
-}));
 
 vi.mock("../../../common_components/DefaultProxyAdminTag", () => ({
   default: ({ userId }: { userId: string }) => <span>{userId}</span>,
@@ -126,17 +120,16 @@ describe("AuditLogDrawer", () => {
     expect(screen.queryByText(/"spend"/)).not.toBeInTheDocument();
   });
 
-  it.each([true, false])("confirms copied JSON only when copying succeeds (%s)", async (success) => {
+  it("should copy the json of a block to the clipboard", async () => {
     const user = userEvent.setup();
-    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
-    vi.mocked(copyToClipboard).mockResolvedValue(success);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
+
     render(<AuditLogDrawer {...defaultProps} />);
+    await user.click(within(blockNamed("Before")).getByTitle("Copy JSON"));
 
-    const button = within(blockNamed("Before")).getByRole("button", { name: "Copy JSON" });
-    await user.click(button);
-
-    expect(copyToClipboard).toHaveBeenCalledWith(JSON.stringify({ max_budget: 10 }, null, 2));
-    expect(button.querySelector(".lucide-check") !== null).toBe(success);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(JSON.stringify({ max_budget: 10 }, null, 2)));
   });
 
   describe("width", () => {

@@ -1,5 +1,5 @@
 use crate::http::apply_credential;
-use crate::{CredentialPlacement, Error, ErrorDetail, ResolvedCredential};
+use crate::{CredentialPlacement, Error, ResolvedCredential};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CredentialPlanKind {
@@ -31,18 +31,11 @@ pub struct ProviderAuthPolicy {
 
 impl ProviderAuthPolicy {
     pub fn has_existing_credential(&self, headers: &[(String, String)]) -> bool {
-        self.existing_credential_header(headers).is_some()
-    }
-
-    fn existing_credential_header(&self, headers: &[(String, String)]) -> Option<&'static str> {
-        self.accepted_existing_headers
-            .iter()
-            .copied()
-            .find(|accepted| {
-                headers
-                    .iter()
-                    .any(|(name, _)| name.eq_ignore_ascii_case(accepted))
-            })
+        headers.iter().any(|(name, _)| {
+            self.accepted_existing_headers
+                .iter()
+                .any(|accepted| name.eq_ignore_ascii_case(accepted))
+        })
     }
 
     pub fn apply(
@@ -51,11 +44,11 @@ impl ProviderAuthPolicy {
         kind: CredentialPlanKind,
         credential: &ResolvedCredential,
     ) -> Result<Vec<(String, String)>, Error> {
-        if let Some(existing) = self.existing_credential_header(&headers) {
+        if self.has_existing_credential(&headers) {
             return match self.existing_header_behavior {
                 ExistingHeaderBehavior::Preserve => Ok(headers),
                 ExistingHeaderBehavior::Reject => Err(Error::InvalidConfiguration(
-                    ErrorDetail::DuplicateHeader(existing),
+                    "credential header already exists".into(),
                 )),
             };
         }
@@ -63,7 +56,11 @@ impl ProviderAuthPolicy {
             .rules
             .iter()
             .find(|rule| rule.kind == kind)
-            .ok_or(Error::InvalidConfiguration(ErrorDetail::PlanNotAllowed))?;
+            .ok_or_else(|| {
+                Error::InvalidConfiguration(
+                    "credential plan is not allowed by the provider auth policy".into(),
+                )
+            })?;
         apply_credential(headers, credential.secret().expose(), rule.placement)
     }
 }
@@ -71,8 +68,7 @@ impl ProviderAuthPolicy {
 #[cfg(test)]
 mod tests {
     use super::{CredentialPlanKind, CredentialRule, ExistingHeaderBehavior, ProviderAuthPolicy};
-    use crate::{CredentialPlacement, ResolvedCredential};
-    use litellm_secret_value::SecretValue;
+    use crate::{CredentialPlacement, ResolvedCredential, SecretValue};
 
     const RULES: &[CredentialRule] = &[CredentialRule {
         kind: CredentialPlanKind::Static,
@@ -112,10 +108,6 @@ mod tests {
             )
             .unwrap_err();
 
-        assert!(
-            litellm_error::Report::new(&error)
-                .to_string()
-                .contains("not allowed")
-        );
+        assert!(error.to_string().contains("not allowed"));
     }
 }

@@ -2,7 +2,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import React from "react";
-import { useTranslation } from "react-i18next";
 
 import type { ClassifierLLMConfig } from "./ComplexityRouterConfig";
 
@@ -17,7 +16,6 @@ interface ClassifierCircuitBreakerConfigProps {
 }
 
 const ClassifierCircuitBreakerConfig: React.FC<ClassifierCircuitBreakerConfigProps> = ({ value, onChange }) => {
-  const { t } = useTranslation();
   const [draftCooldown, setDraftCooldown] = React.useState<string | null>(null);
   const enabled = value.circuit_breaker_enabled ?? DEFAULT_CLASSIFIER_CIRCUIT_BREAKER_ENABLED;
 
@@ -37,15 +35,18 @@ const ClassifierCircuitBreakerConfig: React.FC<ClassifierCircuitBreakerConfigPro
         <Switch
           checked={enabled}
           onCheckedChange={(circuit_breaker_enabled) => onChange({ ...value, circuit_breaker_enabled })}
-          aria-label={t("addModel.classifierCircuitBreakerConfig.label")}
+          aria-label="Classifier circuit breaker"
         />
-        <strong className="font-semibold">{t("addModel.classifierCircuitBreakerConfig.label")}</strong>
+        <strong className="font-semibold">Classifier circuit breaker</strong>
       </div>
-      <span className="block text-xs text-muted-foreground">{t("addModel.classifierCircuitBreakerConfig.help")}</span>
+      <span className="block text-xs text-muted-foreground">
+        After one classifier timeout, use the fallback immediately for every session until a recovery probe succeeds.
+        Enabled by default.
+      </span>
       {enabled && (
         <div>
           <Label htmlFor={COOLDOWN_ID} className="block mb-1 font-semibold">
-            {t("addModel.classifierCircuitBreakerConfig.cooldown")}
+            Circuit breaker cooldown (seconds)
           </Label>
           <Input
             id={COOLDOWN_ID}

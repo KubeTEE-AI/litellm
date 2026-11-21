@@ -12,11 +12,10 @@ import asyncio
 import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import Field, TypeAdapter
-from typing_extensions import TypedDict
 
 from litellm._logging import verbose_proxy_logger
 from litellm._redis import _redis_kwargs_from_environment
@@ -85,11 +84,7 @@ _REDACTED_VALUE: Final = "***REDACTED***"
 _URL_OVERRIDDEN_CONNECTION_FIELDS: Final[frozenset[str]] = frozenset({"host", "port", "db", "password", "username"})
 
 
-class _CacheSettings(TypedDict, total=False, extra_items=object):
-    pass
-
-
-def _resolve_cache_url_precedence(settings: Mapping[str, object]) -> _CacheSettings:
+def _resolve_cache_url_precedence(settings: Mapping[str, object]) -> dict[str, Any]:
     """Return cache settings with the url-vs-discrete-fields ambiguity resolved.
 
     When a full ``url`` is supplied it wins: the discrete
@@ -102,8 +97,8 @@ def _resolve_cache_url_precedence(settings: Mapping[str, object]) -> _CacheSetti
     url: Final = settings.get("url")
     has_url: Final = isinstance(url, str) and url.strip() != ""
     if not has_url or settings.get("redis_startup_nodes"):
-        return _CacheSettings(**settings)
-    return _CacheSettings(**{k: v for k, v in settings.items() if k not in _URL_OVERRIDDEN_CONNECTION_FIELDS})
+        return dict(settings)
+    return {k: v for k, v in settings.items() if k not in _URL_OVERRIDDEN_CONNECTION_FIELDS}
 
 
 def _parse_stored_settings(cache_settings_value: object) -> dict[str, object]:

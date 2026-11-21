@@ -13,11 +13,11 @@ pub use tokenizers::{
 };
 
 pub fn encoding_from_json(json: &str) -> Result<Encoding, Error> {
-    serde_json::from_str(json).map_err(Error::EncodingJson)
+    serde_json::from_str(json).map_err(|error| Error::Load(error.into()))
 }
 
 pub fn encoding_to_json(encoding: &Encoding) -> Result<String, Error> {
-    serde_json::to_string(encoding).map_err(Error::EncodingJson)
+    serde_json::to_string(encoding).map_err(|error| Error::Load(error.into()))
 }
 
 pub struct HuggingFaceTokenizer {

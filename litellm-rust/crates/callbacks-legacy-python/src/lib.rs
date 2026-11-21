@@ -11,7 +11,6 @@ mod adapter;
 mod call;
 mod callbacks;
 mod deferred;
-mod error;
 mod logger;
 mod mapping;
 mod python;

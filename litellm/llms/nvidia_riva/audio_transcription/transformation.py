@@ -11,11 +11,9 @@ dict at call time.
 Reference: https://docs.nvidia.com/deeplearning/riva/user-guide/docs/asr/asr-overview.html
 """
 
-from collections.abc import Sequence
-from typing import Final, TypedDict
+from typing import Any, Final
 
 from httpx import Headers, Response
-from typing_extensions import ReadOnly
 
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.types.llms.openai import (
@@ -34,17 +32,6 @@ from ..common_utils import NvidiaRivaException
 RIVA_TARGET_SAMPLE_RATE_HZ: Final = 16000
 RIVA_TARGET_NUM_CHANNELS: Final = 1
 RIVA_TARGET_ENCODING: Final = "LINEAR_PCM"
-
-
-class RivaWordTiming(TypedDict):
-    word: ReadOnly[str]
-    start_time_ms: ReadOnly[int]
-    end_time_ms: ReadOnly[int]
-
-
-class RivaFinalResult(TypedDict):
-    transcript: ReadOnly[str]
-    words: ReadOnly[Sequence[RivaWordTiming]]
 
 
 class NvidiaRivaAudioTranscriptionConfig(BaseAudioTranscriptionConfig):
@@ -232,7 +219,7 @@ class NvidiaRivaAudioTranscriptionConfig(BaseAudioTranscriptionConfig):
 
     @staticmethod
     def build_transcription_response(
-        final_results: Sequence[RivaFinalResult],
+        final_results: list[dict[str, Any]],
         response_format: str,
         duration_seconds: float | None,
         timestamp_granularities: list[str] | None,

@@ -1,7 +1,7 @@
 import asyncio
 import base64
 import os
-from typing import Final
+from typing import Any, Final
 from urllib.parse import quote
 
 import httpx
@@ -278,7 +278,7 @@ class CyberArkSecretManager(BaseSecretManager):
         optional_params: dict | None = None,
         timeout: float | httpx.Timeout | None = None,
         tags: dict | list | None = None,
-    ) -> dict[str, object]:
+    ) -> dict[str, Any]:
         """
         Writes a secret to CyberArk Conjur using an async HTTPX client.
 

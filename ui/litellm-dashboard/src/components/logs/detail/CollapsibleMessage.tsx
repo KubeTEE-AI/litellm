@@ -5,7 +5,6 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface CollapsibleMessageProps {
@@ -16,7 +15,6 @@ interface CollapsibleMessageProps {
 
 export function CollapsibleMessage({ label, content, defaultExpanded = false }: CollapsibleMessageProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-  const { t } = useTranslation();
   const charCount = content?.length || 0;
 
   if (!content || charCount === 0) {
@@ -32,9 +30,7 @@ export function CollapsibleMessage({ label, content, defaultExpanded = false }: 
           <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
         )}
         <span className="text-[10px] uppercase tracking-[0.5px] text-muted-foreground">{label}</span>
-        <span className="text-[10px] text-muted-foreground">
-          {t("logs.detail.collapsibleMessage.charCount", { count: charCount, value: charCount.toLocaleString() })}
-        </span>
+        <span className="text-[10px] text-muted-foreground">({charCount.toLocaleString()} chars)</span>
       </CollapsibleTrigger>
 
       <CollapsibleContent

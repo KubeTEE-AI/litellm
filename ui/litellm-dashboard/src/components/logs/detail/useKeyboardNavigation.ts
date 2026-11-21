@@ -1,5 +1,3 @@
-import { useTranslation } from "react-i18next";
-
 import { useShortcut } from "@/components/shared/useShortcut";
 
 import { LogEntry } from "../types";
@@ -20,7 +18,6 @@ export function useKeyboardNavigation({
   onClose,
   onSelectLog,
 }: UseKeyboardNavigationProps) {
-  const { t } = useTranslation();
   const index = currentLog ? allLogs.findIndex((log) => log.request_id === currentLog.request_id) : -1;
   const selectAt = (next: number) => {
     const log = allLogs[next];
@@ -31,8 +28,8 @@ export function useKeyboardNavigation({
     if (index > 0) selectAt(index - 1);
   };
   const modal = { layer: "modal", enabled: isOpen } as const;
-  useShortcut("escape", onClose, { ...modal, description: t("logs.detail.drawer.shortcuts.close") });
-  useShortcut("j", selectNextLog, { ...modal, description: t("logs.detail.drawer.shortcuts.log") });
-  useShortcut("k", selectPreviousLog, { ...modal, description: t("logs.detail.drawer.shortcuts.log") });
+  useShortcut("escape", onClose, { ...modal, description: "close" });
+  useShortcut("j", selectNextLog, { ...modal, description: "log" });
+  useShortcut("k", selectPreviousLog, { ...modal, description: "log" });
   return { selectNextLog, selectPreviousLog };
 }

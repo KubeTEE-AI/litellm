@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cva.config";
-import { Trans, useTranslation } from "react-i18next";
 
 interface AdditionalModelSettingsProps {
   temperature?: number;
@@ -102,7 +101,6 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
     }
   };
 
-  const { t } = useTranslation();
   const disabledTextColor = useAdvancedParams ? "text-foreground" : "text-muted-foreground";
 
   return (
@@ -113,17 +111,18 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
             id={streamingId}
             checked={streamingEnabled}
             onCheckedChange={(checked) => onStreamingChange(checked === true)}
-            aria-label={t("playground.chatUi.additionalModelSettings.streamResponses")}
+            aria-label="Stream responses"
           />
           <label htmlFor={streamingId} className="cursor-pointer text-sm font-medium">
-            {t("playground.chatUi.additionalModelSettings.streamResponses")}
+            Stream responses
           </label>
           <Tooltip>
-            <TooltipTrigger aria-label={t("playground.chatUi.additionalModelSettings.streamResponsesHelp")}>
+            <TooltipTrigger aria-label="Help: Stream responses">
               <Info className="size-3 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground" />
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">
-              {t("playground.chatUi.additionalModelSettings.streamResponsesTooltip")}
+              Streams the answer token by token. Uncheck to send a non-streaming request and render the full response at
+              once.
             </TooltipContent>
           </Tooltip>
         </div>
@@ -135,10 +134,10 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
             id={advancedId}
             checked={useAdvancedParams}
             onCheckedChange={(checked) => handleUseAdvancedParamsChange(checked === true)}
-            aria-label={t("playground.chatUi.additionalModelSettings.useAdvancedParams")}
+            aria-label="Use Advanced Parameters"
           />
           <label htmlFor={advancedId} className="cursor-pointer text-sm font-medium">
-            {t("playground.chatUi.additionalModelSettings.useAdvancedParams")}
+            Use Advanced Parameters
           </label>
         </div>
       )}
@@ -149,31 +148,30 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
             id={fallbacksId}
             checked={mockTestFallbacks ?? false}
             onCheckedChange={(checked) => onMockTestFallbacksChange(checked === true)}
-            aria-label={t("playground.chatUi.additionalModelSettings.simulateFailure")}
+            aria-label="Simulate failure to test fallbacks"
           />
           <label htmlFor={fallbacksId} className="cursor-pointer text-sm font-medium">
-            {t("playground.chatUi.additionalModelSettings.simulateFailure")}
+            Simulate failure to test fallbacks
           </label>
           <Popover>
-            <PopoverTrigger aria-label={t("playground.chatUi.additionalModelSettings.simulateFailureHelp")}>
+            <PopoverTrigger aria-label="Help: Simulate failure to test fallbacks">
               <Info className="size-3 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground" />
             </PopoverTrigger>
             <PopoverContent side="right" className="max-w-[340px] gap-2 p-3 text-sm">
-              <p>{t("playground.chatUi.additionalModelSettings.simulateFailureDescription")}</p>
               <p>
-                <Trans
-                  i18nKey="playground.chatUi.additionalModelSettings.behaviorDiffers"
-                  components={{
-                    docs: (
-                      <a
-                        href="https://docs.litellm.ai/docs/proxy/keys_teams_router_settings"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-info hover:text-info/80"
-                      />
-                    ),
-                  }}
-                />
+                Causes the first request to fail so the router tries fallbacks (if configured). Use this to verify your
+                fallback setup.
+              </p>
+              <p>
+                Behavior can differ when keys, teams, or router settings are configured.{" "}
+                <a
+                  href="https://docs.litellm.ai/docs/proxy/keys_teams_router_settings"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-info hover:text-info/80"
+                >
+                  Learn more
+                </a>
               </p>
             </PopoverContent>
           </Popover>
@@ -188,14 +186,14 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-1">
                 <label htmlFor={temperatureId} className={cn("text-sm", disabledTextColor)}>
-                  {t("playground.chatUi.additionalModelSettings.temperature")}
+                  Temperature
                 </label>
                 <Tooltip>
-                  <TooltipTrigger aria-label={t("playground.chatUi.additionalModelSettings.temperatureHelp")}>
+                  <TooltipTrigger aria-label="Help: Temperature">
                     <Info className={cn("size-3 cursor-help", disabledTextColor)} />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">
-                    {t("playground.chatUi.additionalModelSettings.temperatureTooltip")}
+                    Controls randomness. Lower values make output more deterministic, higher values more creative.
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -203,7 +201,7 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
                 id={`${temperatureId}-number`}
                 type="text"
                 inputMode="decimal"
-                aria-label={t("playground.chatUi.additionalModelSettings.temperatureValue")}
+                aria-label="Temperature value"
                 value={temperatureText}
                 disabled={!useAdvancedParams}
                 className="h-8 w-20"
@@ -219,7 +217,7 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
               step={0.1}
               value={localTemperature}
               disabled={!useAdvancedParams}
-              aria-label={t("playground.chatUi.additionalModelSettings.temperature")}
+              aria-label="Temperature"
               className="w-full accent-primary disabled:cursor-not-allowed"
               onChange={(event) => handleTemperatureChange(Number(event.target.value))}
             />
@@ -234,14 +232,14 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-1">
                 <label htmlFor={maxTokensId} className={cn("text-sm", disabledTextColor)}>
-                  {t("playground.chatUi.additionalModelSettings.maxTokens")}
+                  Max Tokens
                 </label>
                 <Tooltip>
-                  <TooltipTrigger aria-label={t("playground.chatUi.additionalModelSettings.maxTokensHelp")}>
+                  <TooltipTrigger aria-label="Help: Max Tokens">
                     <Info className={cn("size-3 cursor-help", disabledTextColor)} />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">
-                    {t("playground.chatUi.additionalModelSettings.maxTokensTooltip")}
+                    Maximum number of tokens to generate in the response.
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -249,7 +247,7 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
                 id={`${maxTokensId}-number`}
                 type="text"
                 inputMode="numeric"
-                aria-label={t("playground.chatUi.additionalModelSettings.maxTokensValue")}
+                aria-label="Max tokens value"
                 value={maxTokensText}
                 disabled={!useAdvancedParams}
                 className="h-8 w-24"
@@ -265,7 +263,7 @@ const AdditionalModelSettings: React.FC<AdditionalModelSettingsProps> = ({
               step={1}
               value={localMaxTokens}
               disabled={!useAdvancedParams}
-              aria-label={t("playground.chatUi.additionalModelSettings.maxTokens")}
+              aria-label="Max Tokens"
               className="w-full accent-primary disabled:cursor-not-allowed"
               onChange={(event) => handleMaxTokensChange(Number(event.target.value))}
             />

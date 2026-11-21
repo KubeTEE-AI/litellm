@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import { getProxyBaseUrl, getGlobalLitellmHeaderName } from "@/components/networking";
 import { toast } from "@/lib/toast";
 import { DiscountConfig } from "./types";
@@ -25,7 +24,6 @@ export interface UseDiscountConfigReturn {
 }
 
 export function useDiscountConfig({ accessToken }: UseDiscountConfigProps): UseDiscountConfigReturn {
-  const { t } = useTranslation();
   const [discountConfig, setDiscountConfig] = useState<DiscountConfig>({});
 
   const fetchDiscountConfig = useCallback(async () => {
@@ -49,9 +47,9 @@ export function useDiscountConfig({ accessToken }: UseDiscountConfigProps): UseD
       }
     } catch (error) {
       console.error("Error fetching discount config:", error);
-      toast.fromError(t("costTracking.discountConfig.toasts.fetchFailed"));
+      toast.fromError("Failed to fetch discount configuration");
     }
-  }, [accessToken, t]);
+  }, [accessToken]);
 
   const saveDiscountConfig = useCallback(
     async (config: DiscountConfig) => {
@@ -69,32 +67,31 @@ export function useDiscountConfig({ accessToken }: UseDiscountConfigProps): UseD
         });
 
         if (response.ok) {
-          toast.success(t("costTracking.discountConfig.toasts.updated"));
+          toast.success("Discount configuration updated successfully");
           await fetchDiscountConfig();
         } else {
           const errorData = await response.json();
-          const errorMessage =
-            errorData.detail?.error || errorData.detail || t("costTracking.discountConfig.toasts.updateFailedFallback");
+          const errorMessage = errorData.detail?.error || errorData.detail || "Failed to update settings";
           toast.fromError(errorMessage);
         }
       } catch (error) {
         console.error("Error updating discount config:", error);
-        toast.fromError(t("costTracking.discountConfig.toasts.updateFailed"));
+        toast.fromError("Failed to update discount configuration");
       }
     },
-    [accessToken, fetchDiscountConfig, t],
+    [accessToken, fetchDiscountConfig],
   );
 
   const handleAddProvider = useCallback(
     async (selectedProvider: string | undefined, newDiscount: string, modelPattern: string): Promise<boolean> => {
       if (!selectedProvider || !newDiscount) {
-        toast.fromError(t("costTracking.discountConfig.toasts.missingInput"));
+        toast.fromError("Please select a provider and enter discount percentage");
         return false;
       }
 
       const percentageValue = parseFloat(newDiscount);
       if (isNaN(percentageValue) || percentageValue < 0 || percentageValue > 100) {
-        toast.fromError(t("costTracking.discountConfig.toasts.outOfRange"));
+        toast.fromError("Discount must be between 0% and 100%");
         return false;
       }
 
@@ -103,7 +100,7 @@ export function useDiscountConfig({ accessToken }: UseDiscountConfigProps): UseD
       const providerValue = getProviderBackendValue(selectedProvider);
 
       if (!providerValue) {
-        toast.fromError(t("costTracking.discountConfig.toasts.invalidProvider"));
+        toast.fromError("Invalid provider selected");
         return false;
       }
 
@@ -112,10 +109,7 @@ export function useDiscountConfig({ accessToken }: UseDiscountConfigProps): UseD
       if (configKey in discountConfig) {
         const displayName = Providers[selectedProvider as keyof typeof Providers];
         toast.fromError(
-          t("costTracking.discountConfig.toasts.duplicate", {
-            name: displayName,
-            models: trimmedPattern || t("costTracking.discountConfig.toasts.allModels"),
-          }),
+          `Discount for ${displayName} (${trimmedPattern || "all models"}) already exists. Edit it in the table above.`,
         );
         return false;
       }
@@ -130,7 +124,7 @@ export function useDiscountConfig({ accessToken }: UseDiscountConfigProps): UseD
       await saveDiscountConfig(updatedConfig);
       return true;
     },
-    [discountConfig, saveDiscountConfig, t],
+    [discountConfig, saveDiscountConfig],
   );
 
   const handleRemoveProvider = useCallback(

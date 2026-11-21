@@ -27,13 +27,10 @@ def sse(data):
     return f"data: {json.dumps(data)}"
 
 
-def _line_stream(lines: list[str]) -> httpx.Response:
-    return httpx.Response(200, stream=httpx.ByteStream("".join(f"{line}\n" for line in lines).encode()))
-
-
 class FakeResponse:
-    def __init__(self, *, json_data: object = None, status_code: int = 200) -> None:
+    def __init__(self, *, json_data=None, lines=None, status_code=200):
         self._json = json_data
+        self._lines = lines or []
         self.status_code = status_code
 
     def json(self):
@@ -42,6 +39,10 @@ class FakeResponse:
     def raise_for_status(self):
         if self.status_code >= 400:
             raise http_status_error(self.status_code)
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
 
 
 class FakeHTTPClient:
@@ -92,7 +93,7 @@ class FakeHTTPClient:
         if url.endswith("/code"):
             if self.execute_raises is not None:
                 raise self.execute_raises
-            return _line_stream(self.execute_lines)
+            return FakeResponse(lines=self.execute_lines)
         raise AssertionError(f"unexpected POST {url}")
 
     async def get(self, url, headers=None, params=None, **kwargs):

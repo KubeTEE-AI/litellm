@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { coy } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -14,7 +13,6 @@ interface ReasoningContentProps {
 }
 
 const ReasoningContent: React.FC<ReasoningContentProps> = ({ reasoningContent }) => {
-  const { t } = useTranslation();
   const syntaxTheme = useSyntaxTheme(coy);
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -34,7 +32,7 @@ const ReasoningContent: React.FC<ReasoningContentProps> = ({ reasoningContent })
           }
         >
           <Lightbulb className="size-3.5" />
-          {isExpanded ? t("chatUi.reasoning.hide") : t("chatUi.reasoning.show")}
+          {isExpanded ? "Hide reasoning" : "Show reasoning"}
           {isExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         </CollapsibleTrigger>
 

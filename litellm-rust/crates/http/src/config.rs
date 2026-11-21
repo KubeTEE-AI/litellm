@@ -16,7 +16,6 @@ pub enum Verify {
     Disabled,
     CaBundle(PathBuf),
     BuiltInRoots,
-    NativeRoots,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -99,7 +98,7 @@ impl TryFrom<&HttpClientConfig> for reqwest::ClientBuilder {
 
     fn try_from(config: &HttpClientConfig) -> Result<Self, Self::Error> {
         let base = reqwest::Client::builder()
-            .tls_backend_preconfigured(rustls::ClientConfig::try_from(config)?)
+            .use_preconfigured_tls(rustls::ClientConfig::try_from(config)?)
             .connect_timeout(config.connect_timeout)
             .pool_idle_timeout(config.pool_idle_timeout);
         let with_keepalive = match config.tcp_keepalive {
@@ -136,7 +135,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{TlsSource, error::Repr};
+    use crate::TlsSource;
 
     fn settings(ssl_verify: Option<SslVerify>, ssl_cert_file: Option<&str>) -> HttpSettings {
         HttpSettings {
@@ -306,10 +305,11 @@ mod tests {
         };
         assert!(matches!(
             reqwest::ClientBuilder::try_from(&config),
-            Err(error) if matches!(
-                error.repr(),
-                Repr::Read { path: reported, tls_source: TlsSource::CaBundle, .. } if *reported == path
-                )
+            Err(Error::Read {
+                path: reported,
+                tls_source: TlsSource::CaBundle,
+                ..
+            }) if reported == path
         ));
     }
 
@@ -326,10 +326,11 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         assert!(matches!(
             result,
-            Err(error) if matches!(
-                error.repr(),
-                Repr::InvalidPem { path: reported, tls_source: TlsSource::CaBundle, .. } if *reported == path
-                )
+            Err(Error::InvalidPem {
+                path: reported,
+                tls_source: TlsSource::CaBundle,
+                ..
+            }) if reported == path
         ));
     }
 }

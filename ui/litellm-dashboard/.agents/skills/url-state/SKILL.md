@@ -1,8 +1,6 @@
 ---
 name: url-state
 description: Read or write dashboard URL query state (tabs, filters, pagination, deep links, demo flags) with nuqs instead of raw history or URLSearchParams
-metadata:
-  internal: true
 ---
 
 # URL state

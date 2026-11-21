@@ -74,15 +74,14 @@ import os
 import re
 import time
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Final, Optional
+from typing import TYPE_CHECKING, Any, Final, Optional
 
 import httpx
 import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
-from pydantic import TypeAdapter
-from typing_extensions import NotRequired, ReadOnly, TypedDict, Unpack
+from typing_extensions import NotRequired, ReadOnly, TypedDict
 
 from litellm._logging import verbose_proxy_logger
 from litellm.caching import DualCache
@@ -90,19 +89,13 @@ from litellm.integrations.custom_guardrail import (
     CustomGuardrail,
     log_guardrail_information,
 )
-from litellm.litellm_core_utils.core_helpers import decoded_json_object
 from litellm.proxy._types import UserAPIKeyAuth
+from litellm.types.guardrail_base_init import GuardrailBaseInitKwargs
 from litellm.types.guardrails import GuardrailEventHooks
 from litellm.types.utils import CallTypesLiteral
 
 if TYPE_CHECKING:
     from jwt.types import Options
-
-_DECODED_JSON: Final = TypeAdapter(object)
-
-
-class _CustomGuardrailOptions(TypedDict, total=False, extra_items=object):
-    pass
 
 
 class _OIDCDiscoveryDocument(TypedDict, total=False):
@@ -286,13 +279,11 @@ class MCPJWTSigner(CustomGuardrail):
         debug_headers: bool = False,
         # FR-10: Configurable scopes
         allowed_scopes: list[str] | None = None,
-        **kwargs: Unpack[_CustomGuardrailOptions],
+        **kwargs: Any,
     ) -> None:
-        options: Final[_CustomGuardrailOptions] = {
-            "supported_event_hooks": list(self.get_supported_event_hooks()),
-            **kwargs,
-        }
-        super().__init__(**options)
+        kwargs.setdefault("supported_event_hooks", list(self.get_supported_event_hooks()))
+        base_kwargs: Final[GuardrailBaseInitKwargs] = kwargs
+        super().__init__(**base_kwargs)
 
         # --- Signing key setup ---
         key_material: Final = os.environ.get(self.SIGNING_KEY_ENV)
@@ -500,7 +491,7 @@ class MCPJWTSigner(CustomGuardrail):
         payload: Final[dict[str, object]] = jwt.decode(raw_token, signing_jwk.key, **decode_kwargs)
         return payload
 
-    async def _introspect_opaque_token(self, token: str) -> Mapping[str, object]:
+    async def _introspect_opaque_token(self, token: str) -> dict[str, object]:
         """
         Perform RFC 7662 token introspection for opaque (non-JWT) tokens.
 
@@ -526,7 +517,7 @@ class MCPJWTSigner(CustomGuardrail):
             timeout=self.timeout,
         )
         resp.raise_for_status()
-        result: Final = decoded_json_object(_DECODED_JSON.validate_python(resp.json()))
+        result: Final[dict[str, object]] = resp.json()
         if not result.get("active", False):
             raise jwt.exceptions.ExpiredSignatureError(
                 "MCPJWTSigner: incoming token is inactive (introspection returned active=false)"
@@ -825,7 +816,7 @@ class MCPJWTSigner(CustomGuardrail):
         # ------------------------------------------------------------------
         # FR-5: Verify incoming token before re-signing
         # ------------------------------------------------------------------
-        jwt_claims: Mapping[str, object] | None = None
+        jwt_claims: dict[str, object] | None = None
         raw_token: Final[str | None] = hook_data.get("incoming_bearer_token")
 
         if self.access_token_discovery_uri and raw_token:

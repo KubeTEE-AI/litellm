@@ -19,7 +19,7 @@ from litellm.proxy.guardrails.guardrail_hooks.mcp_security import initialize_gua
 from litellm.proxy.guardrails.guardrail_hooks.mcp_security.mcp_security_guardrail import (
     MCPSecurityGuardrail,
 )
-from litellm.proxy.mcp_server.mcp_server_manager import MCPServerManager
+from litellm.proxy._experimental.mcp_server.mcp_server_manager import MCPServerManager
 from litellm.types.guardrails import Guardrail, GuardrailEventHooks, LitellmParams
 from litellm.types.mcp import MCPTransport
 from litellm.types.mcp_server.mcp_server_manager import MCPServer
@@ -94,7 +94,10 @@ class TestMCPSecurityGuardrailPreCall:
 
         with (
             patch("litellm.proxy.proxy_server.prisma_client", None),
-            patch("litellm.proxy.mcp_server.mcp_server_manager.global_mcp_server_manager", _manager_with_saved_server()),
+            patch(
+                "litellm.proxy._experimental.mcp_server.mcp_server_manager.global_mcp_server_manager",
+                _manager_with_saved_server(),
+            ),
             pytest.raises(HTTPException) as exc_info,
         ):
             await guardrail.async_pre_call_hook(
@@ -118,7 +121,10 @@ class TestMCPSecurityGuardrailPreCall:
 
         with (
             patch("litellm.proxy.proxy_server.prisma_client", None),
-            patch("litellm.proxy.mcp_server.mcp_server_manager.global_mcp_server_manager", _manager_with_saved_server()),
+            patch(
+                "litellm.proxy._experimental.mcp_server.mcp_server_manager.global_mcp_server_manager",
+                _manager_with_saved_server(),
+            ),
         ):
             result = await guardrail.async_pre_call_hook(
                 user_api_key_dict=UserAPIKeyAuth(),
@@ -190,9 +196,8 @@ class TestInitializeGuardrail:
 @pytest.mark.parametrize("call_type", ["acompletion", "aresponses"])
 async def test_guardrail_observes_saved_server_creation_and_deletion_on_another_worker(guardrail, call_type):
     from unittest.mock import AsyncMock
-
     from litellm.proxy._types import LiteLLM_MCPServerTable
-    from litellm.proxy.mcp_server.mcp_server_manager import MCPServerManager
+    from litellm.proxy._experimental.mcp_server.mcp_server_manager import MCPServerManager
 
     manager = MCPServerManager()
     row = LiteLLM_MCPServerTable(server_id="peer-server", alias="peer_server", transport="http",
@@ -208,7 +213,7 @@ async def test_guardrail_observes_saved_server_creation_and_deletion_on_another_
         patch("litellm.proxy.proxy_server.prisma_client", prisma),
         patch("litellm.proxy.proxy_server.general_settings", {}),
         patch("litellm.proxy.proxy_server.user_api_key_cache", DualCache()),
-        patch("litellm.proxy.mcp_server.mcp_server_manager.global_mcp_server_manager", manager),
+        patch("litellm.proxy._experimental.mcp_server.mcp_server_manager.global_mcp_server_manager", manager),
     ):
         result = await guardrail.async_pre_call_hook(UserAPIKeyAuth(), MagicMock(), data, call_type)
         assert result == data
@@ -242,8 +247,38 @@ async def test_allows_saved_toolset_by_name_and_blocks_unknown_name(guardrail, c
         patch("litellm.proxy.proxy_server.prisma_client", prisma),
         patch("litellm.proxy.proxy_server.general_settings", {}),
         patch("litellm.proxy.proxy_server.user_api_key_cache", DualCache()),
-        patch("litellm.proxy.mcp_server.mcp_server_manager.global_mcp_server_manager", MCPServerManager()),
+        patch(
+            "litellm.proxy._experimental.mcp_server.mcp_server_manager.global_mcp_server_manager",
+            MCPServerManager(),
+        ),
         pytest.raises(HTTPException) as exc,
     ):
         await guardrail.async_pre_call_hook(UserAPIKeyAuth(), MagicMock(), data, call_type)
     assert exc.value.detail["unregistered_servers"] == ["evil_server"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call_type", ["acompletion", "aresponses"])
+async def test_blocks_the_name_with_the_policy_result_when_the_toolset_read_fails(guardrail, call_type):
+    prisma: Final = MagicMock()
+    prisma.writer_db = prisma.db
+    prisma.db.litellm_mcpservertable.find_many = AsyncMock(return_value=[])
+    prisma.db.litellm_config.find_unique = AsyncMock(return_value=None)
+    prisma.db.litellm_mcptoolsettable.find_first = AsyncMock(side_effect=RuntimeError("toolset table unavailable"))
+    data: Final = {
+        "tools": [{"type": "mcp", "server_url": "litellm_proxy/mcp/research"}],
+        "guardrails": ["test-mcp-security"],
+    }
+    with (
+        patch("litellm.proxy.proxy_server.prisma_client", prisma),
+        patch("litellm.proxy.proxy_server.general_settings", {}),
+        patch("litellm.proxy.proxy_server.user_api_key_cache", DualCache()),
+        patch(
+            "litellm.proxy._experimental.mcp_server.mcp_server_manager.global_mcp_server_manager",
+            MCPServerManager(),
+        ),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await guardrail.async_pre_call_hook(UserAPIKeyAuth(), MagicMock(), data, call_type)
+    assert exc.value.status_code == 400
+    assert exc.value.detail["unregistered_servers"] == ["research"]

@@ -14,8 +14,6 @@ from tests.integration._support.database import read_rows
 from tests.integration._support.process import owned_proxy
 from tests.integration._support.wire import Reply, Request, wire_server
 
-pytestmark: Final = pytest.mark.shares_worker_state
-
 KEY_ID: Final = "integration-jwt-signing-key"
 TEAM_BUDGET: Final = 25.0
 

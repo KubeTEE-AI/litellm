@@ -25,8 +25,6 @@ from pydantic import TypeAdapter
 
 import litellm
 
-pytestmark: Final = pytest.mark.shares_worker_state
-
 JSON_OBJECT: Final = TypeAdapter(dict[str, JsonValue])
 EndpointScope: TypeAlias = Literal["streaming", "non_streaming"]
 ModelKind: TypeAlias = Literal["router", "direct"]

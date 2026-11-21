@@ -3,7 +3,6 @@ from types import MappingProxyType
 from typing import Final
 
 from litellm.exceptions import BadRequestError, UnsupportedParamsError
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.openai.image_generation import GPTImageGenerationConfig
 from litellm.types.llms.openai import OpenAIImageGenerationOptionalParams
 
@@ -53,8 +52,7 @@ class AzureFoundryFluxImageGenerationConfig(GPTImageGenerationConfig):
             return f"{api_base}?api-version={api_version}"
 
         provider_model_path: Final = AzureFoundryFluxImageGenerationConfig.get_flux2_provider_model_path(model)
-        flux_route: Final = f"providers/blackforestlabs/v1/{provider_model_path}"
-        return f"{join_api_base(api_base, flux_route)}?api-version={api_version}"
+        return f"{api_base}/providers/blackforestlabs/v1/{provider_model_path}?api-version={api_version}"
 
     @staticmethod
     def is_flux2_model(model: str) -> bool:

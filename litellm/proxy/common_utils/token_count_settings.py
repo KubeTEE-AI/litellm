@@ -13,7 +13,6 @@ from litellm.types.token_count import TokenCountProvider, TokenCountSourceFields
 from litellm.types.utils import TokenCountResponse
 
 CANNOT_COUNT_MODEL_STATUSES: Final = frozenset({400, 404})
-REGION_DENIED_STATUSES: Final = frozenset({401, 403})
 TOKENIZER_LOAD_WAIT_SECONDS: Final = 5.0
 TOKENIZER_LOAD_REUSE_SECONDS: Final = 60.0
 TOKENIZER_LOAD_MAX_RUNNING: Final = 4
@@ -48,7 +47,6 @@ class TokenCountModel:
     model: str
     region: str | None
     litellm_provider: TokenCountProvider | None = None
-    configured: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,22 +54,6 @@ class TokenCountSettings:
     framing: int | None
     count_model: TokenCountModel | None
     tokenizer: TokenCountTokenizer | None = None
-    tool_framing: int | None = None
-    responses_framing: int | None = None
-    responses_tool_framing: int | None = None
-
-    @property
-    def frames_counts(self) -> bool:
-        return any(
-            framing is not None
-            for framing in (self.framing, self.tool_framing, self.responses_framing, self.responses_tool_framing)
-        )
-
-    def hidden_prompt_tokens(self, carries_tools: bool, responses_api: bool) -> int:
-        chat: Final = self.tool_framing if carries_tools else None
-        responses: Final = self.responses_tool_framing if carries_tools else self.responses_framing
-        narrower: Final = responses if responses_api else chat
-        return (narrower if narrower is not None else self.framing) or 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,13 +66,7 @@ class ProviderCountFailure:
     def cannot_count_model(self) -> bool:
         return not self.rejected_before_provider_call and self.status_code in CANNOT_COUNT_MODEL_STATUSES
 
-    @property
-    def denied_in_region(self) -> bool:
-        return not self.rejected_before_provider_call and self.status_code in REGION_DENIED_STATUSES
-
     def with_hint(self, hint: str) -> "ProviderCountFailure":
-        if self.rejected_before_provider_call:
-            return self
         return replace(self, message=_with_hint(self.message, hint))
 
     def to_proxy_exception(self) -> ProxyException:
@@ -121,15 +97,6 @@ def _framing(value: object) -> int | None:
             return None
 
 
-def _first_framing(source: Mapping[str, object], keys: tuple[str, ...]) -> int | None:
-    return next((framing for framing in map(_framing, map(source.get, keys)) if framing is not None), None)
-
-
-def _configured_framing(configured: Mapping[str, object], default: Mapping[str, object], *keys: str) -> int | None:
-    operator_sets_one: Final = _first_framing(configured, (*keys, "token_count_framing")) is not None
-    return _first_framing(configured if operator_sets_one else default, keys)
-
-
 def _non_blank(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
@@ -144,7 +111,7 @@ def _count_provider(value: object) -> TokenCountProvider | None:
             return None
 
 
-def _count_model(value: Mapping[str, object], configured: bool) -> TokenCountModel | None:
+def _count_model(value: Mapping[str, object]) -> TokenCountModel | None:
     model: Final = _non_blank(value.get("model"))
     return (
         None
@@ -153,7 +120,6 @@ def _count_model(value: Mapping[str, object], configured: bool) -> TokenCountMod
             model=model,
             region=_non_blank(value.get("region")),
             litellm_provider=_count_provider(value.get("litellm_provider")),
-            configured=configured,
         )
     )
 
@@ -180,12 +146,12 @@ def _resolved_count_model(
 ) -> TokenCountModel | None:
     configured_mapping: Final = as_str_mapping(configured)
     if configured_mapping is not None:
-        return _count_model(configured_mapping, configured=True)
+        return _count_model(configured_mapping)
     default_mapping: Final = as_str_mapping(default)
     return (
         None
         if default_mapping is None
-        else _within_deployment_geography(_count_model(default_mapping, configured=False), deployment_region)
+        else _within_deployment_geography(_count_model(default_mapping), deployment_region)
     )
 
 
@@ -200,21 +166,13 @@ def _tokenizer(value: object) -> TokenCountTokenizer | None:
 def resolve_token_count_settings(
     configured: Mapping[str, object], default: Mapping[str, object], deployment_region: Callable[[], str]
 ) -> TokenCountSettings:
+    framing: Final = _framing(configured.get("token_count_framing"))
     return TokenCountSettings(
-        framing=_configured_framing(configured, default, "token_count_framing"),
+        framing=framing if framing is not None else _framing(default.get("token_count_framing")),
         count_model=_resolved_count_model(
             configured.get("token_count_model"), default.get("token_count_model"), deployment_region
         ),
         tokenizer=_tokenizer(default.get("token_count_tokenizer")),
-        tool_framing=_configured_framing(configured, default, "token_count_tool_framing"),
-        responses_framing=_configured_framing(configured, default, "token_count_responses_framing"),
-        responses_tool_framing=_configured_framing(
-            configured,
-            default,
-            "token_count_responses_tool_framing",
-            "token_count_responses_framing",
-            "token_count_tool_framing",
-        ),
     )
 
 

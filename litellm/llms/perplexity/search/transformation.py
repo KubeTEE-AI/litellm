@@ -9,7 +9,6 @@ import httpx
 from pydantic import ConfigDict, TypeAdapter
 
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
-from litellm.litellm_core_utils.url_utils import ensure_api_route
 from litellm.llms.base_llm.search.transformation import (
     BaseSearchConfig,
     SearchResponse,
@@ -79,14 +78,18 @@ class PerplexitySearchConfig(BaseSearchConfig):
         """
         Get complete URL for Search endpoint.
         """
-        return ensure_api_route(api_base or get_secret_str("PERPLEXITY_API_BASE") or self.PERPLEXITY_API_BASE, "search")
+        resolved_api_base: Final = api_base or get_secret_str("PERPLEXITY_API_BASE") or self.PERPLEXITY_API_BASE
+        clean_api_base: Final = resolved_api_base.rstrip("/")
+        if clean_api_base.endswith("/search"):
+            return clean_api_base
+        return f"{clean_api_base}/search"
 
     def transform_search_request(
         self,
         query: str | list[str],
-        optional_params: dict[str, object],
-        **kwargs: object,
-    ) -> dict[str, object]:
+        optional_params: dict,
+        **kwargs,
+    ) -> dict:
         """
         Transform Search request to Perplexity API format.
 
@@ -98,7 +101,11 @@ class PerplexitySearchConfig(BaseSearchConfig):
 
         Args:
             query: Search query (string or list of strings)
-            optional_params: Provider parameters, forwarded unchanged when not None.
+            optional_params: Optional parameters for the request
+                - max_results: Maximum number of search results (1-20)
+                - search_domain_filter: List of domains to filter (max 20)
+                - max_tokens_per_page: Max tokens per page (default 1024)
+                - country: Country code filter (e.g., 'US', 'GB', 'DE')
 
         Returns:
             Dict with typed request data following PerplexitySearchRequest spec
@@ -107,10 +114,24 @@ class PerplexitySearchConfig(BaseSearchConfig):
             "query": query,
         }
 
-        return {
-            **{key: value for key, value in optional_params.items() if value is not None},
-            **request_data,
-        }
+        # Add optional parameters following Perplexity API spec (only if not None)
+        max_results: Final = optional_params.get("max_results")
+        if max_results is not None:
+            request_data["max_results"] = max_results
+
+        search_domain_filter: Final = optional_params.get("search_domain_filter")
+        if search_domain_filter is not None:
+            request_data["search_domain_filter"] = search_domain_filter
+
+        max_tokens_per_page: Final = optional_params.get("max_tokens_per_page")
+        if max_tokens_per_page is not None:
+            request_data["max_tokens_per_page"] = max_tokens_per_page
+
+        country: Final = optional_params.get("country")
+        if country is not None:
+            request_data["country"] = country
+
+        return dict(request_data)
 
     def transform_search_response(
         self,

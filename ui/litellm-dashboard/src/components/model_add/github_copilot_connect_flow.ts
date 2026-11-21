@@ -1,5 +1,3 @@
-import type { TFunction } from "i18next";
-import i18n from "@/i18n/i18n";
 import type { UserConnectionPollResponse, UserConnectionStartResponse } from "@/components/networking";
 
 export const GITHUB_DEVICE_LOGIN_URL = "https://github.com/login/device";
@@ -36,22 +34,8 @@ export type ConnectFlowEvent =
 
 export const initialConnectFlowState: ConnectFlowState = { kind: "starting", attempt: 0 };
 
-const safeVerificationUri = (uri: string): string => {
-  try {
-    const url = new URL(uri);
-    const usesHttps = url.protocol === "https:";
-    const hasCredentials = url.username !== "" || url.password !== "";
-    const hasNoPort = url.port === "";
-    const hostIsAllowed =
-      url.hostname === "github.com" || /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.ghe\.com$/.test(url.hostname);
-    const urlHasAllowedAuthority = !hasCredentials && hasNoPort && hostIsAllowed;
-    const isSafeUrl = usesHttps && urlHasAllowedAuthority;
-
-    return isSafeUrl ? uri : GITHUB_DEVICE_LOGIN_URL;
-  } catch {
-    return GITHUB_DEVICE_LOGIN_URL;
-  }
-};
+const safeVerificationUri = (uri: string): string =>
+  uri.startsWith("https://github.com/") ? uri : GITHUB_DEVICE_LOGIN_URL;
 
 const afterPoll = (
   state: Extract<ConnectFlowState, { kind: "awaiting" }>,
@@ -103,18 +87,15 @@ export const connectFlowReducer = (state: ConnectFlowState, event: ConnectFlowEv
   }
 };
 
-export const failureMessage = (
-  state: Extract<ConnectFlowState, { kind: "failed" }>,
-  t: TFunction = i18n.t.bind(i18n),
-): string => {
+export const failureMessage = (state: Extract<ConnectFlowState, { kind: "failed" }>): string => {
   switch (state.reason) {
     case "expired":
-      return t("modelAdd.githubCopilotConnectFlow.expired");
+      return "The device code expired before it was approved. Start again to get a new code.";
     case "denied":
-      return t("modelAdd.githubCopilotConnectFlow.denied");
+      return "The request was denied on GitHub. Start again if this was a mistake.";
     case "no_copilot_seat":
-      return t("modelAdd.githubCopilotConnectFlow.noCopilotSeat");
+      return "This GitHub account does not have GitHub Copilot access, so nothing was saved.";
     case "error":
-      return state.message ?? t("modelAdd.githubCopilotConnectFlow.unknownError");
+      return state.message ?? "Something went wrong while connecting to GitHub.";
   }
 };

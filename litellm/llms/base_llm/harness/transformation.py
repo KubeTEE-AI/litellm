@@ -69,16 +69,6 @@ class HarnessTurnRequest:
 
 
 @dataclass(frozen=True)
-class HarnessSessionCopy:
-    """A saved session under fresh ids: written to `path` in the sandbox, then loaded by `import_command`."""
-
-    session_id: str
-    path: str
-    data: bytes
-    import_command: Sequence[str]
-
-
-@dataclass(frozen=True)
 class HarnessTurnResponse:
     """What the runtime produced for one turn, after the process exited."""
 
@@ -137,18 +127,6 @@ class BaseCLIHarnessConfig(BaseHarnessConfig[OptionsT], Generic[OptionsT, Stream
         native_session_id: str | None,
     ) -> HarnessTurnRequest:
         """argv / env / stdin for one turn. native_session_id is set after the first turn."""
-
-    def transform_resume_export_command(self, native_session_id: str) -> Sequence[str] | None:
-        """Command that prints a saved session before resuming one this handler did not run.
-
-        None resumes the saved session as is. A non-zero exit or a timeout fails the turn, and the next turn
-        tries again.
-        """
-        return None
-
-    def transform_resume_copy(self, exported: str, private_dir: str, workdir: str) -> HarnessSessionCopy | None:
-        """The copy to import and continue, from the export command's stdout, or None to continue the original."""
-        return None
 
     @abstractmethod
     def create_stream_state(self) -> StreamStateT:

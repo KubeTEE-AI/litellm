@@ -20,7 +20,6 @@ from pydantic import ConfigDict, TypeAdapter
 
 from litellm._logging import verbose_logger
 from litellm.exceptions import AuthenticationError
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.llms.base_llm.embedding.transformation import BaseEmbeddingConfig
 from litellm.types.llms.openai import AllEmbeddingInputValues
@@ -30,7 +29,7 @@ from litellm.utils import convert_to_model_response_object
 from ..authenticator import Authenticator
 from ..common_utils import (
     DEFAULT_GITHUB_COPILOT_API_BASE,
-    GetAccessTokenError,
+    GetAPIKeyError,
     get_copilot_default_headers,
     pin_session_authorization,
 )
@@ -100,7 +99,7 @@ class GithubCopilotEmbeddingConfig(BaseEmbeddingConfig):
 
             return merged_headers
 
-        except GetAccessTokenError as e:
+        except GetAPIKeyError as e:
             raise AuthenticationError(
                 model=model,
                 llm_provider="github_copilot",
@@ -122,7 +121,7 @@ class GithubCopilotEmbeddingConfig(BaseEmbeddingConfig):
         user_session: Final = require_github_copilot_user_session(
             cast("dict[str, object]", litellm_params)  # cast-ok: litellm_params arrives as an untyped request dict
         )
-        effective_api_base: Final = (
+        effective_api_base = (
             (user_session.api_base if user_session is not None else None)
             or api_base
             or self.authenticator.get_api_base()
@@ -130,7 +129,11 @@ class GithubCopilotEmbeddingConfig(BaseEmbeddingConfig):
             or DEFAULT_GITHUB_COPILOT_API_BASE
         )
 
-        return join_api_base(effective_api_base, "embeddings")
+        # Remove trailing slashes
+        effective_api_base = effective_api_base.rstrip("/")
+
+        # Return the embeddings endpoint
+        return f"{effective_api_base}/embeddings"
 
     def transform_embedding_request(
         self,
@@ -202,9 +205,7 @@ class GithubCopilotEmbeddingConfig(BaseEmbeddingConfig):
                 optional_params[param] = value
         return optional_params
 
-    def get_error_class(
-        self, error_message: str, status_code: int, headers: dict[str, str] | httpx.Headers
-    ) -> BaseLLMException:
+    def get_error_class(self, error_message: str, status_code: int, headers: Any) -> BaseLLMException:
         from litellm.llms.openai.openai import OpenAIConfig
 
         return OpenAIConfig().get_error_class(error_message=error_message, status_code=status_code, headers=headers)

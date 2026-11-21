@@ -1,10 +1,9 @@
-import type { ParseKeys } from "i18next";
 import { Providers } from "../provider_info_helpers";
 
 export interface ProviderAuthType {
   readonly id: string;
-  readonly labelKey: ParseKeys;
-  readonly descriptionKey: ParseKeys;
+  readonly label: string;
+  readonly description: string;
   readonly fieldKeys: readonly string[];
   readonly requiredFieldKeys: readonly string[];
   readonly fixedValues?: Readonly<Record<string, string>>;
@@ -14,24 +13,25 @@ export interface ProviderAuthType {
 const EMPTY_PROVIDER_AUTH_TYPES: readonly ProviderAuthType[] = [];
 
 export const GITHUB_COPILOT_AUTH_TYPE_KEY = "github_copilot_auth_type";
-export const GITHUB_COPILOT_HOST_KEY = "github_copilot_host";
 export const GITHUB_COPILOT_PER_USER_AUTH_TYPE = "per_user_oauth";
 
 export const PROVIDER_AUTH_TYPES: Partial<Record<keyof typeof Providers, readonly ProviderAuthType[]>> = {
   GITHUB_COPILOT: [
     {
       id: "shared_device_login",
-      labelKey: "addModel.providerAuthTypes.sharedDeviceLogin.label",
-      descriptionKey: "addModel.providerAuthTypes.sharedDeviceLogin.description",
+      label: "Shared device login",
+      description:
+        "One GitHub device login on the proxy host, stored in its token file, is used for every caller of models on this credential.",
       fieldKeys: ["api_base", "api_key"],
       requiredFieldKeys: [],
     },
     {
       id: GITHUB_COPILOT_PER_USER_AUTH_TYPE,
-      labelKey: "addModel.providerAuthTypes.perUserOauth.label",
+      label: "Per-user GitHub OAuth",
       credentialOnly: true,
-      descriptionKey: "addModel.providerAuthTypes.perUserOauth.description",
-      fieldKeys: [GITHUB_COPILOT_AUTH_TYPE_KEY, GITHUB_COPILOT_HOST_KEY],
+      description:
+        "Each LiteLLM user connects their own GitHub account from LLM Credentials, and their requests use their own GitHub Copilot access. Users who have not connected get a 401.",
+      fieldKeys: [GITHUB_COPILOT_AUTH_TYPE_KEY],
       requiredFieldKeys: [GITHUB_COPILOT_AUTH_TYPE_KEY],
       fixedValues: { [GITHUB_COPILOT_AUTH_TYPE_KEY]: GITHUB_COPILOT_PER_USER_AUTH_TYPE },
     },
@@ -39,9 +39,10 @@ export const PROVIDER_AUTH_TYPES: Partial<Record<keyof typeof Providers, readonl
   MICROSOFT_365_COPILOT: [
     {
       id: "oauth_token_exchange",
-      labelKey: "addModel.providerAuthTypes.oauthTokenExchange.label",
+      label: "OAuth token exchange (on-behalf-of)",
       credentialOnly: true,
-      descriptionKey: "addModel.providerAuthTypes.oauthTokenExchange.description",
+      description:
+        "LiteLLM exchanges each caller's IdP-issued JWT at your IdP's token endpoint for a delegated token. Microsoft Graph only accepts Microsoft Entra tokens, so for Microsoft 365 Copilot the token endpoint must be Entra and callers must send an Entra-issued JWT for this app. Users can still sign in through any IdP federated with Entra.",
       fieldKeys: [
         "token_exchange_endpoint",
         "token_exchange_profile",
@@ -54,8 +55,8 @@ export const PROVIDER_AUTH_TYPES: Partial<Record<keyof typeof Providers, readonl
     },
     {
       id: "static_token",
-      labelKey: "addModel.providerAuthTypes.staticToken.label",
-      descriptionKey: "addModel.providerAuthTypes.staticToken.description",
+      label: "Static delegated access token",
+      description: "Sends one pre-acquired delegated Microsoft Graph token for every caller.",
       fieldKeys: ["api_key"],
       requiredFieldKeys: ["api_key"],
     },

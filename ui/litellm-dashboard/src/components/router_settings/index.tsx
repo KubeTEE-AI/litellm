@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/lib/toast";
 import { getCallbacksCall, getRouterSettingsCall, setCallbacksCall } from "../networking";
@@ -18,7 +17,6 @@ interface routingStrategyArgs {
 }
 
 const RouterSettings: React.FC<RouterSettingsProps> = ({ accessToken, userRole, userID }) => {
-  const { t } = useTranslation();
   const [formValue, setFormValue] = useState<RouterSettingsFormValue>({
     routerSettings: {},
     selectedStrategy: null,
@@ -181,9 +179,9 @@ const RouterSettings: React.FC<RouterSettingsProps> = ({ accessToken, userRole, 
 
     try {
       await setCallbacksCall(accessToken, payload);
-      toast.success(t("routerSettingsForm.page.updated"));
+      toast.success("router settings updated successfully");
     } catch (error) {
-      toast.fromError(t("routerSettingsForm.page.updateFailed") + error);
+      toast.fromError("Failed to update router settings: " + error);
     }
   };
 
@@ -205,14 +203,14 @@ const RouterSettings: React.FC<RouterSettingsProps> = ({ accessToken, userRole, 
       {/* Actions - Sticky at bottom */}
       <div className="border-t border-border pt-6 flex justify-end gap-3">
         <Button variant="outline" onClick={() => window.location.reload()}>
-          {t("routerSettingsForm.page.reset")}
+          Reset
         </Button>
         <Button
           onClick={handleSaveChanges}
           disabled={routerSettingsSource === null}
-          title={routerSettingsSource === null ? t(SOURCE_UNKNOWN_HINT) : undefined}
+          title={routerSettingsSource === null ? SOURCE_UNKNOWN_HINT : undefined}
         >
-          {t("routerSettingsForm.page.save")}
+          Save Changes
         </Button>
       </div>
     </div>

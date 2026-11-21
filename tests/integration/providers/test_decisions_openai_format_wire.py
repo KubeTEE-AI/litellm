@@ -187,16 +187,7 @@ _PROVIDERS: Final = (
         "cloudflare/@cf/cloudflare/clef",
         takes_images=True,
     ),
-    _Provider(
-        "hosted_vllm",
-        "hosted_vllm/Qwen/Qwen3-0.6B",
-        "/v1/systemone",
-        "Qwen/Qwen3-0.6B",
-        None,
-        False,
-        None,
-        takes_images=True,
-    ),
+    _Provider("hosted_vllm", "hosted_vllm/Qwen/Qwen3-0.6B", "/v1/systemone", "Qwen/Qwen3-0.6B", None, False, None),
     _Provider(
         "databricks",
         "databricks/ai_decide",
@@ -214,7 +205,7 @@ _PROVIDERS: Final = (
         "databricks-openjev-qwen35-4b",
         _API_KEY,
         False,
-        "databricks/databricks-openjev-qwen35-4b",
+        None,
     ),
     _Provider(
         "azure_ai", "azure_ai/decision-1", "/providers/microsoft/v1/systemone", "decision-1", _API_KEY, False, None

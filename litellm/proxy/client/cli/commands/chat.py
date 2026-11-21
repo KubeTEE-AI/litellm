@@ -409,16 +409,10 @@ def _stream_response(
         console.print(f"\n[red]Error: HTTP {e.response.status_code}[/red]")
         try:
             error_body: Final[_ErrorBodyView] = {"body": e.response.json()}
-            console.print(
-                error_body["body"].get("error", {}).get("message", "Unknown error"),
-                style="red",
-                markup=False,
-                highlight=False,
-                emoji=False,
-            )
+            console.print(f"[red]{error_body['body'].get('error', {}).get('message', 'Unknown error')}[/red]")
         except json.JSONDecodeError:
-            console.print(e.response.text, style="red", markup=False, highlight=False, emoji=False)
+            console.print(f"[red]{e.response.text}[/red]")
         return None
     except Exception as e:
-        console.print(f"\nError: {e}", style="red", markup=False, highlight=False, emoji=False)
+        console.print(f"\n[red]Error: {e}[/red]")
         return None

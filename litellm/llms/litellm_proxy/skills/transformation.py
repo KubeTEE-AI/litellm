@@ -10,6 +10,8 @@ Pattern follows litellm/llms/litellm_proxy/responses/transformation.py
 from collections.abc import Coroutine, Sequence
 from typing import TYPE_CHECKING, Final, Optional
 
+from pydantic import JsonValue
+
 from litellm.types.llms.anthropic_skills import (
     DeleteSkillResponse,
     ListSkillsResponse,
@@ -45,7 +47,7 @@ class LiteLLMSkillsTransformationHandler:
         file_content: bytes | None = None,
         file_name: str | None = None,
         file_type: str | None = None,
-        metadata: dict[str, object] | None = None,
+        metadata: dict[str, JsonValue] | None = None,
         user_id: str | None = None,
         user_api_key_dict: Optional["UserAPIKeyAuth"] = None,
         _is_async: bool = False,
@@ -128,7 +130,7 @@ class LiteLLMSkillsTransformationHandler:
         file_content: bytes | None = None,
         file_name: str | None = None,
         file_type: str | None = None,
-        metadata: dict[str, object] | None = None,
+        metadata: dict[str, JsonValue] | None = None,
         user_id: str | None = None,
         user_api_key_dict: Optional["UserAPIKeyAuth"] = None,
     ) -> Skill:

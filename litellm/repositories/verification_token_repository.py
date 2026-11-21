@@ -9,7 +9,6 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Final, Protocol
 
 from litellm.constants import UI_SESSION_TOKEN_TEAM_ID
-from litellm.litellm_core_utils.core_helpers import require_attributes
 from litellm.models.verification_token import (
     LiteLLM_VerificationToken,
 )
@@ -77,7 +76,8 @@ class VerificationTokenRepository(BaseRepository[LiteLLM_VerificationToken]):
 
     @property
     def _db(self) -> _PrismaVerificationTokenDb:
-        return require_attributes(self._connected_client(), _PrismaClientView, "db").db
+        client: Final[_PrismaClientView] = self.prisma_client
+        return client.db
 
     @property
     def table(self) -> TableActions["PrismaVerificationToken"]:
@@ -124,7 +124,9 @@ class VerificationTokenRepository(BaseRepository[LiteLLM_VerificationToken]):
         records: Final[Sequence[PrismaVerificationToken]] = await self.table.find_many(where={"user_id": user_id})
         return self._to_model_list(records)
 
-    async def find_newest_reusable_key(self, user_id: str, team_id: str | None) -> LiteLLM_VerificationToken | None:
+    async def find_newest_reusable_llm_api_key(
+        self, user_id: str, team_id: str | None
+    ) -> LiteLLM_VerificationToken | None:
         records: Final[Sequence[PrismaVerificationToken]] = await self.table.find_many(
             where={
                 "user_id": user_id,
@@ -136,6 +138,12 @@ class VerificationTokenRepository(BaseRepository[LiteLLM_VerificationToken]):
                         "OR": [
                             {"team_id": None},
                             {"team_id": {"not": UI_SESSION_TOKEN_TEAM_ID}},
+                        ]
+                    },
+                    {
+                        "OR": [
+                            {"allowed_routes": {"is_empty": True}},
+                            {"allowed_routes": {"has": "llm_api_routes"}},
                         ]
                     },
                 ],

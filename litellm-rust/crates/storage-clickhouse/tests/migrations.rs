@@ -48,7 +48,7 @@ async fn database() -> TestResult<ClickHouseDatabase> {
     Ok(ClickHouseDatabase {
         _container: container,
         url,
-        client: Client::for_test(),
+        client: Client::no_redirect_for_test(),
     })
 }
 
@@ -244,7 +244,7 @@ async fn failed_migration_is_not_recorded_and_retains_storage_error(
 
 #[rstest]
 fn invalid_database_identifier_is_rejected() {
-    let client = Client::for_test();
+    let client = Client::no_redirect_for_test();
     let connection = Connection::writer("http://127.0.0.1:1").expect("valid URL");
     assert!(matches!(
         ClickHouseMigrate::new(
@@ -327,7 +327,7 @@ async fn duplicate_ledger_rows_are_tolerated(
 #[rstest]
 #[tokio::test]
 async fn revert_reports_forward_only_error() {
-    let client = Client::for_test();
+    let client = Client::no_redirect_for_test();
     let connection = Connection::writer("http://127.0.0.1:1").expect("valid URL");
     let migration = migration(
         1,
@@ -346,7 +346,11 @@ async fn revert_reports_forward_only_error() {
         .revert("_sqlx_migrations", &migration)
         .await
         .expect_err("ClickHouse migrations cannot be reverted");
-    assert!(matches!(storage_error(&error), Some(Error::Irreversible)));
+    assert!(
+        error
+            .to_string()
+            .contains("ClickHouse migrations are forward-only")
+    );
 }
 
 #[rstest]
@@ -365,7 +369,7 @@ async fn applied_int64_versions_accept_numeric_and_quoted_json(
         )
         .mount(&mock_server)
         .await;
-    let client = Client::for_test();
+    let client = Client::no_redirect_for_test();
     let connection = Connection::writer(&mock_server.uri()).expect("valid URL");
     let migrator = migrator(vec![]);
     let mut adapter = ClickHouseMigrate::new(
@@ -387,7 +391,6 @@ async fn applied_int64_versions_accept_numeric_and_quoted_json(
 #[tokio::test]
 async fn schema_requests_override_unsafe_connection_settings(
     #[future(awt)] mock_server: MockServer,
-    #[values("wait_end_of_query", "send_progress_in_http_headers", "async_insert")] name: &str,
 ) {
     Mock::given(method("POST"))
         .and(query_param("wait_end_of_query", "1"))
@@ -403,7 +406,7 @@ async fn schema_requests_override_unsafe_connection_settings(
         mock_server.uri()
     );
     execute_statement(
-        &Client::for_test(),
+        &Client::no_redirect_for_test(),
         &Connection::writer(&url).expect("valid URL"),
         "CREATE DATABASE IF NOT EXISTS trace_test",
         REQUEST_TIMEOUT,
@@ -414,14 +417,20 @@ async fn schema_requests_override_unsafe_connection_settings(
         .received_requests()
         .await
         .expect("requests recorded");
-    assert_eq!(
-        requests[0]
-            .url
-            .query_pairs()
-            .filter(|(key, _)| key == name)
-            .count(),
-        1
-    );
+    for name in [
+        "wait_end_of_query",
+        "send_progress_in_http_headers",
+        "async_insert",
+    ] {
+        assert_eq!(
+            requests[0]
+                .url
+                .query_pairs()
+                .filter(|(key, _)| key == name)
+                .count(),
+            1
+        );
+    }
 }
 
 #[rstest]
@@ -436,7 +445,7 @@ async fn oversized_ledger_response_is_rejected_before_migrations(
         )
         .mount(&mock_server)
         .await;
-    let client = Client::for_test();
+    let client = Client::no_redirect_for_test();
     let connection = Connection::writer(&mock_server.uri()).expect("valid URL");
     let migrator = migrator(vec![]);
     let mut adapter = ClickHouseMigrate::new(

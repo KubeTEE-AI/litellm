@@ -14,7 +14,6 @@ from .common_utils import (
 )
 
 if TYPE_CHECKING:
-    from litellm.litellm_core_utils.litellm_logging import Logging
     from litellm.llms.anthropic.chat.handler import ModelResponseIterator
 
 
@@ -75,7 +74,6 @@ class BedrockClaudePlatformConfig(BedrockClaudePlatformMixin, AnthropicConfig):
             ),
             code_execution_tool_used=self.is_code_execution_tool_used(tools=optional_params.get("tools")),
             container_with_skills_used=self.is_container_with_skills_used(optional_params=optional_params),
-            thinking=optional_params.get("thinking"),  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]  # optional_params is the base config's bare dict
         )
         anthropic_headers["anthropic-workspace-id"] = workspace_id
         return {**headers, **anthropic_headers}
@@ -115,7 +113,6 @@ class BedrockClaudePlatformConfig(BedrockClaudePlatformMixin, AnthropicConfig):
         sync_stream: bool,
         json_mode: bool | None,
         optional_params: Mapping[str, object],
-        logging_obj: "Logging | None" = None,
     ) -> "ModelResponseIterator":
         from litellm.llms.anthropic.chat.handler import ModelResponseIterator
 

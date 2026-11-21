@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
 
 use litellm_auth_types::{
-    CredentialResolverHandle, Error, InputSource, Sourced, TokenProviderHandle,
+    CredentialResolverHandle, Error, InputSource, SecretValue, Sourced, TokenProviderHandle,
 };
-use litellm_secret_value::SecretValue;
-
 use serde_json::{Map, Value};
 use strum::EnumString;
 

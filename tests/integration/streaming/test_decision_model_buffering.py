@@ -229,17 +229,11 @@ def _frames(identity: str, endpoint: str) -> tuple[str, ...]:
                         'object': 'chat.completion.chunk',
                         'created': 1,
                         'model': 'scripted-chat',
-                        'choices': [
-                            {
-                                'index': 0,
-                                'delta': {'content': text},
-                                'finish_reason': 'stop' if index == len(pieces) - 1 else None,
-                            }
-                        ],
+                        'choices': [{'index': 0, 'delta': {'content': text}, 'finish_reason': None}],
                     }
                 )
             }"
-            for index, text in enumerate(pieces)
+            for text in pieces
         ),
         "data: [DONE]",
     )

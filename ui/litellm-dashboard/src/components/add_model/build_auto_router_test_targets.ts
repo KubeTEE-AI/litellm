@@ -1,5 +1,3 @@
-import type { TFunction } from "i18next";
-import i18n from "@/i18n/i18n";
 import { normalizeTierModels } from "./complexity_router_tiers";
 
 export type AutoRouterTestMode = "chat" | "embedding";
@@ -22,10 +20,13 @@ export interface BuildAutoRouterTestTargetsParams {
   classifier?: { model: string; reasoningEffort?: string };
 }
 
-export const buildAutoRouterTestTargets = (
-  { tiers, semanticMatchingEnabled, embeddingModel, defaultModel, classifier }: BuildAutoRouterTestTargetsParams,
-  t: TFunction = i18n.t.bind(i18n),
-): AutoRouterTestTarget[] => {
+export const buildAutoRouterTestTargets = ({
+  tiers,
+  semanticMatchingEnabled,
+  embeddingModel,
+  defaultModel,
+  classifier,
+}: BuildAutoRouterTestTargetsParams): AutoRouterTestTarget[] => {
   const tieredByModel = tiers.reduce<Record<string, string[]>>((acc, [tier, models]) => {
     return models.reduce((tierAcc, rawModel) => {
       const modelGroup = rawModel?.trim();
@@ -40,7 +41,7 @@ export const buildAutoRouterTestTargets = (
   const resolvedDefault = defaultModel?.trim();
   const groupedByModel =
     resolvedDefault && !(resolvedDefault in tieredByModel)
-      ? { ...tieredByModel, [resolvedDefault]: [t("addModel.buildAutoRouterTestTargets.default")] }
+      ? { ...tieredByModel, [resolvedDefault]: ["Default"] }
       : tieredByModel;
 
   const tierTargets: AutoRouterTestTarget[] = Object.entries(groupedByModel).map(([modelGroup, labels]) => ({
@@ -51,20 +52,14 @@ export const buildAutoRouterTestTargets = (
 
   const embeddingTarget: AutoRouterTestTarget[] =
     semanticMatchingEnabled && embeddingModel?.trim()
-      ? [
-          {
-            labels: [t("addModel.buildAutoRouterTestTargets.embedding")],
-            modelGroup: embeddingModel.trim(),
-            mode: "embedding" as const,
-          },
-        ]
+      ? [{ labels: ["Embedding"], modelGroup: embeddingModel.trim(), mode: "embedding" as const }]
       : [];
 
   const classifierModel = classifier?.model.trim();
   const classifierTarget: AutoRouterTestTarget[] = classifierModel
     ? [
         {
-          labels: [t("addModel.buildAutoRouterTestTargets.classifier")],
+          labels: ["Classifier"],
           modelGroup: classifierModel,
           mode: "chat",
           ...(classifier?.reasoningEffort && { requestParams: { reasoning_effort: classifier.reasoningEffort } }),

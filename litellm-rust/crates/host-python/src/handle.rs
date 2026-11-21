@@ -56,27 +56,25 @@ impl Execution {
     fn advance(slf: &Bound<'_, Self>, py: Python<'_>, input: Resume) -> PyResult<Py<PyAny>> {
         let (mut body, started) = {
             let mut execution = slf.borrow_mut();
-            match (
-                std::mem::replace(&mut execution.state, ExecutionState::Running),
-                &input,
-            ) {
-                (ExecutionState::Created(body), Resume::Send(value)) if value.is_none(py) => {
-                    (body, false)
-                }
-                (ExecutionState::Suspended(body), _) => (body, true),
-                (ExecutionState::Running, _) => return Err(Error::ExecutionRunning.into()),
-                (state @ ExecutionState::Created(_), Resume::Send(_)) => {
-                    execution.state = state;
+            let started = match (&execution.state, &input) {
+                (ExecutionState::Created(_), Resume::Send(value)) if value.is_none(py) => false,
+                (ExecutionState::Created(_), Resume::Send(_)) => {
                     return Err(Error::SendBeforeStart.into());
                 }
-                (state @ ExecutionState::Created(_), Resume::Throw(_)) => {
-                    execution.state = state;
-                    return Err(Error::ExecutionOutOfOrder.into());
+                (ExecutionState::Suspended(_), _) => true,
+                (ExecutionState::Running, _) => {
+                    return Err(Error::ExecutionRunning.into());
                 }
                 (ExecutionState::Closed, _) => {
-                    execution.state = ExecutionState::Closed;
                     return Err(Error::ExecutionClosed.into());
                 }
+                (ExecutionState::Created(_), Resume::Throw(_)) => {
+                    return Err(Error::ExecutionOutOfOrder.into());
+                }
+            };
+            match std::mem::replace(&mut execution.state, ExecutionState::Running) {
+                ExecutionState::Created(body) | ExecutionState::Suspended(body) => (body, started),
+                _ => unreachable!(),
             }
         };
         let result = match input {

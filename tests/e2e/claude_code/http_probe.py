@@ -31,7 +31,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from cli_harness.rate_limiter import RateLimiter, get_default_limiter
+from pydantic import BaseModel
+
 from e2e_http import (
     NetworkError,
     RateLimitedError,
@@ -58,9 +59,12 @@ from models import (
     JsonSchemaProperty,
     ToolInputSchema,
 )
-from pydantic import BaseModel
 
-from claude_code.cli_driver import infer_provider
+from claude_code.rate_limiter import (
+    RateLimiter,
+    get_default_limiter,
+    infer_provider,
+)
 
 if TYPE_CHECKING:
     from proxy_client import ProxyClient

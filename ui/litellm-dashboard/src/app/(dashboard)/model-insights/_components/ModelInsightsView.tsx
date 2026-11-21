@@ -1,9 +1,7 @@
 "use client";
 
 import { Page } from "@/components/shared/Page";
-import type { ParseKeys } from "i18next";
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { ArrowDownRight, ArrowUpRight, BarChart3, Minus } from "lucide-react";
 import { StackedUsageChart } from "@/components/shared/charts";
 
@@ -29,16 +27,8 @@ import {
 
 const SCALES = ["linear", "log"] as const;
 const GRANULARITIES = ["day", "week"] as const;
-const METRICS = ["requests", "spend", "tokens"] as const;
-const GRANULARITY_LABELS: Record<Granularity, ParseKeys> = {
-  day: "modelInsights.modelInsightsView.granularity.day",
-  week: "modelInsights.modelInsightsView.granularity.week",
-};
-const METRIC_LABELS: Record<Metric, ParseKeys> = {
-  requests: "modelInsights.modelInsightsView.metrics.requests",
-  spend: "modelInsights.modelInsightsView.metrics.spend",
-  tokens: "modelInsights.modelInsightsView.metrics.tokens",
-};
+const GRANULARITY_LABELS: Record<Granularity, string> = { day: "Daily", week: "Weekly" };
+const METRIC_LABELS: Record<Metric, string> = { requests: "requests", spend: "spend", tokens: "tokens" };
 const RANKING_ROWS = 5;
 
 type Scale = (typeof SCALES)[number];
@@ -62,28 +52,22 @@ const DeltaBadge = ({ value }: { value: number }) => {
   );
 };
 
-const RankingRow = ({ model, rank }: { model: RankedModel; rank: number }) => {
-  const { t } = useTranslation();
-  return (
-    <li className="grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-3 py-2">
-      <span className="text-sm tabular-nums text-muted-foreground">{rank}</span>
-      <ProviderLogo provider={model.provider} className="size-9 rounded-md border p-1" />
-      <div className="min-w-0">
-        <p className="truncate font-medium">{model.model_group}</p>
-        <p className="truncate text-sm text-muted-foreground">
-          {t("modelInsights.modelInsightsView.byProvider", { provider: model.provider })}
-        </p>
-      </div>
-      <div className="text-right">
-        <p className="font-medium tabular-nums">{model.share.toFixed(1)}%</p>
-        <DeltaBadge value={model.delta} />
-      </div>
-    </li>
-  );
-};
+const RankingRow = ({ model, rank }: { model: RankedModel; rank: number }) => (
+  <li className="grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-3 py-2">
+    <span className="text-sm tabular-nums text-muted-foreground">{rank}</span>
+    <ProviderLogo provider={model.provider} className="size-9 rounded-md border p-1" />
+    <div className="min-w-0">
+      <p className="truncate font-medium">{model.model_group}</p>
+      <p className="truncate text-sm text-muted-foreground">by {model.provider}</p>
+    </div>
+    <div className="text-right">
+      <p className="font-medium tabular-nums">{model.share.toFixed(1)}%</p>
+      <DeltaBadge value={model.delta} />
+    </div>
+  </li>
+);
 
 export default function ModelInsightsView({ accessToken }: { accessToken: string | null }) {
-  const { t } = useTranslation();
   const [loaded, setLoaded] = React.useState<{ metric: Metric; response: ModelInsightsResponse } | null>(null);
   const [metric, setMetric] = React.useState<Metric>("tokens");
   const [scale, setScale] = React.useState<Scale>("linear");
@@ -130,7 +114,7 @@ export default function ModelInsightsView({ accessToken }: { accessToken: string
     return (
       <div className="p-8">
         <Alert variant="destructive">
-          <AlertTitle>{t("modelInsights.modelInsightsView.loadError")}</AlertTitle>
+          <AlertTitle>Could not load model insights</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       </div>
@@ -151,39 +135,36 @@ export default function ModelInsightsView({ accessToken }: { accessToken: string
       <PageHeader>
         <PageHeaderTitle>
           <BarChart3 />
-          {t("modelInsights.modelInsightsView.title")}
+          Model Leaderboard
         </PageHeaderTitle>
         <PageHeaderDescription>
-          {t("modelInsights.modelInsightsView.description", { start: data.start_date, end: data.end_date })}
+          See which models your gateway used from {data.start_date} through {data.end_date}
         </PageHeaderDescription>
       </PageHeader>
 
       <Card aria-busy={isStale} className={isStale ? "opacity-60 transition-opacity" : "transition-opacity"}>
         <CardHeader className="flex-row items-start justify-between space-y-0">
           <div>
-            <CardTitle>{t("modelInsights.modelInsightsView.topModels.title")}</CardTitle>
+            <CardTitle>Top models</CardTitle>
             <CardDescription>
-              {t("modelInsights.modelInsightsView.topModels.description", {
-                granularity: t(GRANULARITY_LABELS[granularity]),
-                metric: t(METRIC_LABELS[shown]),
-              })}
+              {GRANULARITY_LABELS[granularity]} {METRIC_LABELS[shown]} across your gateway
             </CardDescription>
           </div>
           <div className="flex items-center gap-3">
             <Tabs value={metric} onValueChange={(value) => setMetric(value as Metric)}>
               <TabsList>
-                {METRICS.map((value) => (
+                {(["requests", "spend", "tokens"] as const).map((value) => (
                   <TabsTrigger key={value} value={value} className="capitalize">
-                    {t(METRIC_LABELS[value])}
+                    {value}
                   </TabsTrigger>
                 ))}
               </TabsList>
             </Tabs>
             <Tabs value={granularity} onValueChange={(value) => setGranularity(value as Granularity)}>
-              <TabsList aria-label={t("modelInsights.modelInsightsView.bucketSize")}>
+              <TabsList aria-label="Bucket size">
                 {GRANULARITIES.map((value) => (
                   <TabsTrigger key={value} value={value}>
-                    {t(GRANULARITY_LABELS[value])}
+                    {GRANULARITY_LABELS[value]}
                   </TabsTrigger>
                 ))}
               </TabsList>
@@ -206,7 +187,7 @@ export default function ModelInsightsView({ accessToken }: { accessToken: string
             xKey="date"
             scale={scale}
             format={(value) => formatMetric(value, shown)}
-            totalLabel={t("modelInsights.modelInsightsView.gatewayTotal")}
+            totalLabel="Gateway total"
             totalFor={(label) => bucketTotals.get(label) ?? 0}
           />
         </CardContent>
@@ -214,9 +195,9 @@ export default function ModelInsightsView({ accessToken }: { accessToken: string
 
       <Card aria-busy={isStale} className={isStale ? "opacity-60 transition-opacity" : "transition-opacity"}>
         <CardHeader>
-          <CardTitle>{t("modelInsights.modelInsightsView.leaderboard.title")}</CardTitle>
+          <CardTitle>Leaderboard</CardTitle>
           <CardDescription>
-            {t("modelInsights.modelInsightsView.leaderboard.description", { metric: t(METRIC_LABELS[shown]) })}
+            Share of {METRIC_LABELS[shown]}, with the change between the first and second half of the period
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-x-12 md:grid-cols-2">
@@ -235,11 +216,14 @@ export default function ModelInsightsView({ accessToken }: { accessToken: string
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("modelInsights.modelInsightsView.costPerSession.title")}</CardTitle>
-          <CardDescription>{t("modelInsights.modelInsightsView.costPerSession.description")}</CardDescription>
+          <CardTitle>Cost per session</CardTitle>
+          <CardDescription>Session cost is not estimated from request counts</CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">{t("modelInsights.modelInsightsView.costPerSession.hint")}</p>
+          <p className="text-sm text-muted-foreground">
+            Add a stable session_id to requests to unlock accurate session-level model comparisons in a future bounded
+            session rollup
+          </p>
         </CardContent>
       </Card>
     </Page>

@@ -4,7 +4,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use litellm_secret_value::SecretValue;
+use litellm_auth_types::SecretValue;
 
 use crate::{AccessRequest, Auth, AuthenticatedRequest, Credential, Error};
 

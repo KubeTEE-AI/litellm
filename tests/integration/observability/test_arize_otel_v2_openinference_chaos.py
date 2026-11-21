@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import socket
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
-from queue import SimpleQueue
 from typing import Final
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -45,7 +44,7 @@ from _openinference_support import (
 )
 from integration._support.client import Gateway, eventually
 from integration._support.process import graceful_stop_seconds
-from integration._support.wire import Reply, Request, Wire, wire_server
+from integration._support.wire import Reply, Request, wire_server
 
 
 def _call(
@@ -250,12 +249,11 @@ def test_arize_otel_v2_f1_sink_outage_and_recovery(gateway: Gateway, tmp_path: P
             _assert_response(response, marker, surface, stream, model_name)
 
     with ExitStack() as servers:
-        outage_socket: Final = servers.enter_context(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
-        outage_socket.bind(("127.0.0.1", 0))  # test-quality-ok: socket stays bound throughout the outage
-        sink_port: Final = outage_socket.getsockname()[1]
-        stopped_destination: Final = Wire(
-            f"http://127.0.0.1:{sink_port}", SimpleQueue(), SimpleQueue(), SimpleQueue(), SimpleQueue()
-        )
+        initial_stack: Final = servers.enter_context(ExitStack())
+        stopped_destination: Final = initial_stack.enter_context(wire_server(_owned_sink_handler(sink)))
+        sink_port: Final = urlsplit(stopped_destination.url).port
+        assert sink_port is not None, stopped_destination.url
+        initial_stack.close()
         with _rig(
             gateway,
             tmp_path,
@@ -274,7 +272,6 @@ def test_arize_otel_v2_f1_sink_outage_and_recovery(gateway: Gateway, tmp_path: P
                 with httpx.Client(trust_env=False) as client, pytest.raises(httpx.ConnectError):
                     client.get(stopped_destination.url + "/health", timeout=2)
                 recovered_stack: Final = servers.enter_context(ExitStack())
-                outage_socket.close()
                 recovered_destination: Final = recovered_stack.enter_context(
                     wire_server(_owned_sink_handler(sink), port=sink_port)
                 )

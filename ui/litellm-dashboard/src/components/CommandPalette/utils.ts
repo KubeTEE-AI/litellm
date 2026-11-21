@@ -1,7 +1,5 @@
 import type { ReactNode } from "react";
 import { labelText, routeOf, sectionText, type MenuGroup } from "@/components/leftnav";
-import { keepTerminology, type Term } from "@/lib/terminology";
-import i18n from "@/i18n/i18n";
 
 export type PaletteScope = "keys" | "global";
 
@@ -24,7 +22,7 @@ const matchRank = (item: PaletteNavItem, query: string): number => {
   return -1;
 };
 
-export const flattenNavItems = (groups: readonly MenuGroup[], term: Term = keepTerminology): PaletteNavItem[] =>
+export const flattenNavItems = (groups: readonly MenuGroup[]): PaletteNavItem[] =>
   groups.flatMap((group) => {
     const flattenItems = (items: MenuGroup["items"]): PaletteNavItem[] =>
       items.flatMap((item) => {
@@ -33,8 +31,8 @@ export const flattenNavItems = (groups: readonly MenuGroup[], term: Term = keepT
         return [
           {
             key: item.key,
-            label: term(labelText(item)),
-            section: term(sectionText(group.groupLabel)),
+            label: labelText(item),
+            section: sectionText(group.groupLabel),
             route: routeOf(item),
             icon: item.icon,
           },
@@ -58,6 +56,4 @@ export const matchNavItems = (items: readonly PaletteNavItem[], query: string): 
 };
 
 export const shortcutLabel = (platform: string, userAgent: string): string =>
-  [platform, userAgent].some((value) => value.toLowerCase().includes("mac"))
-    ? "⌘K"
-    : i18n.t("shell.commandPaletteUtils.ctrlShortcut");
+  [platform, userAgent].some((value) => value.toLowerCase().includes("mac")) ? "⌘K" : "Ctrl K";

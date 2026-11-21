@@ -13,6 +13,7 @@ class LiteLLMCacheType(str, Enum):
     REDIS_SEMANTIC = "redis-semantic"
     VALKEY_SEMANTIC = "valkey-semantic"
     S3 = "s3"
+    DISK = "disk"
     QDRANT_SEMANTIC = "qdrant-semantic"
     AZURE_BLOB = "azure-blob"
     GCS = "gcs"
@@ -74,7 +75,7 @@ class RedisPipelineSetOperation(TypedDict):
     """
 
     key: str
-    value: object
+    value: Any
     ttl: int | None
 
 
@@ -132,7 +133,7 @@ class HealthCheckCacheParams(LiteLLMBaseModel):
 
     host: str | None = None
     port: str | int | None = None
-    redis_kwargs: dict[str, object] | None = None
+    redis_kwargs: dict[str, Any] | None = None
     namespace: str | None = None
     redis_version: str | int | float | None = None
 

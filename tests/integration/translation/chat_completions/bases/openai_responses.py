@@ -97,17 +97,7 @@ GPT_5_6_SOL_TEST_CASE: Final = TranslationTestCase(
         "created": ANY,
         "model": "openai/responses/gpt-5.6-sol",
         "object": "chat.completion",
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "index": 0,
-                "message": {
-                    "content": "Hello!",
-                    "role": "assistant",
-                    "provider_specific_fields": {"phase": "final_answer", "openai_responses_replay": ANY},
-                },
-            }
-        ],
+        "choices": [{"finish_reason": "stop", "index": 0, "message": {"content": "Hello!", "role": "assistant"}}],
         "usage": {
             "completion_tokens": 6,
             "prompt_tokens": 19,
@@ -262,7 +252,6 @@ GPT_6_1_SOL_TEST_CASE: Final = TranslationTestCase(
                             "summary": [],
                         }
                     ],
-                    "provider_specific_fields": {"phase": "commentary", "openai_responses_replay": ANY},
                 },
             }
         ],

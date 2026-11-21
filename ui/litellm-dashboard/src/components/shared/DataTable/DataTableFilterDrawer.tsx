@@ -6,11 +6,10 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import i18n from "@/i18n/i18n";
 
-export interface FilterDraft<TColumnId extends string = string> {
-  get: (columnId: TColumnId) => unknown;
-  set: (columnId: TColumnId, value: unknown) => void;
+export interface FilterDraft {
+  get: (columnId: string) => unknown;
+  set: (columnId: string, value: unknown) => void;
 }
 
 interface DataTableFilterDrawerProps<TData> {
@@ -47,10 +46,10 @@ export function DataTableFilterDrawer<TData>({
   table,
   open,
   onOpenChange,
-  title = i18n.t("shared.dataTable.filterDrawer.title"),
+  title = "Filters",
   description,
-  applyLabel = i18n.t("shared.dataTable.filterDrawer.apply"),
-  resetLabel = i18n.t("shared.dataTable.filterDrawer.reset"),
+  applyLabel = "Apply Filters",
+  resetLabel = "Reset",
   onReset,
   children,
 }: DataTableFilterDrawerProps<TData>) {

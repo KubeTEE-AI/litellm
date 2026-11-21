@@ -11,7 +11,6 @@ from pydantic import AliasChoices, Field, ValidationError
 
 import litellm
 from litellm.exceptions import AuthenticationError
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.llms.base import LiteLLMBaseModel
@@ -75,7 +74,7 @@ def json_headers(
 
 
 def endpoint_url(api_base: str | None, path: str) -> str:
-    return join_api_base(resolve_api_base(api_base), path)
+    return f"{resolve_api_base(api_base).rstrip('/')}/{path}"
 
 
 def pick(params: Mapping[str, object], keys: Container[str]) -> Mapping[str, object]:

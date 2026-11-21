@@ -11,9 +11,8 @@ are denied so an empty user_id can never select an unscoped query.
 """
 
 from collections.abc import Mapping, Sequence
-from typing import Final, Protocol
+from typing import Any, Final
 
-from litellm.litellm_core_utils.core_helpers import require_attributes
 from litellm.types.proxy.auth.user_api_key_auth import (
     UserAPIKeyAuth,
 )
@@ -48,20 +47,15 @@ def resolve_resource_owner_id(
     return None
 
 
-class _Identified(Protocol):
-    @property
-    def id(self) -> object: ...
-
-
-def build_list_page(items: Sequence[object], has_more: bool = False) -> dict[str, object]:
+def build_list_page(items: list[Any], has_more: bool = False) -> dict[str, object]:
     """Build the OpenAI-style paginated list response shape used by managed
     file/batch/vector-store listings. ``first_id`` and ``last_id`` are
     sourced from each item's ``.id`` attribute."""
     return {
         "object": "list",
         "data": items,
-        "first_id": require_attributes(items[0], _Identified, "id").id if items else None,
-        "last_id": require_attributes(items[-1], _Identified, "id").id if items else None,
+        "first_id": items[0].id if items else None,
+        "last_id": items[-1].id if items else None,
         "has_more": has_more,
     }
 

@@ -86,18 +86,6 @@ def migration_files(directory: Path) -> tuple[tuple[str, str], ...]:
     )
 
 
-def has_packaged_history(migrations_dir: Path) -> bool:
-    """Whether `migrations_dir` carries exactly the migration files and schema.prisma this package ships,
-    the only history the boot baselines an existing database onto."""
-    packaged_dir: Final = Path(__file__).parent
-    migrations: Final = migration_files(migrations_dir)
-    return (
-        bool(migrations)
-        and migrations == migration_files(packaged_dir)
-        and (migrations_dir / "schema.prisma").read_bytes() == (packaged_dir / "schema.prisma").read_bytes()
-    )
-
-
 def baseline_current_schema(
     coordinator: MigrationCoordinator,
     schema: str,
@@ -107,9 +95,14 @@ def baseline_current_schema(
 ) -> None:
     from psycopg import sql
 
-    if not has_packaged_history(migrations_dir):
-        raise RuntimeError("Cannot automatically baseline an existing database with custom migration history.")
+    packaged_dir: Final = Path(__file__).parent
     migrations: Final = migration_files(migrations_dir)
+    if (
+        not migrations
+        or migrations != migration_files(packaged_dir)
+        or (migrations_dir / "schema.prisma").read_bytes() != (packaged_dir / "schema.prisma").read_bytes()
+    ):
+        raise RuntimeError("Cannot automatically baseline an existing database with custom migration history.")
 
     coordinator.acquire_prisma_lock()
     existing: Final = coordinator.connection.execute(

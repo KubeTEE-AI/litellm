@@ -1,7 +1,6 @@
 import json
 import uuid
 from typing import Final
-from unittest.mock import ANY
 
 import httpx
 import pytest
@@ -289,7 +288,6 @@ def test_chat_over_responses_deployment_merges_message_and_function_call(gateway
                             "index": 0,
                         }
                     ],
-                    "provider_specific_fields": {"openai_responses_replay": ANY},
                 },
             }
         ], response.text
@@ -399,7 +397,6 @@ def test_chat_over_responses_deployment_keeps_reasoning_with_merged_tool_call(ga
                             "index": 0,
                         }
                     ],
-                    "provider_specific_fields": {"openai_responses_replay": ANY},
                 },
             }
         ], response.text
@@ -483,7 +480,6 @@ def test_chat_over_responses_deployment_returns_tool_call_only_reply_as_one_choi
                             "index": 0,
                         }
                     ],
-                    "provider_specific_fields": {"openai_responses_replay": ANY},
                 },
             }
         ], response.text
@@ -574,7 +570,6 @@ def test_chat_over_responses_deployment_merges_function_call_followed_by_message
                             "index": 0,
                         }
                     ],
-                    "provider_specific_fields": {"openai_responses_replay": ANY},
                 },
             }
         ], response.text
@@ -676,7 +671,6 @@ def test_chat_over_responses_deployment_folds_two_messages_and_function_call_int
                             "index": 0,
                         }
                     ],
-                    "provider_specific_fields": {"openai_responses_replay": ANY},
                 },
             }
         ], response.text
@@ -735,7 +729,6 @@ def test_chat_over_responses_deployment_folds_commentary_and_final_answer_into_o
                 "message": {
                     "role": "assistant",
                     "content": 'Let me answer that.{"city": "Paris", "summary": "Sunny, 21C"}',
-                    "provider_specific_fields": {"phase": "final_answer", "openai_responses_replay": ANY},
                 },
             }
         ], response.text
@@ -850,7 +843,6 @@ def test_chat_over_responses_deployment_folds_reasoning_two_messages_and_functio
                     "reasoning_content": "Checking the forecast.",
                     "reasoning_items": [_REASONING_ITEM],
                     "tool_calls": _TWO_CALLS_CHAT_SHAPE[:1],
-                    "provider_specific_fields": {"openai_responses_replay": ANY},
                 },
             }
         ], response.text
@@ -892,7 +884,6 @@ def test_chat_over_responses_deployment_folds_message_and_two_function_calls_int
                     "role": "assistant",
                     "content": "Checking both.",
                     "tool_calls": _TWO_CALLS_CHAT_SHAPE,
-                    "provider_specific_fields": {"openai_responses_replay": ANY},
                 },
             }
         ], response.text
@@ -1362,11 +1353,7 @@ def test_chat_over_responses_deployment_with_json_schema_returns_first_of_two_fi
             {
                 "finish_reason": "stop",
                 "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": '{"city":"Paris"}',
-                    "provider_specific_fields": {"phase": "final_answer"},
-                },
+                "message": {"role": "assistant", "content": '{"city":"Paris"}'},
             }
         ], response.text
         assert [(request.method, request.target) for request in wire.drain()] == [("POST", "/responses")]

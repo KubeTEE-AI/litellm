@@ -380,19 +380,15 @@ test("clearing credentials for a server deleted underneath the modal reports the
     await openMcpServers(page);
     const card = cardFor(page, server);
     const dialog = credentialsDialog(page);
-    const clear = dialog.getByRole("button", { name: "Clear", exact: true });
     await card.getByRole("button", { name: "Update", exact: true }).click();
-    await expect(
-      clear,
-      "the modal must load the saved credentials before the server is deleted",
-    ).toBeVisible();
+    await expect(dialog).toBeVisible();
     await server.remove();
     const cleared = page.waitForResponse(
       (response) =>
         response.request().method() === "DELETE" &&
         response.url().includes(server.statusUrl),
     );
-    await clear.click();
+    await dialog.getByRole("button", { name: "Clear", exact: true }).click();
     await page
       .getByRole("alertdialog", { name: "Clear saved credentials" })
       .getByRole("button", {

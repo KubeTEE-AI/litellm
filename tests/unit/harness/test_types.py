@@ -30,7 +30,6 @@ def test_harness_is_plain_enum():
         ("codex", "Harness.CODEX"),
         ("claude-code", "Harness.CLAUDE_CODE"),
         ("OPENCODE", "Harness.OPENCODE"),
-        ("pi", "Harness.PI"),
     ],
 )
 def test_require_harness_hint(given, hint):

@@ -76,8 +76,7 @@ impl CyberArkSecretManager {
             context,
         )
         .send()
-        .await
-        .map_err(litellm_http::Error::from)?;
+        .await?;
         let response = if matches!(retry, AuthenticationRetry::Unauthorized)
             && had_cached_token
             && response.status() == reqwest::StatusCode::UNAUTHORIZED
@@ -90,8 +89,7 @@ impl CyberArkSecretManager {
                 context,
             )
             .send()
-            .await
-            .map_err(litellm_http::Error::from)?
+            .await?
         } else {
             response
         };
@@ -101,7 +99,7 @@ impl CyberArkSecretManager {
         if !response.status().is_success() {
             return Err(Error::Status(response.status().as_u16()));
         }
-        let value = SecretValue::new(response.text().await.map_err(litellm_http::Error::from)?);
+        let value = SecretValue::new(response.text().await?);
         Ok(Some(value))
     }
 }

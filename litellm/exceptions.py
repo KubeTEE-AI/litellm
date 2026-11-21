@@ -9,14 +9,12 @@
 
 ## LiteLLM versions of the OpenAI Exception Types
 
-import datetime
 import enum
 from collections.abc import Mapping, Sequence
-from typing import Any, Final, Protocol, SupportsIndex, SupportsInt, runtime_checkable
+from typing import Any, Final
 
 import httpx
 import openai
-from typing_extensions import Buffer
 
 import litellm
 from litellm.types.utils import LiteLLMCommonStrings
@@ -117,54 +115,6 @@ def validate_rate_limit_type(value: object) -> str | None:
     return None
 
 
-def _upstream_body(response: object) -> bytes:
-    if not isinstance(response, httpx.Response):
-        return b""
-    try:
-        return response.content
-    except httpx.ResponseNotRead:
-        return b""
-
-
-def _request_without_credentials(upstream: object, fallback_url: str) -> httpx.Request:
-    if not isinstance(upstream, httpx.Response):
-        return httpx.Request(method="POST", url=fallback_url)
-    try:
-        upstream_request: Final = upstream.request
-    except RuntimeError:
-        return httpx.Request(method="POST", url=fallback_url)
-    return httpx.Request(
-        method=upstream_request.method,
-        url=upstream_request.url.copy_with(userinfo=b"", query=None, fragment=None),
-    )
-
-
-def _upstream_elapsed(upstream: object) -> datetime.timedelta | None:
-    if not isinstance(upstream, httpx.Response):
-        return None
-    try:
-        return upstream.elapsed
-    except RuntimeError:
-        return None
-
-
-def error_response_without_credentials(status_code: int, upstream: object, fallback_url: str) -> httpx.Response:
-    response: Final = httpx.Response(
-        status_code=status_code,
-        stream=httpx.ByteStream(_upstream_body(upstream)),
-        request=_request_without_credentials(upstream, fallback_url),
-    )
-    _ = response.read()
-    response.headers = httpx.Headers(upstream.headers if isinstance(upstream, httpx.Response) else None)
-    elapsed: Final = _upstream_elapsed(upstream)
-    if elapsed is not None:
-        response.elapsed = elapsed
-    return response
-
-
-_NO_UPSTREAM_REQUEST_URL: Final = "https://cloud.google.com/vertex-ai/"
-
-
 _MINIMAL_ERROR_RESPONSE: httpx.Response | None = None
 
 
@@ -189,7 +139,6 @@ class AuthenticationError(openai.AuthenticationError):
         litellm_debug_info: str | None = None,
         max_retries: int | None = None,
         num_retries: int | None = None,
-        body: Mapping[str, object] | None = None,
     ):
         self.status_code = 401
         self.message = f"litellm.AuthenticationError: {message}"
@@ -203,7 +152,7 @@ class AuthenticationError(openai.AuthenticationError):
             request=httpx.Request(method="GET", url="https://litellm.ai"),  # mock request object
         )
         super().__init__(
-            self.message, response=self.response, body=body
+            self.message, response=self.response, body=None
         )  # Call the base class constructor with the parameters it needs
 
     def __str__(self):
@@ -240,7 +189,6 @@ class NotFoundError(openai.NotFoundError):
         litellm_debug_info: str | None = None,
         max_retries: int | None = None,
         num_retries: int | None = None,
-        body: Mapping[str, object] | None = None,
     ):
         self.status_code = 404
         self.message = f"litellm.NotFoundError: {message}"
@@ -254,7 +202,7 @@ class NotFoundError(openai.NotFoundError):
             request=httpx.Request(method="GET", url="https://litellm.ai"),  # mock request object
         )
         super().__init__(
-            self.message, response=self.response, body=body
+            self.message, response=self.response, body=None
         )  # Call the base class constructor with the parameters it needs
 
     def __str__(self):
@@ -284,7 +232,7 @@ class BadRequestError(openai.BadRequestError):
         litellm_debug_info: str | None = None,
         max_retries: int | None = None,
         num_retries: int | None = None,
-        body: Mapping[str, object] | None = None,
+        body: dict | None = None,
     ):
         self.status_code = 400
         self.message = f"litellm.BadRequestError: {message}"
@@ -328,7 +276,7 @@ class ImageFetchError(BadRequestError):
         litellm_debug_info: str | None = None,
         max_retries: int | None = None,
         num_retries: int | None = None,
-        body: Mapping[str, object] | None = None,
+        body: dict | None = None,
     ):
         super().__init__(
             message=message,
@@ -367,21 +315,6 @@ class VectorStoreSearchError(BadRequestError):
 
 class MalformedRequestFieldError(BadRequestError):
     pass
-
-
-class UnsupportedEndpointError(BadRequestError):
-    pass
-
-
-class EndpointNotSupportedByModelError(BadRequestError):
-    def __init__(self, message: str, model: str, llm_provider: str = "") -> None:
-        super().__init__(  # pyright: ignore[reportUnknownMemberType]  # inherited public exception constructor is untyped
-            message=message, model=model, llm_provider=llm_provider
-        )
-        self.message = message
-        self.type = "invalid_request_error"
-        self.param = "model"
-        self.code = "400"
 
 
 class UnprocessableEntityError(openai.UnprocessableEntityError):
@@ -569,11 +502,20 @@ class RateLimitError(openai.RateLimitError):
         # headers stay reachable on `e.response.headers` for callers that
         # explicitly want them; only the proxy-supplied `headers=` kwarg
         # makes it onto `self.headers`.
+        _response_headers: Final = getattr(response, "headers", None) if response is not None else None
         self.headers: dict[str, str] | None = {k: str(v) for k, v in headers.items()} if headers else None
         # Mirrors FastAPI HTTPException.detail so the same instance can be
         # serialized through both the ProxyException and HTTPException paths.
         self.detail = detail if detail is not None else self.message
-        self.response = error_response_without_credentials(429, response, _NO_UPSTREAM_REQUEST_URL)
+        self.response = httpx.Response(
+            status_code=429,
+            headers=_response_headers,
+            content=response.content if response is not None else None,
+            request=httpx.Request(
+                method="POST",
+                url=" https://cloud.google.com/vertex-ai/",
+            ),
+        )
         super().__init__(
             self.message,
             response=self.response,  # pyright: ignore[reportArgumentType]  # SDK accepts HTTPX at runtime
@@ -614,7 +556,6 @@ class ContextWindowExceededError(BadRequestError):
         llm_provider,
         response: httpx.Response | None = None,
         litellm_debug_info: str | None = None,
-        body: Mapping[str, object] | None = None,
     ):
         self.status_code = 400
         self.model = model
@@ -626,7 +567,6 @@ class ContextWindowExceededError(BadRequestError):
             llm_provider=self.llm_provider,
             response=response,
             litellm_debug_info=self.litellm_debug_info,
-            body=body,
         )  # Call the base class constructor with the parameters it needs
 
         # set after, to make it clear the raised error is a context window exceeded error
@@ -745,7 +685,7 @@ class ContentPolicyViolationError(BadRequestError):
         response: httpx.Response | None = None,
         litellm_debug_info: str | None = None,
         provider_specific_fields: dict | None = None,
-        body: Mapping[str, object] | None = None,
+        body: dict | None = None,
     ):
         self.status_code = 400
         self.message = f"litellm.ContentPolicyViolationError: {message}"
@@ -798,7 +738,15 @@ class ServiceUnavailableError(openai.APIStatusError):
         self.litellm_debug_info = litellm_debug_info
         self.max_retries = max_retries
         self.num_retries = num_retries
-        self.response = error_response_without_credentials(self.status_code, response, _NO_UPSTREAM_REQUEST_URL)
+        _response_headers: Final = getattr(response, "headers", None) if response is not None else None
+        self.response = httpx.Response(
+            status_code=self.status_code,
+            headers=_response_headers,
+            request=httpx.Request(
+                method="POST",
+                url=" https://cloud.google.com/vertex-ai/",
+            ),
+        )
         super().__init__(
             self.message, response=self.response, body=None
         )  # Call the base class constructor with the parameters it needs
@@ -841,7 +789,15 @@ class BadGatewayError(openai.APIStatusError):
         self.litellm_debug_info = litellm_debug_info
         self.max_retries = max_retries
         self.num_retries = num_retries
-        self.response = error_response_without_credentials(self.status_code, response, _NO_UPSTREAM_REQUEST_URL)
+        _response_headers: Final = getattr(response, "headers", None) if response is not None else None
+        self.response = httpx.Response(
+            status_code=self.status_code,
+            headers=_response_headers,
+            request=httpx.Request(
+                method="POST",
+                url=" https://cloud.google.com/vertex-ai/",
+            ),
+        )
         super().__init__(
             self.message,
             response=self.response,  # pyright: ignore[reportArgumentType]  # SDK accepts HTTPX at runtime
@@ -868,7 +824,6 @@ class BadGatewayError(openai.APIStatusError):
 class InternalServerError(openai.InternalServerError):
     response: httpx.Response  # pyright: ignore[reportIncompatibleVariableOverride]  # LiteLLM constructs an HTTPX response
     request: httpx.Request  # pyright: ignore[reportIncompatibleVariableOverride]  # LiteLLM constructs an HTTPX request
-    provider_status_code: int | None
 
     def __init__(
         self,
@@ -880,17 +835,23 @@ class InternalServerError(openai.InternalServerError):
         max_retries: int | None = None,
         num_retries: int | None = None,
         body: object | None = None,
-        provider_status_code: int | None = None,
     ):
         self.status_code = 500
-        self.provider_status_code = provider_status_code
         self.message = f"litellm.InternalServerError: {message}"
         self.llm_provider = llm_provider
         self.model = model
         self.litellm_debug_info = litellm_debug_info
         self.max_retries = max_retries
         self.num_retries = num_retries
-        self.response = error_response_without_credentials(self.status_code, response, _NO_UPSTREAM_REQUEST_URL)
+        _response_headers: Final = getattr(response, "headers", None) if response is not None else None
+        self.response = httpx.Response(
+            status_code=self.status_code,
+            headers=_response_headers,
+            request=httpx.Request(
+                method="POST",
+                url=" https://cloud.google.com/vertex-ai/",
+            ),
+        )
         super().__init__(
             self.message,
             response=self.response,  # pyright: ignore[reportArgumentType]  # SDK accepts HTTPX at runtime
@@ -928,7 +889,6 @@ class APIError(openai.APIError):
         max_retries: int | None = None,
         num_retries: int | None = None,
         body: object | None = None,
-        response: httpx.Response | None = None,
     ):
         self.status_code = status_code
         self.message = f"litellm.APIError: {message}"
@@ -937,8 +897,6 @@ class APIError(openai.APIError):
         self.litellm_debug_info = litellm_debug_info
         self.max_retries = max_retries
         self.num_retries = num_retries
-        if response is not None:
-            self.response = response
         if request is None:
             request = httpx.Request(method="POST", url="https://api.openai.com/v1")
         super().__init__(self.message, request=request, body=body)
@@ -1096,7 +1054,6 @@ LITELLM_EXCEPTION_TYPES: Final = [
     BadRequestError,
     UnprocessableEntityError,
     UnsupportedParamsError,
-    UnsupportedEndpointError,
     Timeout,
     PermissionDeniedError,
     RateLimitError,
@@ -1251,19 +1208,6 @@ class BlockedPiiEntityError(Exception):
         super().__init__(self.message)
 
 
-@runtime_checkable
-class _SupportsTrunc(Protocol):
-    def __trunc__(self) -> int: ...
-
-
-def _status_code_int(value: object) -> int:
-    if isinstance(value, (str, Buffer, SupportsInt, SupportsIndex, _SupportsTrunc)):
-        return int(value)
-    raise TypeError(
-        f"int() argument must be a string, a bytes-like object or a real number, not '{type(value).__name__}'"
-    )
-
-
 class MidStreamFallbackError(ServiceUnavailableError):
     def __init__(
         self,
@@ -1277,10 +1221,9 @@ class MidStreamFallbackError(ServiceUnavailableError):
         num_retries: int | None = None,
         generated_content: str = "",
         is_pre_first_chunk: bool = False,
-        emitted_disqualifying_content: bool = False,
     ):
-        original_status: Final[object] = getattr(original_exception, "status_code", None)
-        self.status_code = _status_code_int(original_status) if original_status is not None else 503
+        original_status: Final = getattr(original_exception, "status_code", None)
+        self.status_code = int(original_status) if original_status is not None else 503
         self.message = f"litellm.MidStreamFallbackError: {message}"
         self.model = model
         self.llm_provider = llm_provider
@@ -1290,7 +1233,6 @@ class MidStreamFallbackError(ServiceUnavailableError):
         self.num_retries = num_retries
         self.generated_content = generated_content
         self.is_pre_first_chunk = is_pre_first_chunk
-        self.emitted_disqualifying_content = emitted_disqualifying_content
 
         # Create a response if one wasn't provided
         if response is None:
@@ -1323,13 +1265,13 @@ class MidStreamFallbackError(ServiceUnavailableError):
         )
 
         # Restore the propagated status and original response/request objects
-        self.status_code = _status_code_int(original_status) if original_status is not None else 503
+        self.status_code = int(original_status) if original_status is not None else 503
         self.response = _saved_response
         self.request = _saved_request
         self.message = _saved_message
         self.args = (_saved_message,)
 
-        original_headers: Final[object] = getattr(original_exception, "litellm_response_headers", None)
+        original_headers: Final = getattr(original_exception, "litellm_response_headers", None)
         if original_headers is not None:
             self.litellm_response_headers = original_headers
 

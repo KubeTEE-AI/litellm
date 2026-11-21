@@ -1,5 +1,7 @@
+from typing import Any
+
 from pydantic import Field
-from typing_extensions import ReadOnly, TypedDict
+from typing_extensions import TypedDict
 
 from litellm.types.llms.base import LiteLLMBaseModel
 
@@ -12,41 +14,41 @@ from .base import IBMGuardrailsBaseConfigModel
 class IBMDetectorRequestBodyDetectorServer(TypedDict):
     """Request body for calling IBM Detector Server directly"""
 
-    contents: ReadOnly[list[str]]
-    detector_params: ReadOnly[dict[str, object]]
+    contents: list[str]
+    detector_params: dict[str, Any]
 
 
 class IBMDetectorRequestBodyOrchestrator(TypedDict):
     """Request body for calling IBM Detector via FMS Guardrails Orchestrator"""
 
-    content: ReadOnly[str]
-    detectors: ReadOnly[dict[str, dict[str, object]]]
+    content: str
+    detectors: dict[str, dict[str, Any]]
 
 
 class IBMDetectorDetection(TypedDict, total=False):
     """Individual detection from IBM Detector"""
 
-    start: ReadOnly[int]
-    end: ReadOnly[int]
-    text: ReadOnly[str]
-    detection: ReadOnly[str]
-    detection_type: ReadOnly[str]
-    score: ReadOnly[float]
-    evidences: ReadOnly[list[object]]
-    metadata: ReadOnly[dict[str, object]]
-    detector_id: ReadOnly[str | None]  # Only present in orchestrator response
+    start: int
+    end: int
+    text: str
+    detection: str
+    detection_type: str
+    score: float
+    evidences: list[Any]
+    metadata: dict[str, Any]
+    detector_id: str | None  # Only present in orchestrator response
 
 
 class IBMDetectorResponseDetectorServer(TypedDict):
     """Response from IBM Detector Server (returns list of lists)"""
 
-    detections: ReadOnly[list[list[IBMDetectorDetection]]]
+    detections: list[list[IBMDetectorDetection]]
 
 
 class IBMDetectorResponseOrchestrator(TypedDict):
     """Response from IBM FMS Guardrails Orchestrator"""
 
-    detections: ReadOnly[list[IBMDetectorDetection]]
+    detections: list[IBMDetectorDetection]
 
 
 # Pydantic Config Models
@@ -55,12 +57,12 @@ class IBMDetectorResponseOrchestrator(TypedDict):
 class IBMDetectorOptionalParams(LiteLLMBaseModel):
     """Optional parameters for IBM Detector guardrail"""
 
-    detector_params: dict[str, object] | None = Field(
+    detector_params: dict[str, Any] | None = Field(
         default_factory=lambda: {},
         description="Dictionary of arguments to pass to the detector.",
     )
 
-    extra_headers: dict[str, object] | None = Field(
+    extra_headers: dict[str, Any] | None = Field(
         default_factory=lambda: {},
         description="Dictionary of extra headers to pass to the detector.",
     )

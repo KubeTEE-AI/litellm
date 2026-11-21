@@ -1,6 +1,5 @@
 import json
-import traceback
-from typing import Callable, Final, Optional
+from typing import Final
 from unittest.mock import MagicMock, patch
 
 import pytest

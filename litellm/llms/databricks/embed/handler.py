@@ -26,7 +26,6 @@ class DatabricksEmbeddingHandler(OpenAILikeEmbeddingHandler, DatabricksBase):
         aembedding=None,
         custom_endpoint: bool | None = None,
         headers: dict | None = None,
-        drop_params: bool = False,
     ) -> EmbeddingResponse:
         # Check for custom user agent in optional_params or environment
         # This allows partners building on LiteLLM to set their own telemetry
@@ -59,5 +58,4 @@ class DatabricksEmbeddingHandler(OpenAILikeEmbeddingHandler, DatabricksBase):
             aembedding=aembedding,
             custom_endpoint=True,
             headers=headers,
-            drop_params=drop_params,
         )

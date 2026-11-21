@@ -2,9 +2,7 @@
 
 import { CircleHelp } from "lucide-react";
 import React from "react";
-import { Trans, useTranslation } from "react-i18next";
 import { z } from "zod";
-import i18n from "@/i18n/i18n";
 import BudgetDurationDropdown from "@/components/common_components/budget_duration_dropdown";
 import { FieldGroup } from "@/components/ui/field";
 import { FormField } from "@/components/shared/form/FormField";
@@ -34,7 +32,7 @@ const budgetSchema = z
     budget_duration: z.string().optional(),
   })
   .refine(hasAnyBudgetValue, {
-    error: () => i18n.t("modelsAndEndpoints.accessGroupBudgetModal.validation.atLeastOne"),
+    message: "Set at least one of max budget, soft budget or reset window",
     path: ["max_budget"],
   });
 
@@ -51,7 +49,6 @@ const AccessGroupBudgetModal: React.FC<AccessGroupBudgetModalProps> = ({
   onCancel,
   onSubmit,
 }) => {
-  const { t } = useTranslation();
   const budget = accessGroup?.budget ?? null;
   const form = useZodForm(budgetSchema, { values: accessGroupBudgetFormValues(budget) });
 
@@ -60,19 +57,12 @@ const AccessGroupBudgetModal: React.FC<AccessGroupBudgetModalProps> = ({
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>
-            {t("modelsAndEndpoints.accessGroupBudgetModal.title", {
-              action: budget
-                ? t("modelsAndEndpoints.accessGroupBudgetModal.edit")
-                : t("modelsAndEndpoints.accessGroupBudgetModal.set"),
-              accessGroup: accessGroup?.access_group,
-            })}
+            {budget ? "Edit" : "Set"} budget for &quot;{accessGroup?.access_group}&quot;
           </DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          <Trans
-            i18nKey="modelsAndEndpoints.accessGroupBudgetModal.description"
-            components={{ allProxyModels: <code>all-proxy-models</code> }}
-          />
+          Every key granted this access group by name draws from this one budget. A key that reaches the group&apos;s
+          models through a wildcard or <code>all-proxy-models</code> is not charged against it.
         </p>
         <form onSubmit={form.handleSubmit((values) => onSubmit(buildAccessGroupBudgetBody(values)))} noValidate>
           <TooltipProvider>
@@ -81,8 +71,8 @@ const AccessGroupBudgetModal: React.FC<AccessGroupBudgetModalProps> = ({
                 control={form.control}
                 name="max_budget"
                 label={labelWithHint(
-                  t("modelsAndEndpoints.accessGroupBudgetModal.maxBudget.label"),
-                  t("modelsAndEndpoints.accessGroupBudgetModal.maxBudget.hint"),
+                  "Max Budget (USD)",
+                  "Total the whole group may spend. Once its shared spend reaches this, every key that draws from the group is refused",
                 )}
               >
                 {({ ref, value, ...field }) => <NumericalInput {...field} value={value ?? ""} step={0.01} />}
@@ -92,8 +82,8 @@ const AccessGroupBudgetModal: React.FC<AccessGroupBudgetModalProps> = ({
                 control={form.control}
                 name="soft_budget"
                 label={labelWithHint(
-                  t("modelsAndEndpoints.accessGroupBudgetModal.softBudget.label"),
-                  t("modelsAndEndpoints.accessGroupBudgetModal.softBudget.hint"),
+                  "Soft Budget (USD)",
+                  "Fires an alert when the group's spend reaches this. Requests keep succeeding",
                 )}
               >
                 {({ ref, value, ...field }) => <NumericalInput {...field} value={value ?? ""} step={0.01} />}
@@ -103,8 +93,8 @@ const AccessGroupBudgetModal: React.FC<AccessGroupBudgetModalProps> = ({
                 control={form.control}
                 name="budget_duration"
                 label={labelWithHint(
-                  t("modelsAndEndpoints.accessGroupBudgetModal.resetBudget.label"),
-                  t("modelsAndEndpoints.accessGroupBudgetModal.resetBudget.hint"),
+                  "Reset Budget",
+                  "How often the group's spend resets. Leave empty for a budget that never resets",
                 )}
               >
                 {({ id, value, onChange }) => (
@@ -112,24 +102,21 @@ const AccessGroupBudgetModal: React.FC<AccessGroupBudgetModalProps> = ({
                     id={id}
                     value={value || null}
                     onChange={(next) => onChange(next ?? undefined)}
-                    placeholder={t("modelsAndEndpoints.accessGroupBudgetModal.resetBudget.keepCurrent")}
                   />
                 )}
               </FormField>
             </FieldGroup>
 
             <p className="mt-3 text-xs text-muted-foreground">
-              {t("modelsAndEndpoints.accessGroupBudgetModal.blankFieldNote")}
+              A field left blank keeps whatever the budget already has. Use Clear budget to remove the budget itself.
             </p>
 
             <div className="mt-6 flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={onCancel}>
-                {t("modelsAndEndpoints.accessGroupBudgetModal.cancel")}
+                Cancel
               </Button>
               <Button type="submit" disabled={isSaving}>
-                {isSaving
-                  ? t("modelsAndEndpoints.accessGroupBudgetModal.saving")
-                  : t("modelsAndEndpoints.accessGroupBudgetModal.save")}
+                {isSaving ? "Saving..." : "Save Budget"}
               </Button>
             </div>
           </TooltipProvider>

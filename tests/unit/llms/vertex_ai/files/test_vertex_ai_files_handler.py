@@ -3,6 +3,7 @@ Test Vertex AI files handler functionality
 """
 
 import re
+from types import MappingProxyType
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -61,14 +62,15 @@ class TestVertexAIFilesHandler:
                 configured_bucket_name="test-bucket",
             )
 
-    def test_extract_bucket_and_object_from_file_id_allows_legacy_flag_on_the_call(self):
+    def test_extract_bucket_and_object_from_file_id_allows_trusted_legacy_flag(self):
         file_id = "gs%3A%2F%2Ftest-bucket%2Ftest-file.txt"
+        trusted_credentials = MappingProxyType({"allow_legacy_cloud_file_ids": True})
 
         bucket_name, object_path = self.handler._extract_bucket_and_object_from_file_id(
             file_id=file_id,
             configured_bucket_name="test-bucket",
             litellm_params={
-                "allow_legacy_cloud_file_ids": True,
+                "_litellm_internal_model_credentials": trusted_credentials,
             },
         )
 

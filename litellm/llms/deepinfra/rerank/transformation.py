@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from typing import Final, Protocol
 
 import httpx
-from pydantic import TypeAdapter
 from typing_extensions import ReadOnly, TypedDict
 
 from litellm._uuid import uuid
@@ -24,8 +23,6 @@ from litellm.types.rerank import (
     RerankResponseResult,
     RerankTokens,
 )
-
-_DECODED_JSON: Final = TypeAdapter(object)
 
 
 class _DeepinfraInferenceStatus(TypedDict, total=False):
@@ -254,7 +251,7 @@ class DeepinfraRerankConfig(BaseRerankConfig):
         try:
             error_data = error_message
             if isinstance(error_message, str):
-                error_data = _DECODED_JSON.validate_python(json.loads(error_message))
+                error_data = json.loads(error_message)
             if isinstance(error_data, dict):
                 # Check for {"detail": {"error": "..."}}
                 detail: Final = error_data.get("detail")

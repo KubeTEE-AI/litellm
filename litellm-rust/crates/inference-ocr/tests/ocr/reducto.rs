@@ -175,11 +175,8 @@ async fn a_failed_upload_stops_before_parse(#[case] upload: ResponseTemplate) {
 }
 
 #[rstest]
-#[case::remote_url(
-    "https://example.com/a.pdf",
-    Error::UnsupportedDocument { provider: "Reducto", guidance: "" }
-)]
-#[case::empty_file_id("reducto://", Error::RequestField { path: "document file id".into(), cause: None })]
+#[case::remote_url("https://example.com/a.pdf", Error::ReductoSource)]
+#[case::empty_file_id("reducto://", Error::RequestField { path: "document file id".into() })]
 #[case::data_uri_without_payload("data:application/pdf;base64", Error::InvalidDataUri)]
 #[case::invalid_base64("data:application/pdf;base64,INVALID!", Error::InvalidDataUri)]
 #[tokio::test]
@@ -205,6 +202,7 @@ async fn invalid_document_sources_are_rejected_before_sending(
         std::mem::discriminant(&expected)
     );
     assert_eq!(error.http_status_code(), Some(400));
+    assert_eq!(error.to_string(), expected.to_string());
 }
 
 #[tokio::test]

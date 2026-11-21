@@ -1,16 +1,12 @@
 use std::time::Duration;
 
 use super::operations::PythonReadRequest;
-use litellm_secret_value::SecretValue;
-use litellm_secrets::KeyManagementSystem;
-
+use litellm_secrets::{KeyManagementSystem, SecretValue};
 use litellm_secrets_types::{
     AwsOperationContext, CyberarkOperationContext, GoogleOperationContext,
     HashicorpOperationContext, SecretOperationContext,
 };
-use pyo3::{prelude::*, types::PyDict};
-
-use super::ManagerError;
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 
 pub(super) fn read_request(
     system: KeyManagementSystem,
@@ -43,7 +39,9 @@ pub(super) fn read_request(
             SecretOperationContext::Google(GoogleOperationContext::default())
         }
         _ => {
-            return Err(ManagerError::ProviderReads.into());
+            return Err(PyValueError::new_err(
+                "secret manager does not support provider reads",
+            ));
         }
     };
     Ok(PythonReadRequest {
@@ -90,19 +88,18 @@ fn aws_context(
 }
 
 fn read_timeout(value: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Duration>> {
-    read_timeout_seconds(value)?
-        .map(|value| Ok(Duration::try_from_secs_f64(value).map_err(ManagerError::Timeout)?))
-        .transpose()
-}
-
-pub(super) fn read_timeout_seconds(value: Option<&Bound<'_, PyAny>>) -> PyResult<Option<f64>> {
     let Some(value) = value.filter(|value| !value.is_none()) else {
         return Ok(None);
     };
-    match value.extract::<f64>() {
-        Ok(value) => Ok(Some(value)),
-        Err(_) => value.getattr("read")?.extract::<Option<f64>>(),
-    }
+    let seconds = match value.extract::<f64>() {
+        Ok(value) => Some(value),
+        Err(_) => value.getattr("read")?.extract::<Option<f64>>()?,
+    };
+    seconds
+        .map(|value| {
+            Duration::try_from_secs_f64(value).map_err(|_| PyValueError::new_err("invalid timeout"))
+        })
+        .transpose()
 }
 
 fn vault_context(params: Option<&Bound<'_, PyAny>>) -> PyResult<HashicorpOperationContext> {

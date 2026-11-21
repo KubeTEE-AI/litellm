@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Search } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
@@ -10,8 +9,6 @@ import { fetchDiscoverableMCPServers } from "@/components/networking";
 import { DiscoverableMCPServer, DiscoverMCPServersResponse } from "@/components/mcp_tools/types";
 import { mcpLogoImg } from "./CreateMCPServer";
 import { resolveLogoSrc } from "@/lib/assetPaths";
-
-const ALL_CATEGORIES = "All";
 
 interface MCPDiscoveryProps {
   isVisible: boolean;
@@ -45,13 +42,12 @@ const MCPDiscovery: React.FC<MCPDiscoveryProps> = ({
   onCustomServer,
   accessToken,
 }) => {
-  const { t } = useTranslation();
   const [servers, setServers] = useState<DiscoverableMCPServer[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES);
+  const [selectedCategory, setSelectedCategory] = useState("All");
 
   useEffect(() => {
     if (isVisible && accessToken) {
@@ -63,24 +59,24 @@ const MCPDiscovery: React.FC<MCPDiscoveryProps> = ({
           setCategories(data.categories || []);
         })
         .catch((err: Error) => {
-          setError(err.message || t("mcpServers.discovery.errors.loadFailed"));
+          setError(err.message || "Failed to load MCP servers");
         })
         .finally(() => {
           setLoading(false);
         });
     }
-  }, [isVisible, accessToken, t]);
+  }, [isVisible, accessToken]);
 
   useEffect(() => {
     if (isVisible) {
       setSearchQuery("");
-      setSelectedCategory(ALL_CATEGORIES);
+      setSelectedCategory("All");
     }
   }, [isVisible]);
 
   const filteredServers = useMemo(() => {
     let result = servers;
-    if (selectedCategory !== ALL_CATEGORIES) {
+    if (selectedCategory !== "All") {
       result = result.filter((s) => s.category === selectedCategory);
     }
     if (searchQuery.trim()) {
@@ -111,15 +107,11 @@ const MCPDiscovery: React.FC<MCPDiscoveryProps> = ({
         <DialogHeader>
           <div className="flex items-center justify-between border-b border-border pb-4">
             <div className="flex items-center space-x-3">
-              <img
-                src={resolveLogoSrc(mcpLogoImg)}
-                alt={t("mcpServers.discovery.logoAlt")}
-                className="mr-2 size-5 object-contain"
-              />
-              <DialogTitle className="text-xl font-semibold">{t("mcpServers.discovery.title")}</DialogTitle>
+              <img src={resolveLogoSrc(mcpLogoImg)} alt="MCP Logo" className="mr-2 size-5 object-contain" />
+              <DialogTitle className="text-xl font-semibold">Add MCP Server</DialogTitle>
             </div>
             <Button variant="link" size="sm" className="mr-8" onClick={onCustomServer}>
-              {t("mcpServers.discovery.customServer")}
+              + Custom Server
             </Button>
           </div>
         </DialogHeader>
@@ -127,7 +119,7 @@ const MCPDiscovery: React.FC<MCPDiscoveryProps> = ({
         <div className="max-h-[70vh] overflow-y-auto">
           {/* Filter pills */}
           <div className="mb-3 flex flex-wrap gap-1.5">
-            {[ALL_CATEGORIES, ...categories].map((cat) => {
+            {["All", ...categories].map((cat) => {
               const isSelected = selectedCategory === cat;
               return (
                 <Button
@@ -136,7 +128,7 @@ const MCPDiscovery: React.FC<MCPDiscoveryProps> = ({
                   variant={isSelected ? "default" : "outline"}
                   onClick={() => setSelectedCategory(cat)}
                 >
-                  {cat === ALL_CATEGORIES ? t("mcpServers.discovery.allCategories") : cat}
+                  {cat}
                 </Button>
               );
             })}
@@ -148,7 +140,7 @@ const MCPDiscovery: React.FC<MCPDiscoveryProps> = ({
               <Search className="size-4 text-muted-foreground" />
             </InputGroupAddon>
             <InputGroupInput
-              placeholder={t("mcpServers.discovery.searchPlaceholder")}
+              placeholder="Search servers..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -165,16 +157,16 @@ const MCPDiscovery: React.FC<MCPDiscoveryProps> = ({
 
           {error && (
             <div className="py-8 text-center text-muted-foreground">
-              <p className="text-sm">{t("mcpServers.discovery.loadError", { error })}</p>
+              <p className="text-sm">Failed to load servers: {error}</p>
             </div>
           )}
 
           {!loading && !error && filteredServers.length === 0 && (
             <div className="py-8 text-center text-muted-foreground">
               <p className="text-sm">
-                {t("mcpServers.discovery.noServers")}{" "}
+                No servers found.{" "}
                 <Button variant="link" size="sm" onClick={onCustomServer}>
-                  {t("mcpServers.discovery.addCustomServer")}
+                  Add a custom server
                 </Button>
               </p>
             </div>
@@ -186,7 +178,7 @@ const MCPDiscovery: React.FC<MCPDiscoveryProps> = ({
             Object.entries(groupedServers).map(([category, categoryServers]) => (
               <div key={category} className="mb-4">
                 <div className="mb-1 border-b border-border py-1.5 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
-                  {category === "Other" ? t("mcpServers.discovery.otherCategory") : category}
+                  {category}
                 </div>
                 <div className="grid grid-cols-2 gap-x-4">
                   {categoryServers.map((server) => {

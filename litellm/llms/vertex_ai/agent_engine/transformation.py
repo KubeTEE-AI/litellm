@@ -22,7 +22,6 @@ from litellm.litellm_core_utils.prompt_templates.common_utils import (
     convert_content_list_to_str,
 )
 from litellm.llms.base_llm.chat.transformation import BaseConfig, BaseLLMException
-from litellm.llms.custom_httpx.sse_lines import aiter_sse_lines, iter_sse_lines
 from litellm.llms.vertex_ai.agent_engine.sse_iterator import (
     VertexAgentEngineResponseIterator,
 )
@@ -358,7 +357,7 @@ class VertexAgentEngineConfig(BaseConfig, VertexBase):
     ) -> VertexAgentEngineResponseIterator:
         """Return a streaming iterator for SSE responses."""
         return VertexAgentEngineResponseIterator(
-            streaming_response=iter_sse_lines(raw_response.iter_text()),
+            streaming_response=raw_response.iter_lines(),
             sync_stream=True,
         )
 
@@ -466,7 +465,7 @@ class VertexAgentEngineConfig(BaseConfig, VertexBase):
 
         # Create iterator for SSE stream (async)
         completion_stream: Final = VertexAgentEngineResponseIterator(
-            streaming_response=aiter_sse_lines(response.aiter_text()),
+            streaming_response=response.aiter_lines(),
             sync_stream=False,
         )
 

@@ -1,5 +1,4 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import LatencyBasedConfiguration from "./LatencyBasedConfiguration";
 import { RouterSettingsSource, isOwnedByConfig } from "./ConfigOwned";
 import ReliabilityRetriesSection from "./ReliabilityRetriesSection";
@@ -29,7 +28,6 @@ const RouterSettingsForm: React.FC<RouterSettingsFormProps> = ({
   routingStrategyDescriptions,
   routerSettingsSource = {},
 }) => {
-  const { t } = useTranslation();
   const handleStrategyChange = (strategy: string) => {
     onChange({
       ...value,
@@ -49,8 +47,8 @@ const RouterSettingsForm: React.FC<RouterSettingsFormProps> = ({
       {/* Routing Settings Section */}
       <div className="space-y-6">
         <div className="max-w-3xl">
-          <h3 className="text-sm font-medium text-foreground">{t("routerSettingsForm.form.title")}</h3>
-          <p className="text-xs text-muted-foreground mt-1">{t("routerSettingsForm.form.description")}</p>
+          <h3 className="text-sm font-medium text-foreground">Routing Settings</h3>
+          <p className="text-xs text-muted-foreground mt-1">Configure how requests are routed to deployments</p>
         </div>
 
         {/* Routing Strategy */}

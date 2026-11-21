@@ -1,5 +1,3 @@
-import i18n from "@/i18n/i18n";
-
 interface ValidatorRule {
   validator: (rule: unknown, value: unknown) => Promise<void>;
 }
@@ -36,7 +34,7 @@ export const ptuCountRules: ValidatorRule[] = [
     validator: (_, value) =>
       isPositiveWholePtuCount(value)
         ? Promise.resolve()
-        : Promise.reject(new Error(i18n.t("utils.ptuValidation.countRange", { max: MAX_PTU_COUNT.toLocaleString() }))),
+        : Promise.reject(new Error(`PTU Count must be a whole number between 1 and ${MAX_PTU_COUNT.toLocaleString()}`)),
   },
 ];
 
@@ -55,7 +53,7 @@ export const ptuRateRules: ValidatorRule[] = [
       isNonNegativePtuRate(value)
         ? Promise.resolve()
         : Promise.reject(
-            new Error(i18n.t("utils.ptuValidation.rateRange", { max: MAX_COST_PER_PTU_PER_HOUR.toLocaleString() })),
+            new Error(`Cost per PTU / Hour must be between 0 and ${MAX_COST_PER_PTU_PER_HOUR.toLocaleString()}`),
           ),
   },
 ];
@@ -71,7 +69,7 @@ export const ptuPairRule =
     validator: (_, value) =>
       isFilledPtuValue(value) === isFilledPtuValue(getFieldValue(siblingField))
         ? Promise.resolve()
-        : Promise.reject(new Error(i18n.t("utils.ptuValidation.countAndRateTogether"))),
+        : Promise.reject(new Error("PTU Count and Cost per PTU / Hour must be set together")),
   });
 
 /**
@@ -89,7 +87,7 @@ export const ptuNoUsageCostRule =
       const echoed = thisField !== undefined && isFieldTouched !== undefined && !isFieldTouched(thisField);
       return echoed || !isFilledPtuValue(getFieldValue(countField)) || !isFilledPtuValue(value) || Number(value) === 0
         ? Promise.resolve()
-        : Promise.reject(new Error(i18n.t("utils.ptuValidation.reservedCapacityCost")));
+        : Promise.reject(new Error("A PTU deployment bills by reserved capacity, so this cost must be 0 or blank"));
     },
   });
 
@@ -104,7 +102,7 @@ export const ptuStartRequiredRule =
     validator: (_, value) =>
       isFilledPtuValue(value) || !isFilledPtuValue(getFieldValue(countField))
         ? Promise.resolve()
-        : Promise.reject(new Error(i18n.t("utils.ptuValidation.effectiveFromRequired"))),
+        : Promise.reject(new Error("PTU Effective From is required when PTU Count is set")),
   });
 
 /** Milliseconds for a picker value, which arrives as a Dayjs (or a Date/ISO string in tests). */
@@ -138,6 +136,6 @@ export const ptuWindowOrderRule =
       const end = thisBound === "start" ? sibling : value;
       return ptuWindowIsOrdered(start, end)
         ? Promise.resolve()
-        : Promise.reject(new Error(i18n.t("utils.ptuValidation.effectiveToAfterFrom")));
+        : Promise.reject(new Error("PTU Effective To must be after PTU Effective From"));
     },
   });

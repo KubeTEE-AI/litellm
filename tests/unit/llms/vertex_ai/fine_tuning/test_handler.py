@@ -45,8 +45,7 @@ class TestCustomLogger(CustomLogger):
 
 
 @pytest.mark.asyncio()
-@pytest.mark.parametrize("model_prefix", ["", "vertex_ai/"], ids=["bare", "provider-prefixed"])
-async def test_create_vertex_fine_tune_jobs_mocked(model_prefix: str):
+async def test_create_vertex_fine_tune_jobs_mocked():
     # Define reusable variables for the test
     project_id = "633608382793"
     location = "us-central1"
@@ -91,7 +90,7 @@ async def test_create_vertex_fine_tune_jobs_mocked(model_prefix: str):
             ),
         ):
             create_fine_tuning_response = await litellm.acreate_fine_tuning_job(
-                model=f"{model_prefix}{base_model}",
+                model=base_model,
                 custom_llm_provider="vertex_ai",
                 training_file=training_file,
                 vertex_project=project_id,

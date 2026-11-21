@@ -53,11 +53,10 @@ _PRISMA_POOL_TIMEOUT_CODE: Final = "P2024"
 _LOCK_TIMEOUT_SQLSTATE: Final = "55P03"
 _LOCK_TIMEOUT_PHRASE: Final = "canceling statement due to lock timeout"
 _STATEMENT_TIMEOUT_SQLSTATE: Final = "57014"
-_REJECTED_ROW_SQLSTATE_CLASSES: Final = frozenset({"22", "23", "54"})
 _STATEMENT_TIMEOUT_PHRASE: Final = "canceling statement due to statement timeout"
 
 
-def exception_chain(e: BaseException) -> Iterator[BaseException]:
+def _exception_chain(e: BaseException) -> Iterator[BaseException]:
     current = e  # rebind-ok: advances one link per iteration of the bounded walk
     for _ in range(_MAX_EXCEPTION_CHAIN_DEPTH):
         yield current
@@ -70,7 +69,7 @@ def exception_chain(e: BaseException) -> Iterator[BaseException]:
 def _database_service_unavailable_errors(e: BaseException) -> tuple[Exception, ...]:
     return tuple(
         link
-        for link in exception_chain(e)
+        for link in _exception_chain(e)
         if isinstance(link, Exception) and PrismaDBExceptionHandler.is_database_service_unavailable_error(link)
     )
 
@@ -223,20 +222,6 @@ class PrismaDBExceptionHandler:
         return type(e) is prisma.errors.DataError
 
     @staticmethod
-    def is_rejected_row_error(e: Exception) -> bool:
-        """True iff Postgres refused the rows themselves: a base ``DataError``, or a raw query failing with a data
-        exception (SQLSTATE class 22), integrity violation (class 23) or a value too large for an index (class 54). Systemic raw failures such as a missing
-        table (42P01) or a deadlock (40P01) stay False so the batch is retried instead of dropped."""
-        import prisma
-
-        if PrismaDBExceptionHandler.is_prisma_data_error(e):
-            return True
-        if not isinstance(e, _exception_types(prisma.errors.RawQueryError)):
-            return False
-        sqlstate: Final = PrismaDBExceptionHandler.postgres_sqlstate(e)
-        return sqlstate is not None and sqlstate[:2] in _REJECTED_ROW_SQLSTATE_CLASSES
-
-    @staticmethod
     def is_database_transport_error(e: Exception) -> bool:
         """
         Returns True only for transport/connectivity failures where a reconnect
@@ -259,8 +244,6 @@ class PrismaDBExceptionHandler:
             return True
         if PrismaDBExceptionHandler.is_database_capacity_error(e):
             return False
-        if _prisma_error_code(e) == "P1017":
-            return True
         if isinstance(e, _exception_types(prisma.errors.PrismaError)):
             error_message: Final = str(e).lower()
             connection_keywords: Final = (
@@ -536,7 +519,7 @@ class PrismaDBExceptionHandler:
         return ProxyException(
             message=PrismaDBExceptionHandler.database_unavailable_message(e),
             type=ProxyErrorTypes.no_db_connection,
-            param=None,
+            param="None",
             code=HTTPStatus.SERVICE_UNAVAILABLE.value,
         )
 

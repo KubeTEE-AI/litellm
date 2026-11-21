@@ -1,13 +1,10 @@
 use litellm_auth::AwsParams;
-use litellm_auth::CredentialPlacement;
-use litellm_secret_value::SecretValue;
-
+use litellm_auth::{CredentialPlacement, SecretValue};
 use litellm_auth_aws::{
     AwsCredentialSource, bedrock_model_id_and_region,
     constants::{AWS_BEARER_TOKEN_BEDROCK, BEDROCK_RUNTIME_ENDPOINT_TEMPLATE, BEDROCK_SERVICE},
     resolve_bedrock_region,
 };
-use litellm_core_utils::decline::Decline;
 use litellm_core_utils::{
     core_helpers::{finish_reason_for, unix_now, usage_from_parts},
     prompt_templates::factory::{Conversation, TurnRole, build_conversation},
@@ -22,14 +19,14 @@ use litellm_llms_types::{
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Error, ErrorDetail,
+    Error,
     base_llm::{
         auth::AuthScheme,
         chat::{
             streaming::StreamShape,
             transformation::{
                 BaseConfig, Headers, ProviderChatRequestData, ProviderChatResponseData,
-                ValidatedEnvironment, unsupported_message, unsupported_param,
+                Unsupported, ValidatedEnvironment, unsupported_message, unsupported_param,
             },
         },
     },
@@ -157,20 +154,25 @@ impl BaseConfig for AmazonConverseConfig {
         response: ProviderChatResponseData,
     ) -> Result<ChatCompletionsResponse, Error> {
         let body = response.body;
-        let has_usage = body.get("usage").is_some();
-        let response: ConverseResponse = serde_json::from_value(body).map_err(|error| {
-            Error::InvalidResponse(ErrorDetail::invalid("Converse response", error))
-        })?;
-        if !has_usage {
-            return Err(Error::InvalidResponse(ErrorDetail::MissingField {
-                subject: "Converse response",
-                field: "usage",
-            }));
+        if !body.is_object() {
+            return Err(Error::InvalidResponse(
+                "converse response is not an object".into(),
+            ));
         }
+        for field in ["output", "usage"] {
+            if body.get(field).is_none() {
+                return Err(Error::InvalidResponse(
+                    format!("invalid Converse response: missing field `{field}`").into(),
+                ));
+            }
+        }
+        let response: ConverseResponse = serde_json::from_value(body).map_err(|error| {
+            Error::InvalidResponse(format!("invalid Converse response: {error}").into())
+        })?;
+        // The route declines tool requests, so anything other than a text block
+        // is something this path never asked for. Decline; the host falls back.
         if response.message_content_is_non_text() {
-            return Err(Error::InvalidResponse(ErrorDetail::Unhandled(
-                "non-text response content block",
-            )));
+            return Err(Error::Unsupported("non-text response content block"));
         }
         let text = response.content_text();
         let computed = usage_from_parts(
@@ -267,7 +269,7 @@ impl BaseConfig for AmazonConverseConfig {
         &self,
         messages: &[ChatMessage],
         optional_params: &Map<String, Value>,
-    ) -> Option<Decline> {
+    ) -> Option<Unsupported> {
         unsupported_param(
             self.supported_openai_param_mappings(),
             CONFIG_PARAMS,
@@ -281,7 +283,7 @@ impl BaseConfig for AmazonConverseConfig {
             messages
                 .iter()
                 .any(has_blank_text)
-                .then_some(Decline::new("blank message text"))
+                .then_some(Unsupported("blank message text"))
         })
         // Converse has no assistant prefill: Python inserts a continue turn
         // when a conversation opens or closes on an assistant message, and
@@ -294,7 +296,7 @@ impl BaseConfig for AmazonConverseConfig {
                 .turns
                 .last()
                 .is_some_and(|turn| turn.role == TurnRole::Assistant);
-            (!conversation.opens_on_user_turn() || ends_on_assistant).then_some(Decline::new(
+            (!conversation.opens_on_user_turn() || ends_on_assistant).then_some(Unsupported(
                 "conversation does not run user turn to user turn",
             ))
         })
@@ -356,12 +358,11 @@ mod tests {
         Error,
         base_llm::{
             auth::AuthScheme,
-            chat::transformation::{BaseConfig, ProviderChatResponseData},
+            chat::transformation::{BaseConfig, ProviderChatResponseData, Unsupported},
         },
         bedrock::chat::converse_transformation::BEDROCK_CHAT_COMPLETIONS_CONFIG,
     };
     use litellm_auth::CredentialPlacement;
-    use litellm_core_utils::decline::Decline;
     use litellm_llms_types::formats::chat_completions::{ChatCompletionsResponse, ChatMessage};
     use rstest::rstest;
     use serde_json::{Map, Value, json};
@@ -395,7 +396,7 @@ mod tests {
         )
     }
 
-    fn reason(msgs: Value, opts: Value) -> Option<Decline> {
+    fn reason(msgs: Value, opts: Value) -> Option<Unsupported> {
         BEDROCK_CHAT_COMPLETIONS_CONFIG.unsupported_reason(&messages(msgs), &params(opts))
     }
 
@@ -471,7 +472,7 @@ mod tests {
                 json!([{"role": "user", "content": "hi"}]),
                 json!({"stream": true})
             ),
-            Some(Decline::new("streaming"))
+            Some(Unsupported("streaming"))
         );
     }
 
@@ -482,7 +483,7 @@ mod tests {
                 json!([{"role": "user", "content": "hi"}]),
                 json!({"topK": 40})
             ),
-            Some(Decline::new("unrecognized request parameter"))
+            Some(Unsupported("unrecognized request parameter"))
         );
     }
 
@@ -496,7 +497,7 @@ mod tests {
     fn declines_tools_and_other_params_outside_the_allowlist(#[case] param: Value) {
         assert_eq!(
             reason(json!([{"role": "user", "content": "hi"}]), param.clone()),
-            Some(Decline::new("unrecognized request parameter")),
+            Some(Unsupported("unrecognized request parameter")),
             "expected {param} to decline"
         );
     }
@@ -513,7 +514,7 @@ mod tests {
                 json!([{"role": "user", "content": content}, {"role": "user", "content": "hi"}]),
                 json!({})
             ),
-            Some(Decline::new("blank message text")),
+            Some(Unsupported("blank message text")),
             "expected blank content {content} to decline"
         );
     }
@@ -525,7 +526,7 @@ mod tests {
         // host before the call rather than an error after it.
         assert_eq!(
             reason(json!([{"role": "user", "content": []}]), json!({})),
-            Some(Decline::new("message without content"))
+            Some(Unsupported("message without content"))
         );
         assert_eq!(
             reason(
@@ -546,7 +547,7 @@ mod tests {
                 ]),
                 json!({})
             ),
-            Some(Decline::new(
+            Some(Unsupported(
                 "conversation does not run user turn to user turn"
             ))
         );
@@ -558,7 +559,7 @@ mod tests {
                 ]),
                 json!({})
             ),
-            Some(Decline::new(
+            Some(Unsupported(
                 "conversation does not run user turn to user turn"
             ))
         );
@@ -818,7 +819,7 @@ mod tests {
                 ]}]),
                 json!({})
             ),
-            Some(Decline::new("non-text message content"))
+            Some(Unsupported("non-text message content"))
         );
     }
 
@@ -845,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn a_response_carrying_a_tool_use_block_is_invalid() {
+    fn declines_a_response_carrying_a_tool_use_block() {
         let err = transform_response(json!({
             "output": {"message": {"content": [
                 {"toolUse": {"toolUseId": "t1", "name": "f", "input": {}}}
@@ -854,32 +855,37 @@ mod tests {
             "usage": {"inputTokens": 1, "outputTokens": 1}
         }))
         .expect_err("tool use block");
+        assert_eq!(err, Error::Unsupported("non-text response content block"));
+    }
+
+    #[test]
+    fn errors_on_a_response_missing_required_fields() {
         assert_eq!(
-            err,
-            Error::InvalidResponse(crate::ErrorDetail::Unhandled(
-                "non-text response content block"
-            ))
+            transform_response(json!("nope")).expect_err("not an object"),
+            Error::InvalidResponse("converse response is not an object".to_string().into())
+        );
+        assert_eq!(
+            transform_response(json!({"usage": {}})).expect_err("no output"),
+            Error::InvalidResponse("invalid Converse response: missing field `output`".into())
+        );
+        assert_eq!(
+            transform_response(json!({"output": {"message": {"content": []}}}))
+                .expect_err("no usage"),
+            Error::InvalidResponse("invalid Converse response: missing field `usage`".into())
         );
     }
 
-    #[rstest::rstest]
-    #[case::not_an_object(json!("nope"), "invalid type")]
-    #[case::no_output(json!({"usage": {"inputTokens": 1, "outputTokens": 1}}), "missing field `output`")]
-    #[case::no_usage(json!({"output": {"message": {"content": []}}}), "missing usage")]
-    #[case::non_string_text(
-        json!({"output": {"message": {"content": [{"text": 123}]}}, "usage": {"inputTokens": 1, "outputTokens": 1}}),
-        "invalid type"
-    )]
-    #[case::non_integer_tokens(
-        json!({"output": {"message": {"content": [{"text": "x"}]}}, "usage": {"inputTokens": "1", "outputTokens": 1}}),
-        "invalid type"
-    )]
-    fn rejects_a_malformed_response(#[case] response: Value, #[case] fact: &str) {
-        let error = transform_response(response).expect_err("malformed response");
-        assert!(matches!(error, Error::InvalidResponse(_)), "{error:?}");
-        let report = litellm_error::Report::new(&error).to_string();
-        assert!(report.contains("Converse response"), "{report}");
-        assert!(report.contains(fact), "{report}");
+    #[test]
+    fn rejects_malformed_text_and_token_counts() {
+        for response in [
+            json!({"output": {"message": {"content": [{"text": 123}]}}, "usage": {"inputTokens": 1, "outputTokens": 1}}),
+            json!({"output": {"message": {"content": [{"text": "x"}]}}, "usage": {"inputTokens": "1", "outputTokens": 1}}),
+        ] {
+            assert!(matches!(
+                transform_response(response),
+                Err(Error::InvalidResponse(message)) if message.to_string().starts_with("invalid Converse response:")
+            ));
+        }
     }
 
     #[test]

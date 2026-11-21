@@ -11,7 +11,6 @@ import httpx
 from pydantic import ConfigDict, TypeAdapter
 
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
-from litellm.litellm_core_utils.url_utils import ensure_api_route
 from litellm.llms.base_llm.search.transformation import (
     BaseSearchConfig,
     SearchResponse,
@@ -88,7 +87,11 @@ class LinkupSearchConfig(BaseSearchConfig):
         """
         Get complete URL for Search endpoint.
         """
-        return ensure_api_route(api_base or get_secret_str("LINKUP_API_BASE") or self.LINKUP_API_BASE, "search")
+        resolved_api_base: Final = api_base or get_secret_str("LINKUP_API_BASE") or self.LINKUP_API_BASE
+        clean_api_base: Final = resolved_api_base.rstrip("/")
+        if clean_api_base.endswith("/search"):
+            return clean_api_base
+        return f"{clean_api_base}/search"
 
     def transform_search_request(
         self,

@@ -3,7 +3,6 @@
 import { X } from "lucide-react";
 import moment from "moment";
 import { useRef, useState, type RefObject } from "react";
-import { useTranslation } from "react-i18next";
 import { useResizeObserver } from "usehooks-ts";
 
 import { DotFieldCanvas, DotFieldRoot } from "@/components/shared/dotField/DotField";
@@ -86,7 +85,6 @@ function BucketTooltip({
   bucketCount: number;
   noun: ItemNoun;
 }) {
-  const { t } = useTranslation();
   return (
     <div
       className="pointer-events-none absolute top-full z-floating mt-1 rounded-md border border-border bg-popover px-2.5 py-1.5 font-mono text-xs text-popover-foreground shadow-md"
@@ -94,16 +92,13 @@ function BucketTooltip({
       role="tooltip"
     >
       <div>
-        {t("shared.timeline.tooltip.range", {
-          start: moment(bucket.startMs).format(EDGE_FORMAT),
-          end: moment(bucket.endMs).format("HH:mm"),
-        })}
+        {moment(bucket.startMs).format(EDGE_FORMAT)} to {moment(bucket.endMs).format("HH:mm")}
       </div>
       <div>
         {bucket.total} {bucket.total === 1 ? noun.singular : noun.plural}
-        {bucket.failed > 0 && t("shared.timeline.tooltip.failed", { count: bucket.failed })}
+        {bucket.failed > 0 && `, ${bucket.failed} failed`}
       </div>
-      <div className="text-info">{t("shared.timeline.tooltip.dragToZoom")}</div>
+      <div className="text-info">drag to zoom</div>
     </div>
   );
 }
@@ -233,7 +228,6 @@ function TickAxis({ range, width }: { range: TimeWindow; width: number }) {
 
 /** Histogram over the window covered by `buckets`. Drag to select; drag the bracket or its edges to adjust; Esc clears. */
 export function Timeline({ buckets, selection, onSelect, noun }: TimelineProps) {
-  const { t } = useTranslation();
   const bucketCount = buckets.length;
   const [hover, setHover] = useState<number | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -346,7 +340,7 @@ export function Timeline({ buckets, selection, onSelect, noun }: TimelineProps) 
         <button
           type="button"
           onClick={() => onSelect(null)}
-          aria-label={t("shared.timeline.clearZoom")}
+          aria-label="Clear time zoom"
           className="absolute top-1 right-3 inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <X className="size-3" />

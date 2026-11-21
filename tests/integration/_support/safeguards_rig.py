@@ -30,7 +30,7 @@ from integration._support.client import (
     string_value,
 )
 from integration._support.database import read_rows
-from integration._support.process import OwnedProxy, OwnedState, owned_proxy_process
+from integration._support.process import OwnedProxy, owned_proxy_process
 from integration._support.wire import Reply, Request, Wire, wire_server
 from pydantic import JsonValue, TypeAdapter
 
@@ -287,7 +287,6 @@ def safeguards_rig(
     directory: Path,
     *,
     environment: Callable[[str], Mapping[str, str]] = no_environment,
-    remove_environment: tuple[str, ...] = (),
     workers: int = 2,
     classifier_model: JsonValue | Omitted = CLASSIFIER_MODEL,
     general_settings: Mapping[str, JsonValue] | None = None,
@@ -306,15 +305,7 @@ def safeguards_rig(
             litellm_settings=litellm_settings,
             top_level=top_level,
         )
-        with owned_proxy_process(
-            shared,
-            directory,
-            dict(environment(wire.url)),
-            config=path,
-            remove_environment=remove_environment,
-            workers=workers,
-            state=OwnedState.SHARED_WITH_WORKER,
-        ) as owned:
+        with owned_proxy_process(shared, directory, dict(environment(wire.url)), config=path, workers=workers) as owned:
             yield Rig(wire, scripts, owned)
 
 

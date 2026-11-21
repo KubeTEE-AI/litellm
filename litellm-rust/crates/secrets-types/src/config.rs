@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 
-use litellm_secret_value::SecretValue;
+use crate::SecretValue;
 
 #[derive(
     Clone,

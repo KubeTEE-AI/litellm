@@ -32,7 +32,6 @@ EXCLUDED_FOLDERS = {
     "claude_code",
     "codex",
     "opencode",
-    "pi",
     "deepagents",
     "tool_loop",
 }

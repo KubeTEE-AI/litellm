@@ -3,19 +3,28 @@ Organization repository for database operations on LiteLLM_OrganizationTable.
 """
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Protocol
 
 from litellm.models.organization import LiteLLM_OrganizationTable
 from litellm.repositories.base_repository import BaseRepository
 from litellm.repositories.prisma_protocols import TableActions
-from litellm.repositories.table_repositories import PrismaTableRepository
 
 if TYPE_CHECKING:
     from prisma import models as prisma_models
 
 
-class _OrganizationTable(PrismaTableRepository["prisma_models.LiteLLM_OrganizationTable"]):
-    table_name = "litellm_organizationtable"
+class _OrganizationDb(Protocol):
+    """The single Prisma table this repository reaches for on ``prisma_client.db``."""
+
+    @property
+    def litellm_organizationtable(self) -> TableActions["prisma_models.LiteLLM_OrganizationTable"]: ...
+
+
+class _PrismaClientView(Protocol):
+    """The one attribute this repository reads off the untyped Prisma client wrapper."""
+
+    @property
+    def db(self) -> _OrganizationDb: ...
 
 
 class OrganizationRepository(BaseRepository[LiteLLM_OrganizationTable]):
@@ -23,7 +32,8 @@ class OrganizationRepository(BaseRepository[LiteLLM_OrganizationTable]):
 
     @property
     def table(self) -> TableActions["prisma_models.LiteLLM_OrganizationTable"]:
-        return _OrganizationTable(self._prisma_client).table
+        client: Final[_PrismaClientView] = self.prisma_client
+        return client.db.litellm_organizationtable
 
     @property
     def model_class(self) -> type[LiteLLM_OrganizationTable]:

@@ -1,21 +1,17 @@
-import type { ParseKeys } from "i18next";
-
-import i18n from "@/i18n/i18n";
-
 export type CoordinationFieldType = "string" | "password" | "integer" | "boolean" | "list";
 
 export type CoordinationRedisType = "node" | "cluster" | "sentinel";
 
 export type CoordinationSection = "connection" | "cluster" | "sentinel" | "ssl";
 
-export type CoordinationFieldRule = (value: unknown) => ParseKeys | null;
+export type CoordinationFieldRule = (value: unknown) => string | null;
 
 export interface CoordinationField {
   readonly name: string;
-  readonly label: ParseKeys;
+  readonly label: string;
   readonly type: CoordinationFieldType;
   readonly section: CoordinationSection;
-  readonly helpText: ParseKeys;
+  readonly helpText: string;
   readonly redisType: CoordinationRedisType | null;
   readonly secret: boolean;
   readonly defaultValue?: string | number | boolean;
@@ -25,21 +21,15 @@ export interface CoordinationField {
 export const COORDINATION_REDIS_TYPES: readonly CoordinationRedisType[] = ["node", "cluster", "sentinel"];
 
 export const COORDINATION_REDIS_TYPE_DESCRIPTIONS: Readonly<Record<CoordinationRedisType, string>> = {
-  get node() {
-    return i18n.t("caching.coordinationRedis.redisType.descriptions.node");
-  },
-  get cluster() {
-    return i18n.t("caching.coordinationRedis.redisType.descriptions.cluster");
-  },
-  get sentinel() {
-    return i18n.t("caching.coordinationRedis.redisType.descriptions.sentinel");
-  },
+  node: "Standard Redis node/single instance",
+  cluster: "Redis Cluster mode for high availability and horizontal scaling",
+  sentinel: "Redis Sentinel mode for high availability with automatic failover",
 };
 
-export const COORDINATION_REDIS_TYPE_LABELS: Readonly<Record<CoordinationRedisType, ParseKeys>> = {
-  node: "caching.coordinationRedis.redisType.options.node",
-  cluster: "caching.coordinationRedis.redisType.options.cluster",
-  sentinel: "caching.coordinationRedis.redisType.options.sentinel",
+export const COORDINATION_REDIS_TYPE_LABELS: Readonly<Record<CoordinationRedisType, string>> = {
+  node: "Node (Single Instance)",
+  cluster: "Cluster",
+  sentinel: "Sentinel",
 };
 
 const isBlank = (value: unknown): boolean => value === undefined || value === null || String(value).trim() === "";
@@ -49,7 +39,7 @@ const portRule: CoordinationFieldRule = (value) => {
     return null;
   }
   const port = Number(value);
-  return Number.isInteger(port) && port >= 1 && port <= 65535 ? null : "caching.coordinationRedis.validation.port";
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? null : "Port must be an integer between 1 and 65535";
 };
 
 const jsonListRule: CoordinationFieldRule = (value) => {
@@ -60,36 +50,37 @@ const jsonListRule: CoordinationFieldRule = (value) => {
   try {
     parsed = JSON.parse(String(value));
   } catch {
-    return "caching.coordinationRedis.validation.jsonArrayInvalid";
+    return "Must be a valid JSON array (use double quotes)";
   }
-  return Array.isArray(parsed) ? null : "caching.coordinationRedis.validation.jsonArrayRequired";
+  return Array.isArray(parsed) ? null : "Must be a JSON array";
 };
 
 export const COORDINATION_FIELDS: readonly CoordinationField[] = [
   {
     name: "url",
-    label: "caching.coordinationRedis.fields.url.label",
+    label: "Redis URL",
     type: "password",
     section: "connection",
-    helpText: "caching.coordinationRedis.fields.url.helpText",
+    helpText:
+      "Full Redis/Valkey connection URL (e.g. redis://:password@host:6379/1). When set, it takes precedence over Host, Port, Username, and Password.",
     redisType: null,
     secret: true,
   },
   {
     name: "host",
-    label: "caching.coordinationRedis.fields.host.label",
+    label: "Host",
     type: "string",
     section: "connection",
-    helpText: "caching.coordinationRedis.fields.host.helpText",
+    helpText: "Redis server hostname or IP address",
     redisType: null,
     secret: false,
   },
   {
     name: "port",
-    label: "caching.coordinationRedis.fields.port.label",
+    label: "Port",
     type: "integer",
     section: "connection",
-    helpText: "caching.coordinationRedis.fields.port.helpText",
+    helpText: "Redis server port number",
     redisType: null,
     secret: false,
     defaultValue: "6379",
@@ -97,66 +88,66 @@ export const COORDINATION_FIELDS: readonly CoordinationField[] = [
   },
   {
     name: "username",
-    label: "caching.coordinationRedis.fields.username.label",
+    label: "Username",
     type: "string",
     section: "connection",
-    helpText: "caching.coordinationRedis.fields.username.helpText",
+    helpText: "Redis server username (if required)",
     redisType: null,
     secret: false,
   },
   {
     name: "password",
-    label: "caching.coordinationRedis.fields.password.label",
+    label: "Password",
     type: "password",
     section: "connection",
-    helpText: "caching.coordinationRedis.fields.password.helpText",
+    helpText: "Redis server password",
     redisType: null,
     secret: true,
   },
   {
     name: "startup_nodes",
-    label: "caching.coordinationRedis.fields.startupNodes.label",
+    label: "Startup Nodes",
     type: "list",
     section: "cluster",
-    helpText: "caching.coordinationRedis.fields.startupNodes.helpText",
+    helpText: 'List of startup nodes for Redis Cluster (e.g., [{"host": "127.0.0.1", "port": 7001}])',
     redisType: "cluster",
     secret: false,
     rules: [jsonListRule],
   },
   {
     name: "sentinel_nodes",
-    label: "caching.coordinationRedis.fields.sentinelNodes.label",
+    label: "Sentinel Nodes",
     type: "list",
     section: "sentinel",
-    helpText: "caching.coordinationRedis.fields.sentinelNodes.helpText",
+    helpText: 'List of Sentinel nodes (e.g., [["localhost", 26379]])',
     redisType: "sentinel",
     secret: false,
     rules: [jsonListRule],
   },
   {
     name: "service_name",
-    label: "caching.coordinationRedis.fields.serviceName.label",
+    label: "Service Name",
     type: "string",
     section: "sentinel",
-    helpText: "caching.coordinationRedis.fields.serviceName.helpText",
+    helpText: "Master service name for Redis Sentinel",
     redisType: "sentinel",
     secret: false,
   },
   {
     name: "sentinel_password",
-    label: "caching.coordinationRedis.fields.sentinelPassword.label",
+    label: "Sentinel Password",
     type: "password",
     section: "sentinel",
-    helpText: "caching.coordinationRedis.fields.sentinelPassword.helpText",
+    helpText: "Password for Redis Sentinel authentication",
     redisType: "sentinel",
     secret: true,
   },
   {
     name: "ssl",
-    label: "caching.coordinationRedis.fields.ssl.label",
+    label: "SSL",
     type: "boolean",
     section: "ssl",
-    helpText: "caching.coordinationRedis.fields.ssl.helpText",
+    helpText: "Enable SSL/TLS connection",
     redisType: null,
     secret: false,
     defaultValue: false,

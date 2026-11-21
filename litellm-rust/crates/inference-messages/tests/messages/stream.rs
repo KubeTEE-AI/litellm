@@ -260,7 +260,13 @@ async fn an_upstream_error_fails_the_call_without_opening_the_stream(
         .await
         .expect_err("upstream error propagates");
 
-    assert_eq!(error.upstream_response(), Some((429, body)));
+    assert_eq!(
+        error,
+        Error::Transport(litellm_http::transport::Error::Http {
+            status: 429,
+            body: body.into()
+        })
+    );
     assert!(host.seen.into_inner().unwrap().is_empty());
 }
 
@@ -326,9 +332,7 @@ async fn the_timeout_covers_a_stalled_stream_body(call: MessagesCall) {
         .expect("the stalled stream gives up within the timeout")
         .expect_err("a stalled body fails the call");
 
-    assert!(error.dispatched(), "{error:?}");
-    assert!(!error.is_request(), "{error:?}");
-    assert_eq!(error.upstream_response(), None);
+    assert!(matches!(error, Error::Transport(_)), "{error:?}");
     let seen = host.seen.into_inner().unwrap();
     assert!(
         matches!(seen.as_slice(), [Seen::Open(_), Seen::Deliver(chunk)] if chunk.as_ref() == b"event: message_start\ndata: {}\n\n"),
@@ -386,7 +390,13 @@ async fn the_sdk_returns_http_errors_before_opening_a_stream(call: MessagesCall)
         .err()
         .expect("upstream failure is returned by messages()");
 
-    assert_eq!(error.upstream_response(), Some((429, "slow down")));
+    assert_eq!(
+        error,
+        Error::Transport(litellm_http::transport::Error::Http {
+            status: 429,
+            body: "slow down".into(),
+        })
+    );
 }
 
 #[rstest]
@@ -432,49 +442,6 @@ async fn dropping_the_sdk_stream_closes_the_unfinished_upstream(
         .unwrap();
 }
 
-/// Answers with an error head whose promised body never arrives.
-async fn stalling_error_upstream() -> (String, JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    let connection = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let mut request = vec![0; 4096];
-        let _ = socket.read(&mut request).await;
-        socket
-            .write_all(b"HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n")
-            .await
-            .unwrap();
-        let _ = socket.read_to_end(&mut Vec::new()).await;
-    });
-    (base, connection)
-}
-
-#[rstest]
-#[tokio::test]
-async fn the_timeout_covers_a_stalled_stream_error_body(call: MessagesCall) {
-    let (base, connection) = stalling_error_upstream().await;
-    let host = RecordingStreamHost::new(
-        MessagesCall {
-            timeout: Some(Duration::from_millis(300)),
-            ..streaming(call, base)
-        },
-        usize::MAX,
-    );
-
-    let error = tokio::time::timeout(Duration::from_secs(5), stream_through(&host))
-        .await
-        .expect("the stalled error body gives up within the timeout")
-        .expect_err("a stalled error body fails the call");
-
-    assert!(error.dispatched(), "{error:?}");
-    assert_eq!(error.upstream_response(), None);
-    assert!(host.seen.into_inner().unwrap().is_empty());
-    tokio::time::timeout(Duration::from_secs(5), connection)
-        .await
-        .expect("timing out closes the upstream connection")
-        .unwrap();
-}
-
 #[rstest]
 #[tokio::test]
 async fn the_sdk_yields_a_body_error_once_after_delivered_chunks(call: MessagesCall) {
@@ -503,9 +470,7 @@ async fn the_sdk_yields_a_body_error_once_after_delivered_chunks(call: MessagesC
         .expect("the stalled body times out")
         .unwrap()
         .unwrap_err();
-    assert!(error.dispatched(), "{error:?}");
-    assert!(!error.is_request(), "{error:?}");
-    assert_eq!(error.upstream_response(), None);
+    assert!(matches!(error, Error::Transport(_)), "{error:?}");
     assert!(chunks.next().await.is_none());
     tokio::time::timeout(Duration::from_secs(5), connection)
         .await

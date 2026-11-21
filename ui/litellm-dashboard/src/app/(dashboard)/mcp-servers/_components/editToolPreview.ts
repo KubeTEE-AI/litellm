@@ -1,5 +1,3 @@
-import type { TFunction } from "i18next";
-import i18n from "@/i18n/i18n";
 import { AUTH_TYPE, TRANSPORT } from "@/components/mcp_tools/types";
 import { AUTH_TYPES_REQUIRING_AUTH_VALUE, reduceStaticHeaders } from "./createServerPayload";
 
@@ -29,7 +27,6 @@ type EditToolPreview =
 export const getEditToolPreview = (
   values: Readonly<Record<string, unknown>>,
   initialValues: Readonly<Record<string, unknown>>,
-  t: TFunction = i18n.t.bind(i18n),
 ): EditToolPreview => {
   const staticAuth =
     values.auth_type === AUTH_TYPE.NONE ||
@@ -62,7 +59,8 @@ export const getEditToolPreview = (
   if (changedOrigin && (needsSavedCredential || reusesHeader)) {
     return {
       kind: "incomplete",
-      message: t("mcpServers.editToolPreview.originChanged"),
+      message:
+        "The server origin changed. Enter credentials and replace or remove saved static headers to preview tools.",
     };
   }
   return { kind: "preview", config };

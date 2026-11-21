@@ -17,20 +17,18 @@ import {
   ComboboxValue,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
-import type { TFunction } from "i18next";
-import { useTranslation } from "react-i18next";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Team } from "@/components/key_team_helpers/key_list";
 import { splitWildcardModels } from "./modelUtils";
 
 const MODEL_SELECT_ALL_PROXY_MODELS_SPECIAL_VALUE = {
-  labelKey: "modelSelect.specialOptions.allProxyModels",
+  label: "All Proxy Models",
   value: "all-proxy-models",
 } as const;
 
 const MODEL_SELECT_NO_DEFAULT_MODELS_SPECIAL_VALUE = {
-  labelKey: "modelSelect.specialOptions.noDefaultModels",
+  label: "No Default Models",
   value: "no-default-models",
 } as const;
 
@@ -139,16 +137,14 @@ const unavailableGroups = (
   selectedOptions: ModelOption[],
   offeredByValue: Map<string, ModelOption>,
   offeredListKnown: boolean,
-  t: TFunction,
 ): ModelOptionGroup[] => {
   if (!offeredListKnown) return [];
   const items = selectedOptions.filter((option) => !offeredByValue.has(option.value));
   if (items.length === 0) return [];
-  return [{ label: t("modelSelect.groups.unavailable"), items }];
+  return [{ label: "Unavailable", items }];
 };
 
 export const ModelSelect = (props: ModelSelectProps) => {
-  const { t } = useTranslation();
   const anchor = useComboboxAnchor();
   const { id, teamID, organizationID, options, context, dataTestId, value = [], onChange, style } = props;
   const { showAllProxyModelsOverride, includeSpecialOptions } = options || {};
@@ -190,12 +186,12 @@ export const ModelSelect = (props: ModelSelectProps) => {
     ...(includeSpecialOptions
       ? [
           {
-            label: t("modelSelect.groups.special"),
+            label: "Special Options",
             items: [
               ...(shouldShowAllProxyModels
                 ? [
                     {
-                      label: t(MODEL_SELECT_ALL_PROXY_MODELS_SPECIAL_VALUE.labelKey),
+                      label: MODEL_SELECT_ALL_PROXY_MODELS_SPECIAL_VALUE.label,
                       value: MODEL_SELECT_ALL_PROXY_MODELS_SPECIAL_VALUE.value,
                       disabled:
                         value.length > 0 &&
@@ -206,7 +202,7 @@ export const ModelSelect = (props: ModelSelectProps) => {
                   ]
                 : []),
               {
-                label: t(MODEL_SELECT_NO_DEFAULT_MODELS_SPECIAL_VALUE.labelKey),
+                label: MODEL_SELECT_NO_DEFAULT_MODELS_SPECIAL_VALUE.label,
                 value: MODEL_SELECT_NO_DEFAULT_MODELS_SPECIAL_VALUE.value,
                 disabled:
                   value.length > 0 &&
@@ -219,13 +215,13 @@ export const ModelSelect = (props: ModelSelectProps) => {
     ...(wildcard.length > 0
       ? [
           {
-            label: t("modelSelect.groups.wildcard"),
+            label: "Wildcard Options",
             items: wildcard.map((model) => {
               const provider = model.replace("/*", "");
               const capitalizedProvider = provider.charAt(0).toUpperCase() + provider.slice(1);
 
               return {
-                label: t("modelSelect.wildcardOption", { provider: capitalizedProvider }),
+                label: `All ${capitalizedProvider} models`,
                 value: model,
                 disabled: hasSpecialOptionSelected,
               };
@@ -234,7 +230,7 @@ export const ModelSelect = (props: ModelSelectProps) => {
         ]
       : []),
     {
-      label: t("modelSelect.groups.models"),
+      label: "Models",
       items: regular.map((model) => ({
         label: model,
         value: model,
@@ -244,17 +240,12 @@ export const ModelSelect = (props: ModelSelectProps) => {
   ];
 
   const offeredByValue = new Map(offeredGroups.flatMap((group) => group.items).map((option) => [option.value, option]));
-  const sentinelOption = (v: string): ModelOption | undefined => {
-    const sentinel = MODEL_SENTINEL_OPTIONS.find((option) => option.value === v);
-    return sentinel === undefined ? undefined : { label: t(sentinel.labelKey), value: sentinel.value };
-  };
-  const selectedOptions = value.map((v) => offeredByValue.get(v) ?? sentinelOption(v) ?? { label: v, value: v });
+  const selectedOptions = value.map((v) => offeredByValue.get(v) ?? { label: v, value: v });
   const groups: ModelOptionGroup[] = [
     ...unavailableGroups(
       selectedOptions,
       offeredByValue,
       isOfferedListKnown(allProxyModels !== undefined, context, organizationID, organizationModels),
-      t,
     ),
     ...offeredGroups,
   ];
@@ -281,24 +272,19 @@ export const ModelSelect = (props: ModelSelectProps) => {
                 ))}
                 {overflowOptions.length > 0 && (
                   <Tooltip>
-                    <TooltipTrigger render={<span className="px-1 text-xs text-muted-foreground" />}>
-                      {t("modelSelect.moreSelected", { count: overflowOptions.length })}
-                    </TooltipTrigger>
+                    <TooltipTrigger
+                      render={<span className="px-1 text-xs text-muted-foreground" />}
+                    >{`+${overflowOptions.length} more`}</TooltipTrigger>
                     <TooltipContent>{overflowOptions.map((option) => option.value).join(", ")}</TooltipContent>
                   </Tooltip>
                 )}
               </>
             )}
           </ComboboxValue>
-          <ComboboxChipsInput
-            id={id}
-            placeholder={t("modelSelect.placeholder")}
-            aria-label={t("modelSelect.placeholder")}
-            className="min-w-24"
-          />
+          <ComboboxChipsInput id={id} placeholder="Select Models" aria-label="Select Models" className="min-w-24" />
         </ComboboxChips>
         <ComboboxContent anchor={anchor}>
-          <ComboboxEmpty>{t("modelSelect.empty")}</ComboboxEmpty>
+          <ComboboxEmpty>No models found</ComboboxEmpty>
           <ComboboxList>
             {(group: ModelOptionGroup) => (
               <ComboboxGroup key={group.label} items={group.items}>

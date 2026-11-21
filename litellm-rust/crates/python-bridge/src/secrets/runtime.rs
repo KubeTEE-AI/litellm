@@ -7,9 +7,12 @@ use litellm_secrets::{
     read_secret_from_python_manager,
 };
 use litellm_secrets_types::PythonSecretRead;
-use pyo3::{exceptions::PyAttributeError, prelude::*, types::PyDict};
+use pyo3::{
+    exceptions::{PyAttributeError, PyRuntimeError, PyValueError},
+    prelude::*,
+    types::PyDict,
+};
 
-use super::ManagerError;
 use crate::execution::{run_async_value, run_sync_value};
 
 const SECRET_MANAGER_MODULE: &str = "litellm.rust_bridge.host.secret_manager";
@@ -32,7 +35,9 @@ pub(crate) struct NativeSecretManager {
 impl NativeSecretManager {
     pub(super) fn backend(&self) -> PyResult<SecretManager> {
         if self.pid != std::process::id() {
-            return Err(ManagerError::Forked.into());
+            return Err(PyRuntimeError::new_err(
+                "native secret manager must be recreated after fork",
+            ));
         }
         Ok(self.backend.clone())
     }
@@ -55,7 +60,7 @@ impl NativeSecretManager {
                 enterprise_enabled,
             )
             .await
-            .map_err(|error| ManagerError::Secret(error).into())
+            .map_err(|error| PyValueError::new_err(error.to_string()))
         })?;
         Ok(Self {
             backend,
@@ -77,7 +82,7 @@ impl NativeSecretManager {
         enterprise_enabled: bool,
     ) -> PyResult<Self> {
         let system = serde_json::from_value(serde_json::Value::String(system.to_owned()))
-            .map_err(ManagerError::UnknownSystem)?;
+            .map_err(|_| PyValueError::new_err("unknown secret manager system"))?;
         let settings = parse_settings(settings)?;
         Self::build(
             py,
@@ -141,7 +146,7 @@ impl NativeSecretManager {
             .collect::<PyResult<Vec<_>>>()?;
         let settings =
             from_py::<serde_json::Map<String, serde_json::Value>>(&config.getattr("settings")?)
-                .map_err(ManagerError::settings)?;
+                .map_err(|_| PyValueError::new_err("invalid secret manager settings"))?;
         let attributes = config
             .getattr("settings_attributes")?
             .extract::<Vec<String>>()?;
@@ -156,11 +161,11 @@ impl NativeSecretManager {
             system: serde_json::from_value(serde_json::Value::String(
                 config.getattr("system")?.extract()?,
             ))
-            .map_err(ManagerError::UnknownSystem)?,
+            .map_err(|_| PyValueError::new_err("unknown secret manager system"))?,
             settings: serde_json::from_value(serde_json::Value::Object(
                 settings.into_iter().chain(setting_overrides).collect(),
             ))
-            .map_err(ManagerError::settings)?,
+            .map_err(|_| PyValueError::new_err("invalid secret manager settings"))?,
             environment: captured
                 .into_iter()
                 .filter(|(key, _)| !environment_attributes.contains_key(key))
@@ -185,8 +190,12 @@ impl NativeSecretManager {
     }
 
     #[getter]
-    fn system(&self) -> &'static str {
-        self.configuration.system.into()
+    fn system(&self) -> String {
+        serde_json::to_value(self.configuration.system)
+            .expect("serializable system")
+            .as_str()
+            .expect("string system")
+            .to_owned()
     }
 
     #[pyo3(signature = (name, settings=None))]
@@ -229,7 +238,7 @@ impl NativeSecretManager {
         run_sync_value(py, async move {
             super::operations::read_python_provider(&backend, &request, &ProcessEnvironment)
                 .await
-                .map_err(|error| ManagerError::Secret(error).into())
+                .map_err(|error| PyValueError::new_err(error.to_string()))
                 .and_then(|value| python_secret_value(value, &request.secret_name))
         })
     }
@@ -255,7 +264,7 @@ impl NativeSecretManager {
         run_async_value(py, async move {
             super::operations::read_python_provider(&backend, &request, &ProcessEnvironment)
                 .await
-                .map_err(|error| ManagerError::Secret(error).into())
+                .map_err(|error| PyValueError::new_err(error.to_string()))
                 .and_then(|value| python_secret_value(value, &request.secret_name))
         })
     }
@@ -307,7 +316,7 @@ impl NativeSecretManager {
                 super::operations::write_python_provider_with_context(
                     &backend,
                     &secret_name,
-                    &litellm_secret_value::SecretValue::new(secret_value),
+                    &litellm_secrets::SecretValue::new(secret_value),
                     &context,
                 )
                 .await,
@@ -365,7 +374,7 @@ impl NativeSecretManager {
                     &backend,
                     &current_secret_name,
                     &new_secret_name,
-                    &litellm_secret_value::SecretValue::new(new_secret_value),
+                    &litellm_secrets::SecretValue::new(new_secret_value),
                     &context,
                 )
                 .await,
@@ -429,8 +438,8 @@ fn cached(
 fn parse_settings(value: Option<&Bound<'_, PyAny>>) -> PyResult<KeyManagementSettings> {
     value
         .map(|value| {
-            Ok(serde_json::from_value(from_py::<serde_json::Value>(value)?)
-                .map_err(ManagerError::settings)?)
+            serde_json::from_value(from_py::<serde_json::Value>(value)?)
+                .map_err(|_| PyValueError::new_err("invalid secret manager settings"))
         })
         .transpose()
         .map(Option::unwrap_or_default)
@@ -457,10 +466,11 @@ fn python_read_error(
     name: &str,
     error: litellm_secrets::Error,
 ) -> PyErr {
-    match (system, error) {
+    let message = match (system, error) {
         (KeyManagementSystem::Cyberark, litellm_secrets::Error::ManagedSecretMissing) => {
-            ManagerError::CyberarkSecretMissing(name.to_owned()).into()
+            format!("No secret found in CyberArk Secret Manager for {name}")
         }
-        (_, error) => ManagerError::Secret(error).into(),
-    }
+        (_, error) => error.to_string(),
+    };
+    PyValueError::new_err(message)
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import type { ParseKeys } from "i18next";
 import { toast } from "@/lib/toast";
 import { DEBOUNCE_WAIT_MS } from "@/utils/debounceConstants";
 import { Eraser, FileText, Plus, Trash2 } from "lucide-react";
@@ -10,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { v4 as uuidv4 } from "uuid";
 import ChatImageUpload from "../chat_ui/ChatImageUpload";
 import { createChatDisplayMessage, createChatMultimodalMessage } from "../chat_ui/ChatImageUtils";
@@ -52,19 +50,14 @@ interface CompareUIProps {
   accessToken: string | null;
   disabledPersonalKeyCreation: boolean;
 }
-const GENERIC_FOLLOW_UPS: ParseKeys[] = [
-  "playground.compare.followUps.summarize",
-  "playground.compare.followUps.assumptions",
-  "playground.compare.followUps.nextSteps",
+const GENERIC_FOLLOW_UPS = [
+  "Can you summarize the key points?",
+  "What assumptions did you make?",
+  "What are the next steps?",
 ];
-const SUGGESTED_PROMPTS: ParseKeys[] = [
-  "playground.compare.suggestions.poem",
-  "playground.compare.suggestions.quantum",
-  "playground.compare.suggestions.email",
-];
+const SUGGESTED_PROMPTS = ["Write me a poem", "Explain quantum computing", "Draft a polite email requesting a meeting"];
 const DEFAULT_ENDPOINT = EndpointId.CHAT_COMPLETIONS;
 export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: CompareUIProps) {
-  const { t } = useTranslation();
   const [comparisons, setComparisons] = useState<ComparisonInstance[]>([
     {
       id: "1",
@@ -489,7 +482,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       return;
     }
     if (!effectiveApiKey) {
-      toast.fromError(t("playground.compare.toasts.missingKey"));
+      toast.fromError("Please provide a Virtual Key or select Current UI Session");
       return;
     }
     const targetComparisons = comparisons;
@@ -498,7 +491,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
     }
     // Validate selection based on endpoint type
     if (targetComparisons.some((comparison) => !hasValidSelection(comparison, selectedEndpoint))) {
-      toast.fromError(t(endpointConfig.validationMessage));
+      toast.fromError(endpointConfig.validationMessage);
       return;
     }
 
@@ -699,26 +692,20 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
         <div className="border-b px-4 py-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-muted-foreground">
-                {t("playground.compare.header.keySource")}
-              </span>
+              <span className="text-sm font-medium text-muted-foreground">Virtual Key Source</span>
               <Select
                 value={apiKeySource}
                 onValueChange={(value) => setApiKeySource(value as "session" | "custom")}
                 disabled={disabledPersonalKeyCreation}
               >
-                <SelectTrigger className="w-48" aria-label={t("playground.compare.header.keySource")}>
-                  <SelectValue>
-                    {apiKeySource === "custom"
-                      ? t("playground.compare.header.virtualKey")
-                      : t("playground.compare.header.currentSession")}
-                  </SelectValue>
+                <SelectTrigger className="w-48" aria-label="Virtual Key Source">
+                  <SelectValue>{apiKeySource === "custom" ? "Virtual Key" : "Current UI Session"}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="session" disabled={!canUseSessionKey}>
-                    {t("playground.compare.header.currentSession")}
+                    Current UI Session
                   </SelectItem>
-                  <SelectItem value="custom">{t("playground.compare.header.virtualKey")}</SelectItem>
+                  <SelectItem value="custom">Virtual Key</SelectItem>
                 </SelectContent>
               </Select>
               {apiKeySource === "custom" && (
@@ -726,17 +713,15 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
                   type="password"
                   value={customApiKey}
                   onChange={(event) => setCustomApiKey(event.target.value)}
-                  placeholder={t("playground.compare.header.keyPlaceholder")}
+                  placeholder="Enter Virtual Key"
                   className="w-56"
                 />
               )}
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-muted-foreground">
-                {t("playground.compare.header.endpoint")}
-              </span>
+              <span className="text-sm font-medium text-muted-foreground">Endpoint</span>
               <Select value={selectedEndpoint} onValueChange={(value) => setSelectedEndpoint(value as EndpointIdType)}>
-                <SelectTrigger className="w-56" aria-label={t("playground.compare.header.endpoint")}>
+                <SelectTrigger className="w-56" aria-label="Endpoint">
                   <SelectValue>{endpointConfig.label}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -751,19 +736,17 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
             <div className="flex items-center gap-3">
               <Button variant="outline" onClick={clearAllChats} disabled={!hasMessages}>
                 <Eraser />
-                {t("playground.compare.header.clearAll")}
+                Clear All Chats
               </Button>
               <Tooltip>
                 <TooltipTrigger render={<span className="inline-flex" />}>
                   <Button variant="outline" onClick={addComparison} disabled={comparisons.length >= maxComparisons}>
                     <Plus />
-                    {t("playground.compare.header.addComparison")}
+                    Add Comparison
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {comparisons.length >= maxComparisons
-                    ? t("playground.compare.header.maxReached")
-                    : t("playground.compare.header.addAnother")}
+                  {comparisons.length >= maxComparisons ? "Compare up to 3 models at a time" : "Add another comparison"}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -795,17 +778,17 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
             <div className="border border-border shadow-lg rounded-xl bg-card p-4">
               <div className="flex items-center justify-between gap-4 mb-3 min-h-8">
                 {hasAttachment ? (
-                  <span className="text-sm text-muted-foreground">{t("playground.compare.attachment.ready")}</span>
+                  <span className="text-sm text-muted-foreground">Attachment ready to send</span>
                 ) : showSuggestedPrompts ? (
                   <div className="flex items-center gap-2 overflow-x-auto">
                     {SUGGESTED_PROMPTS.map((prompt) => (
                       <button
                         key={prompt}
                         type="button"
-                        onClick={() => handleFollowUpSelect(t(prompt))}
+                        onClick={() => handleFollowUpSelect(prompt)}
                         className="shrink-0 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent cursor-pointer"
                       >
-                        {t(prompt)}
+                        {prompt}
                       </button>
                     ))}
                   </div>
@@ -815,20 +798,20 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
                       <button
                         key={question}
                         type="button"
-                        onClick={() => handleFollowUpSelect(t(question))}
+                        onClick={() => handleFollowUpSelect(question)}
                         className="shrink-0 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent cursor-pointer"
                       >
-                        {t(question)}
+                        {question}
                       </button>
                     ))}
                   </div>
                 ) : isAnyComparisonLoading ? (
                   <span className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span className="h-2 w-2 rounded-full bg-info animate-pulse" aria-hidden />
-                    {t(endpointConfig.loadingMessage)}
+                    {endpointConfig.loadingMessage}
                   </span>
                 ) : (
-                  <span className="text-sm text-muted-foreground">{t(endpointConfig.inputPlaceholder)}</span>
+                  <span className="text-sm text-muted-foreground">{endpointConfig.inputPlaceholder}</span>
                 )}
               </div>
               {uploadedFile && (
@@ -842,21 +825,19 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
                       ) : (
                         <img
                           src={uploadedFilePreviewUrl || ""}
-                          alt={t("playground.compare.attachment.preview")}
+                          alt="Upload preview"
                           className="w-10 h-10 rounded-md border border-border object-cover"
                         />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-foreground truncate">{uploadedFile.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {isUploadedFilePdf ? "PDF" : t("playground.compare.attachment.image")}
-                      </div>
+                      <div className="text-xs text-muted-foreground">{isUploadedFilePdf ? "PDF" : "Image"}</div>
                     </div>
                     <button
                       className="flex items-center justify-center w-6 h-6 text-muted-foreground hover:text-foreground hover:bg-accent rounded-full transition-colors"
                       onClick={handleRemoveFile}
-                      aria-label={t("playground.compare.attachment.remove")}
+                      aria-label="Remove attachment"
                     >
                       <Trash2 className="size-3" />
                     </button>

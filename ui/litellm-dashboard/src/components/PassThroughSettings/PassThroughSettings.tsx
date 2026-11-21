@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -20,6 +19,7 @@ interface PassThroughSettingsProps {
   accessToken: string | null;
   userRole: string | null;
   userID: string | null;
+  premiumUser?: boolean;
 }
 
 export interface passThroughItem {
@@ -37,8 +37,7 @@ export interface passThroughItem {
   is_from_config?: boolean;
 }
 
-const PassThroughSettings: React.FC<PassThroughSettingsProps> = ({ accessToken, userRole, userID }) => {
-  const { t } = useTranslation();
+const PassThroughSettings: React.FC<PassThroughSettingsProps> = ({ accessToken, userRole, userID, premiumUser }) => {
   const [generalSettings, setGeneralSettings] = useState<passThroughItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEndpointId, setSelectedEndpointId] = useState<string | null>(null);
@@ -85,10 +84,10 @@ const PassThroughSettings: React.FC<PassThroughSettingsProps> = ({ accessToken, 
       const updatedSettings = generalSettings.filter((setting) => setting.id !== endpointToDelete);
       setGeneralSettings(updatedSettings);
 
-      toast.success(t("passThroughSettings.passThroughSettings.toasts.deleted"));
+      toast.success("Endpoint deleted successfully.");
     } catch (error) {
       console.error("Error deleting the endpoint:", error);
-      toast.fromError(t("passThroughSettings.passThroughSettings.toasts.deleteFailed", { error: String(error) }));
+      toast.fromError("Error deleting the endpoint: " + error);
     }
 
     setIsDeleteModalOpen(false);
@@ -108,7 +107,7 @@ const PassThroughSettings: React.FC<PassThroughSettingsProps> = ({ accessToken, 
     const selectedEndpoint = generalSettings.find((endpoint) => endpoint.id === selectedEndpointId);
 
     if (!selectedEndpoint) {
-      return <div>{t("passThroughSettings.passThroughSettings.endpointNotFound")}</div>;
+      return <div>Endpoint not found</div>;
     }
 
     return (
@@ -117,6 +116,7 @@ const PassThroughSettings: React.FC<PassThroughSettingsProps> = ({ accessToken, 
         onClose={() => setSelectedEndpointId(null)}
         accessToken={accessToken}
         isAdmin={userRole === "Admin" || userRole === "admin"}
+        premiumUser={premiumUser}
         onEndpointUpdated={handleEndpointUpdated}
       />
     );
@@ -125,14 +125,15 @@ const PassThroughSettings: React.FC<PassThroughSettingsProps> = ({ accessToken, 
   return (
     <div>
       <div className="mb-4">
-        <h2 className="text-lg font-semibold text-foreground">{t("passThroughSettings.passThroughSettings.title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("passThroughSettings.passThroughSettings.description")}</p>
+        <h2 className="text-lg font-semibold text-foreground">Pass Through Endpoints</h2>
+        <p className="text-sm text-muted-foreground">Configure and manage your pass-through endpoints</p>
       </div>
 
       <AddPassThroughEndpoint
         accessToken={accessToken}
         setPassThroughItems={setGeneralSettings}
         passThroughItems={generalSettings}
+        premiumUser={premiumUser}
       />
 
       <PassThroughEndpointsTable
@@ -145,15 +146,15 @@ const PassThroughSettings: React.FC<PassThroughSettingsProps> = ({ accessToken, 
       <AlertDialog open={isDeleteModalOpen} onOpenChange={(open) => !open && cancelDelete()}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("passThroughSettings.passThroughSettings.deleteDialog.title")}</AlertDialogTitle>
+            <AlertDialogTitle>Delete Pass-Through Endpoint</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("passThroughSettings.passThroughSettings.deleteDialog.description")}
+              Are you sure you want to delete this pass-through endpoint? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("passThroughSettings.passThroughSettings.deleteDialog.cancel")}</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <Button variant="destructive" onClick={confirmDelete}>
-              {t("passThroughSettings.passThroughSettings.deleteDialog.confirm")}
+              Delete
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

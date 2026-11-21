@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import { VectorStore } from "./types";
 import { vectorStoreListCall } from "../networking";
 import { MultiSelect } from "@/components/shared/MultiSelect";
-import i18n from "@/i18n/i18n";
 interface VectorStoreSelectorProps {
   onChange: (selectedVectorStores: string[]) => void;
   value?: string[];
@@ -17,7 +16,7 @@ const VectorStoreSelector: React.FC<VectorStoreSelectorProps> = ({
   value,
   className,
   accessToken,
-  placeholder = i18n.t("vectorStoreSelector.placeholder"),
+  placeholder = "Select vector stores",
   disabled = false,
 }) => {
   const [vectorStores, setVectorStores] = useState<VectorStore[]>([]);

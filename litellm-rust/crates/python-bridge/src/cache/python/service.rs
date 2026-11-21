@@ -17,21 +17,18 @@ fn from_python(value: Value) -> Result<Value, Error> {
     let output = match value.get(STREAM_EVENTS_KEY) {
         Some(events) => {
             let events: Vec<String> =
-                serde_json::from_value(events.clone()).map_err(Error::invalid_entry)?;
+                serde_json::from_value(events.clone()).map_err(|_| Error::InvalidEntry)?;
             CachedOutput::Stream(events.concat())
         }
         None => CachedOutput::Response(value),
     };
-    serde_json::to_value(ResponseEnvelope::new("messages", output)).map_err(Error::invalid_entry)
+    serde_json::to_value(ResponseEnvelope::new("messages", output)).map_err(|_| Error::InvalidEntry)
 }
 
 fn to_python(value: Value) -> Result<Value, Error> {
     let envelope: ResponseEnvelope<CachedOutput<Value>> =
-        serde_json::from_value(value).map_err(Error::invalid_entry)?;
-    match envelope
-        .decode("messages")
-        .ok_or(Error::InvalidEntry(None))?
-    {
+        serde_json::from_value(value).map_err(|_| Error::InvalidEntry)?;
+    match envelope.decode("messages").ok_or(Error::InvalidEntry)? {
         CachedOutput::Response(response) => Ok(response),
         CachedOutput::Stream(text) => Ok(serde_json::json!({
             STREAM_EVENTS_KEY: text.split_inclusive("\n\n").collect::<Vec<_>>()
@@ -59,7 +56,7 @@ pub(in crate::cache) fn service<P: Protocol<HostCall = CacheCall>>(
     namespace: String,
 ) -> std::sync::Arc<dyn ResponseCacheService>
 where
-    P::Error: From<MachineFault> + std::error::Error,
+    P::Error: From<MachineFault>,
 {
     std::sync::Arc::new(PythonCacheService {
         services,
@@ -72,7 +69,7 @@ where
 
 impl<P: Protocol<HostCall = CacheCall>> ResponseCacheService for PythonCacheService<P>
 where
-    P::Error: From<MachineFault> + std::error::Error,
+    P::Error: From<MachineFault>,
 {
     fn config(&self) -> &ResponseCacheConfig {
         &self.config
@@ -87,7 +84,7 @@ where
             self.services
                 .call(|reply| CacheCall::Lookup { reply })
                 .await
-                .map_err(Error::unavailable)??
+                .map_err(|_| Error::Unavailable)??
                 .map(from_python)
                 .transpose()
         })
@@ -104,7 +101,7 @@ where
             self.services
                 .call(|reply| CacheCall::Store { value, reply })
                 .await
-                .map_err(Error::unavailable)?
+                .map_err(|_| Error::Unavailable)?
         })
     }
 }

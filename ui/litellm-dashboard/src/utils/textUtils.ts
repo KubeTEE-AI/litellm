@@ -1,5 +1,3 @@
-import i18n from "@/i18n/i18n";
-
 export const formatLabel = (text: string): string => {
   if (!text) {
     return text;
@@ -21,6 +19,6 @@ export const formItemValidateJSON = (_: any, value: string) => {
     JSON.parse(value);
     return Promise.resolve();
   } catch (error) {
-    return Promise.reject(i18n.t("utils.textUtils.invalidJson"));
+    return Promise.reject("Please enter valid JSON");
   }
 };

@@ -1,25 +1,22 @@
-import type { TFunction } from "i18next";
-import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import i18n from "@/i18n/i18n";
 import { classificationFrequency, type ComplexityRouterConfigValue } from "./ComplexityRouterConfig";
 
-const blockedReason = (value: ComplexityRouterConfigValue, t: TFunction = i18n.t.bind(i18n)): string | null => {
-  if (value.custom_tier_set) return t("addModel.cacheAwareRoutingConfig.blockedByCustomTiers");
-  if (value.adaptive) return t("addModel.cacheAwareRoutingConfig.blockedByAdaptive");
+const blockedReason = (value: ComplexityRouterConfigValue): string | null => {
+  if (value.custom_tier_set) return "Use the built-in tiers to enable cache-aware routing.";
+  if (value.adaptive) return "Turn off Adaptive Routing to enable cache-aware routing.";
   if (classificationFrequency(value) !== "every_request") {
-    return t("addModel.cacheAwareRoutingConfig.blockedByFrequency");
+    return 'Set "How often to classify" to every request to enable cache-aware routing.';
   }
   if (Object.values(value.tiers).some((models) => models.length > 1)) {
-    return t("addModel.cacheAwareRoutingConfig.blockedByMultipleModels");
+    return "Choose one model per tier to enable cache-aware routing.";
   }
   if (
     Object.values(value.tier_model_params ?? {}).some((models) =>
       Object.values(models).some((params) => Object.keys(params).length > 0),
     )
   ) {
-    return t("addModel.cacheAwareRoutingConfig.blockedByParamOverrides");
+    return "Remove per-model parameter overrides to enable cache-aware routing.";
   }
   return null;
 };
@@ -37,9 +34,8 @@ const CacheAwareRoutingConfig = ({
   value: ComplexityRouterConfigValue;
   onChange: (value: ComplexityRouterConfigValue) => void;
 }) => {
-  const { t } = useTranslation();
   const enabled = value.cache_aware_routing ?? false;
-  const reason = blockedReason(value, t);
+  const reason = blockedReason(value);
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -47,14 +43,18 @@ const CacheAwareRoutingConfig = ({
           checked={enabled}
           disabled={!enabled && reason !== null}
           onCheckedChange={(next) => onChange({ ...value, cache_aware_routing: next })}
-          aria-label={t("addModel.cacheAwareRoutingConfig.toggle")}
+          aria-label="Cache-aware routing"
         />
-        <span className="text-sm font-medium">{t("addModel.cacheAwareRoutingConfig.considerSavings")}</span>
+        <span className="text-sm font-medium">Consider prompt-cache savings</span>
       </div>
-      <p className="text-xs text-muted-foreground">{t("addModel.cacheAwareRoutingConfig.description")}</p>
+      <p className="text-xs text-muted-foreground">
+        Disabled by default. Reuse a model with a warm prompt cache when its estimated total cost is lower and it meets
+        the selected tier or higher. Supports native Anthropic Messages with explicit prompt caching; unsupported
+        requests keep their usual route.
+      </p>
       {reason && (
         <p className="text-xs text-muted-foreground" role="status">
-          {enabled && t("addModel.cacheAwareRoutingConfig.currentlySkipped")}
+          {enabled && "Cache-aware routing is currently skipped. "}
           {reason}
         </p>
       )}
@@ -62,7 +62,7 @@ const CacheAwareRoutingConfig = ({
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="block text-sm font-medium mb-1" htmlFor="cache-aware-output-tokens">
-              {t("addModel.cacheAwareRoutingConfig.outputTokens")}
+              Expected output tokens
             </label>
             <Input
               id="cache-aware-output-tokens"
@@ -80,12 +80,12 @@ const CacheAwareRoutingConfig = ({
               aria-describedby="cache-aware-output-help"
             />
             <p id="cache-aware-output-help" className="mt-1 text-xs text-muted-foreground">
-              {t("addModel.cacheAwareRoutingConfig.outputTokensHelp")}
+              Used to estimate cost, not to limit the response. Leave blank to use the default of 1024.
             </p>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1" htmlFor="cache-aware-timeout">
-              {t("addModel.cacheAwareRoutingConfig.timeout")}
+              Prediction timeout (ms)
             </label>
             <Input
               id="cache-aware-timeout"
@@ -103,7 +103,7 @@ const CacheAwareRoutingConfig = ({
               aria-describedby="cache-aware-timeout-help"
             />
             <p id="cache-aware-timeout-help" className="mt-1 text-xs text-muted-foreground">
-              {t("addModel.cacheAwareRoutingConfig.timeoutHelp")}
+              Keep the original route if the comparison takes too long. Leave blank to use the default of 2000 ms.
             </p>
           </div>
         </div>

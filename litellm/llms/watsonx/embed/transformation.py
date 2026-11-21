@@ -9,7 +9,6 @@ import httpx
 from pydantic import ConfigDict, TypeAdapter
 from typing_extensions import ReadOnly, TypedDict
 
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.embedding.transformation import (
     BaseEmbeddingConfig,
     LiteLLMLoggingObj,
@@ -93,7 +92,7 @@ class IBMWatsonXEmbeddingConfig(IBMWatsonXMixin, BaseEmbeddingConfig):
         if model.startswith("deployment/"):
             deployment_id: Final = "/".join(model.split("/")[1:])
             endpoint = endpoint.format(deployment_id=deployment_id)
-        url = join_api_base(url, endpoint)
+        url = url.rstrip("/") + endpoint
 
         ## add api version
         url = self._add_api_version_to_url(url=url, api_version=optional_params.pop("api_version", None))

@@ -5,7 +5,7 @@ API Reference: https://docs.datadoghq.com/llm_observability/setup/api/?tab=examp
 """
 
 from collections.abc import Sequence
-from typing import Literal
+from typing import Any, Literal
 
 from typing_extensions import ReadOnly, TypedDict
 
@@ -16,7 +16,7 @@ class ToolCall(TypedDict, total=False):
     """A tool call on a message, as LLM Obs names its fields."""
 
     name: ReadOnly[str]
-    arguments: ReadOnly[dict[str, object] | str]  # parsed object, or the raw string when it will not parse to one
+    arguments: ReadOnly[dict[str, Any] | str]  # parsed object, or the raw string when it will not parse to one
     tool_id: ReadOnly[str]
     type: ReadOnly[str]
 
@@ -35,7 +35,7 @@ class ToolDefinition(TypedDict, total=False):
 
     name: ReadOnly[str]
     description: ReadOnly[str]
-    schema: ReadOnly[dict[str, object]]
+    schema: ReadOnly[dict[str, Any]]
 
 
 class Message(TypedDict, total=False):
@@ -49,15 +49,13 @@ class Message(TypedDict, total=False):
 
 
 class InputMeta(TypedDict):
-    messages: ReadOnly[
-        Sequence[
-            Message | dict[str, object]  # changed to fit with tool calls
-        ]
+    messages: Sequence[
+        Message | dict[str, Any]  # changed to fit with tool calls
     ]  # Relevant Issue: https://github.com/BerriAI/litellm/issues/9494
 
 
 class OutputMeta(TypedDict):
-    messages: ReadOnly[Sequence[object]]
+    messages: Sequence[Any]
 
 
 class DDLLMObsError(TypedDict, total=False):
@@ -73,7 +71,7 @@ class Meta(TypedDict, total=False):
     kind: Literal["llm", "tool", "task", "embedding", "retrieval"]
     input: InputMeta  # The span's input information.
     output: OutputMeta  # The span's output information.
-    metadata: ReadOnly[dict[str, object]]
+    metadata: dict[str, Any]
     error: DDLLMObsError | None  # Error information on the span
     tool_definitions: ReadOnly[Sequence[ToolDefinition]]  # The tools offered to the model on this request
 

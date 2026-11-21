@@ -1,8 +1,7 @@
 import asyncio
 import os
 import time
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from functools import cache
 from typing import Final
@@ -16,7 +15,6 @@ from litellm.constants import (
     AZURE_STORAGE_MSFT_VERSION,
 )
 from litellm.integrations.custom_batch_logger import CustomBatchLogger
-from litellm.litellm_core_utils.internal_call_metadata import logged_event_key
 from litellm.litellm_core_utils.safe_json_dumps import safe_dumps
 from litellm.llms.azure.common_utils import get_azure_ad_token_from_entra_id
 from litellm.llms.custom_httpx.http_handler import (
@@ -47,20 +45,6 @@ def adls_safe_file_name(payload_id: str | None) -> str:
     if not name.startswith("resp_") and _DOT_OR_EMPTY_SEGMENTS.isdisjoint(unquote(name).split("/")):
         return f"{name}.json"
     return f"{name.translate(_ADLS_SAFE_NAME)}.json"
-
-
-@dataclass(frozen=True, slots=True)
-class AzureStorageLogQueueItem:
-    payload: StandardLoggingPayload
-    file_name: str
-
-
-def _queued_log(kwargs: Mapping[str, object], payload: StandardLoggingPayload) -> AzureStorageLogQueueItem:
-    payload_id: Final = payload.get("id")
-    return AzureStorageLogQueueItem(
-        payload=payload,
-        file_name=adls_safe_file_name(payload_id and logged_event_key(kwargs, payload_id)),
-    )
 
 
 @cache
@@ -115,7 +99,7 @@ class AzureBlobStorageLogger(CustomBatchLogger):
 
             asyncio.create_task(self.periodic_flush())
             self.flush_lock = asyncio.Lock()
-            self.log_queue: list[AzureStorageLogQueueItem] = []
+            self.log_queue: list[StandardLoggingPayload] = []
             super().__init__(**kwargs, flush_lock=self.flush_lock)
         except Exception as e:
             verbose_logger.exception(
@@ -131,7 +115,7 @@ class AzureBlobStorageLogger(CustomBatchLogger):
     def azure_storage_blob_endpoint(self) -> str:
         return f"https://{self.azure_storage_account_name}.blob.{self.azure_storage_endpoint_suffix}"
 
-    async def async_log_success_event(self, kwargs, response_obj: object, start_time: datetime, end_time: datetime):
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
         """
         Async Log success events to Azure Blob Storage
 
@@ -149,12 +133,12 @@ class AzureBlobStorageLogger(CustomBatchLogger):
             if standard_logging_payload is None:
                 raise ValueError("standard_logging_payload is not set")
 
-            self.log_queue.append(_queued_log(kwargs, standard_logging_payload))
+            self.log_queue.append(standard_logging_payload)
 
         except Exception as e:
             verbose_logger.exception("AzureBlobStorageLogger Layer Error - %s", e)
 
-    async def async_log_failure_event(self, kwargs, response_obj: object, start_time: datetime, end_time: datetime):
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
         """
         Async Log failure events to Azure Blob Storage
 
@@ -172,7 +156,7 @@ class AzureBlobStorageLogger(CustomBatchLogger):
             if standard_logging_payload is None:
                 raise ValueError("standard_logging_payload is not set")
 
-            self.log_queue.append(_queued_log(kwargs, standard_logging_payload))
+            self.log_queue.append(standard_logging_payload)
         except Exception as e:
             verbose_logger.exception("AzureBlobStorageLogger Layer Error - %s", e)
 
@@ -211,15 +195,13 @@ class AzureBlobStorageLogger(CustomBatchLogger):
                 len(self.log_queue),
             )
 
-            for item in self.log_queue:
-                await self.async_upload_payload_to_azure_blob_storage(payload=item.payload, file_name=item.file_name)
+            for payload in self.log_queue:
+                await self.async_upload_payload_to_azure_blob_storage(payload=payload)
 
         except Exception as e:
             verbose_logger.exception("AzureBlobStorageLogger Error sending batch API - %s", e)
 
-    async def async_upload_payload_to_azure_blob_storage(
-        self, payload: StandardLoggingPayload, file_name: str | None = None
-    ):
+    async def async_upload_payload_to_azure_blob_storage(self, payload: StandardLoggingPayload):
         """
         Uploads the payload to Azure Blob Storage using a 3-step process:
         1. Create file resource
@@ -228,14 +210,14 @@ class AzureBlobStorageLogger(CustomBatchLogger):
         """
         try:
             if self.azure_storage_account_key:
-                await self.upload_to_azure_data_lake_with_azure_account_key(payload=payload, file_name=file_name)
+                await self.upload_to_azure_data_lake_with_azure_account_key(payload=payload)
             else:
                 # Get a valid token instead of always requesting a new one
                 await self.set_valid_azure_ad_token()
                 async_client: Final = get_async_httpx_client(llm_provider=httpxSpecialProvider.LoggingCallback)
                 json_payload: Final = safe_dumps(payload) + "\n"  # Add newline for each log entry
                 payload_bytes: Final = json_payload.encode("utf-8")
-                filename: Final = file_name or adls_safe_file_name(payload.get("id"))
+                filename: Final = adls_safe_file_name(payload.get("id"))
                 base_url = f"{self.azure_storage_dfs_endpoint}/{self.azure_storage_file_system}/{filename}"
 
                 # Execute the 3-step upload process
@@ -395,9 +377,7 @@ class AzureBlobStorageLogger(CustomBatchLogger):
             self._service_client_timeout = self._clock() + _DEFAULT_TTL_FOR_HTTPX_CLIENTS
         return self._service_client
 
-    async def upload_to_azure_data_lake_with_azure_account_key(
-        self, payload: StandardLoggingPayload, file_name: str | None = None
-    ):
+    async def upload_to_azure_data_lake_with_azure_account_key(self, payload: StandardLoggingPayload):
         """
         Uploads the payload to Azure Data Lake using the Azure SDK
 
@@ -406,11 +386,11 @@ class AzureBlobStorageLogger(CustomBatchLogger):
 
         try:
             today: Final = datetime.now().strftime("%Y-%m-%d")
-            resolved_file_name: Final = file_name or adls_safe_file_name(payload.get("id"))
+            file_name: Final = adls_safe_file_name(payload.get("id"))
             await self._upload_bytes_with_account_key(
-                file_path=f"{today}/{resolved_file_name}", content=safe_dumps(payload).encode("utf-8")
+                file_path=f"{today}/{file_name}", content=safe_dumps(payload).encode("utf-8")
             )
-            verbose_logger.debug("Successfully uploaded and wrote to %s/%s", today, resolved_file_name)
+            verbose_logger.debug("Successfully uploaded and wrote to %s/%s", today, file_name)
 
         except Exception as e:
             verbose_logger.exception("Error occurred: %s", e)

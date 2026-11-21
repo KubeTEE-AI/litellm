@@ -1,7 +1,6 @@
 "use client";
 
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
-import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,7 +29,6 @@ export function DataTablePagination({
   isLoading = false,
   className,
 }: DataTablePaginationProps) {
-  const { t } = useTranslation();
   const pageCount = pageSize > 0 ? Math.ceil(rowCount / pageSize) : 0;
   const start = rowCount === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, rowCount);
@@ -39,12 +37,9 @@ export function DataTablePagination({
   const lastPage = Math.max(pageCount - 1, 0);
 
   return (
-    <div
-      data-slot="table-pagination"
-      className={cn("flex flex-wrap items-center justify-between gap-4 px-4 py-2.5", className)}
-    >
+    <div className={cn("flex flex-wrap items-center justify-between gap-4 px-4 py-2.5", className)}>
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span>{t("shared.dataTable.pagination.rowsPerPage")}</span>
+        <span>Rows per page</span>
         <Select
           value={String(pageSize)}
           onValueChange={(value) => {
@@ -66,21 +61,19 @@ export function DataTablePagination({
         </Select>
       </div>
 
-      <div data-slot="table-pagination-summary" className="flex items-center gap-4">
+      <div className="flex items-center gap-4">
         <span data-testid="pagination-range" className="text-sm text-muted-foreground tabular-nums">
-          {rowCount === 0
-            ? t("shared.dataTable.pagination.noResults")
-            : t("shared.dataTable.pagination.showing", { start, end, total: rowCount })}
+          {rowCount === 0 ? "No results" : `Showing ${start}-${end} of ${rowCount}`}
         </span>
         <span data-testid="pagination-page" className="text-sm text-muted-foreground tabular-nums">
-          {t("shared.dataTable.pagination.pageOf", { page: page + 1, total: Math.max(pageCount, 1) })}
+          Page {page + 1} of {Math.max(pageCount, 1)}
         </span>
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
             size="icon-sm"
             data-testid="pagination-first"
-            aria-label={t("shared.dataTable.pagination.firstPage")}
+            aria-label="Go to first page"
             disabled={!canPrev}
             onClick={() => onPageChange(0)}
           >
@@ -90,7 +83,7 @@ export function DataTablePagination({
             variant="outline"
             size="icon-sm"
             data-testid="pagination-prev"
-            aria-label={t("shared.dataTable.pagination.previousPage")}
+            aria-label="Go to previous page"
             disabled={!canPrev}
             onClick={() => onPageChange(page - 1)}
           >
@@ -100,7 +93,7 @@ export function DataTablePagination({
             variant="outline"
             size="icon-sm"
             data-testid="pagination-next"
-            aria-label={t("shared.dataTable.pagination.nextPage")}
+            aria-label="Go to next page"
             disabled={!canNext}
             onClick={() => onPageChange(page + 1)}
           >
@@ -110,7 +103,7 @@ export function DataTablePagination({
             variant="outline"
             size="icon-sm"
             data-testid="pagination-last"
-            aria-label={t("shared.dataTable.pagination.lastPage")}
+            aria-label="Go to last page"
             disabled={!canNext}
             onClick={() => onPageChange(lastPage)}
           >

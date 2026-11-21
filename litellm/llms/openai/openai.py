@@ -1,7 +1,7 @@
 import inspect
 import time
 import types
-from collections.abc import AsyncIterator, Callable, Coroutine, Iterable, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterable, Iterator, Mapping
 from typing import TYPE_CHECKING, Final, Literal, Optional, cast
 
 import httpx
@@ -17,7 +17,6 @@ from openai._base_client import make_request_options
 from openai._constants import RAW_RESPONSE_HEADER
 from openai._legacy_response import LegacyAPIResponse
 from openai._types import RequestOptions
-from openai.pagination import SyncCursorPage
 from openai.types import CreateEmbeddingResponse
 from openai.types.beta.assistant_deleted import AssistantDeleted
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
@@ -29,40 +28,31 @@ import litellm
 from litellm import LlmProviders
 from litellm._logging import verbose_logger
 from litellm.constants import DEFAULT_MAX_RETRIES
-from litellm.exceptions import UnsupportedParamsError
 from litellm.files.types import FileContentStreamingResult
-from litellm.litellm_core_utils.chat_completion_agentic_loop import (
-    bill_first_round_on_failure,
-    run_chat_completion_agentic_hooks,
-)
+from litellm.litellm_core_utils.chat_completion_agentic_loop import refuse_a_call_the_choice_excludes
 from litellm.litellm_core_utils.core_helpers import set_provider_response_headers_in_hidden_params
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.litellm_core_utils.logging_utils import speech_request_body, track_llm_api_timing
-from litellm.llms.base_llm.base_model_iterator import BaseModelResponseIterator, MockResponseIterator
+from litellm.llms.base_llm.base_model_iterator import BaseModelResponseIterator
 from litellm.llms.base_llm.chat.transformation import BaseConfig, BaseLLMException
+from litellm.llms.bedrock.chat.invoke_handler import MockResponseIterator
 from litellm.types.utils import (
     EmbeddingResponse,
     ImageResponse,
     LiteLLMBatch,
     ModelResponse,
     ModelResponseStream,
-    openai_batch_status,
 )
 from litellm.utils import (
     CustomStreamWrapper,
     ProviderConfigManager,
     convert_to_model_response_object,
-    get_base_model_from_metadata,
 )
 
 from ...types.llms.openai import *
 from ..base import BaseLLM
-from .chat.gpt_reasoning_transformation import OpenAIGPT5Config
-from .chat.gpt_transformation import (
-    OpenAIGPTConfig,
-    OpenAIUnknownModelConfig,
-    translate_developer_role_for_openai_compatible_endpoint,
-)
+from .chat.gpt_5_transformation import OpenAIGPT5Config
+from .chat.gpt_transformation import OpenAIGPTConfig, OpenAIUnknownModelConfig
 from .chat.o_series_transformation import OpenAIOSeriesConfig
 from .common_utils import (
     BaseOpenAILLM,
@@ -72,7 +62,6 @@ from .common_utils import (
     is_openai_backed_api_base,
     is_output_token_limit_error,
     model_dump_provider_response,
-    upstream_error_response,
 )
 from .workload_identity import (
     build_async_openai_client,
@@ -218,19 +207,6 @@ class OpenAIConfig(BaseConfig):
             return litellm.openAIGPTAudioConfig.get_supported_openai_params(model=model)
         else:
             return self._gpt_config_for_model(model).get_supported_openai_params(model=model)
-
-    def translate_developer_role_to_system_role(
-        self,
-        messages: Sequence[AllMessageValues],
-        *,
-        model: str,
-        custom_llm_provider: str | None,
-        api_base: str | None,
-        model_info: object,
-    ) -> Sequence[AllMessageValues]:
-        return translate_developer_role_for_openai_compatible_endpoint(
-            messages, model=model, custom_llm_provider=custom_llm_provider, api_base=api_base, model_info=model_info
-        )
 
     def _gpt_config_for_model(self, model: str) -> OpenAIGPTConfig:
         if type(self) is OpenAIConfig and not OpenAIGPTConfig.is_openai_catalog_model(model):
@@ -590,12 +566,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         except openai.BadRequestError as e:
             if not is_output_token_limit_error(e):
                 raise
-            return build_output_token_limit_response(
-                e=e,
-                data=data,
-                is_async=True,
-                base_model=get_base_model_from_metadata(logging_obj.model_call_details),
-            )
+            return build_output_token_limit_response(e=e, data=data, is_async=True)
         except Exception as e:
             raise e
 
@@ -642,12 +613,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
         except openai.BadRequestError as e:
             if not is_output_token_limit_error(e):
                 raise
-            return build_output_token_limit_response(
-                e=e,
-                data=data,
-                is_async=False,
-                base_model=get_base_model_from_metadata(logging_obj.model_call_details),
-            )
+            return build_output_token_limit_response(e=e, data=data, is_async=False)
         except Exception as e:
             if raw_response is not None:
                 raise Exception(
@@ -674,23 +640,73 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
 
         Returns the response from agentic loop, or None if no hook runs.
         """
-        if not isinstance(response, ModelResponse):
-            return None
-        return await bill_first_round_on_failure(
-            run_chat_completion_agentic_hooks(
-                response=response,
-                model=model,
-                messages=messages,
-                optional_params=optional_params,
-                kwargs=litellm_params or {},
-                logging_obj=logging_obj,
-                custom_llm_provider=litellm_params.get("custom_llm_provider", "openai"),
-                stream=stream,
-            ),
-            logging_obj=logging_obj,
-            response=response,
-            stream=stream,
+        from litellm._logging import verbose_logger
+        from litellm.integrations.custom_logger import CustomLogger
+
+        callbacks: Final = litellm.callbacks + (logging_obj.dynamic_success_callbacks or [])
+        # Avoid logging full callback objects to prevent leaking sensitive data
+        verbose_logger.debug("LiteLLM.AgenticHooks: callbacks_count=%s", len(callbacks))
+        tools: Final = optional_params.get("tools", [])
+        # Avoid logging full tools payloads; they may contain sensitive parameters
+        verbose_logger.debug(
+            "LiteLLM.AgenticHooks: tools_count=%s",
+            len(tools) if isinstance(tools, list) else 1 if tools else 0,
         )
+        # Get custom_llm_provider from litellm_params
+        custom_llm_provider: Final = litellm_params.get("custom_llm_provider", "openai")
+        request_litellm_params: Final = cast(  # cast-ok: litellm_params is a str-keyed dict
+            "Mapping[str, object]", litellm_params
+        )
+
+        for callback in callbacks:
+            if not isinstance(callback, CustomLogger) or not hasattr(
+                callback, "async_should_run_chat_completion_agentic_loop"
+            ):
+                continue
+
+            try:
+                (
+                    should_run,
+                    tool_calls,
+                ) = await callback.async_should_run_chat_completion_agentic_loop(
+                    response=response,
+                    model=model,
+                    messages=messages,
+                    tools=tools,
+                    stream=stream,
+                    custom_llm_provider=custom_llm_provider,
+                    kwargs=litellm_params,
+                )
+            except Exception as e:
+                verbose_logger.exception(
+                    "LiteLLM.AgenticHookError: Exception in agentic completion hooks for OpenAI: %s", e
+                )
+                continue
+
+            if not should_run:
+                continue
+
+            refuse_a_call_the_choice_excludes(response, request_litellm_params, callbacks, model)
+
+            try:
+                agentic_response: object = await callback.async_run_chat_completion_agentic_loop(
+                    tools=tool_calls,
+                    model=model,
+                    messages=messages,
+                    response=response,
+                    optional_params=optional_params,
+                    logging_obj=logging_obj,
+                    stream=stream,
+                    kwargs={**(litellm_params or {}), "custom_llm_provider": custom_llm_provider},
+                )
+            except Exception as e:  # noqa: BLE001  # a failing hook is logged and skipped, as the line always did
+                verbose_logger.exception(
+                    "LiteLLM.AgenticHookError: Exception in agentic completion hooks for OpenAI: %s", e
+                )
+            else:
+                return agentic_response
+
+        return None
 
     def mock_streaming(
         self,
@@ -909,9 +925,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 except openai.UnprocessableEntityError as e:
                     ## check if body contains unprocessable params - related issue https://github.com/BerriAI/litellm/issues/4800
                     if litellm.drop_params is True or drop_params is True:
-                        inference_params = drop_params_from_unprocessable_entity_error(
-                            e, inference_params, model=model, drop_params_gated=True
-                        )
+                        inference_params = drop_params_from_unprocessable_entity_error(e, inference_params)
                     else:
                         raise e
                     # e.message
@@ -943,8 +957,8 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                         litellm.remove_index_from_tool_calls(messages=messages)
                     else:
                         raise e
-        except (OpenAIError, UnsupportedParamsError):
-            raise
+        except OpenAIError as e:
+            raise e
         except Exception as e:
             status_code: Final = getattr(e, "status_code", 500)
             error_headers = getattr(e, "headers", None)
@@ -956,7 +970,6 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
             raise OpenAIError(
                 status_code=status_code,
                 message=error_text,
-                response=upstream_error_response(e),
                 headers=error_headers,
                 body=error_body,
             )
@@ -1041,28 +1054,8 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                     hidden_params={"headers": headers},
                     _response_headers=headers,
                 )
-            except openai.UnprocessableEntityError as e:
-                if litellm.drop_params is True or drop_params is True:
-                    data = drop_params_from_unprocessable_entity_error(e, data, model=model, drop_params_gated=True)
-                else:
-                    raise e
-            except Exception as e:
-                exception_response: object = getattr(e, "response", None)
-                status_code = getattr(e, "status_code", 500)
-                exception_body = getattr(e, "body", None)
-                error_headers = getattr(e, "headers", None)
-                if error_headers is None and exception_response:
-                    error_headers = getattr(exception_response, "headers", None)
-                message = getattr(e, "message", str(e))
 
-                raise OpenAIError(
-                    status_code=status_code,
-                    message=message,
-                    response=upstream_error_response(e),
-                    headers=error_headers,
-                    body=exception_body,
-                )
-            else:
+                # Call agentic completion hooks (e.g., for websearch_interception)
                 agentic_response = await self._call_agentic_completion_hooks_openai(
                     response=final_response_obj,
                     model=model,
@@ -1085,6 +1078,28 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                     )
 
                 return final_response_obj
+            except openai.UnprocessableEntityError as e:
+                ## check if body contains unprocessable params - related issue https://github.com/BerriAI/litellm/issues/4800
+                if litellm.drop_params is True or drop_params is True:
+                    data = drop_params_from_unprocessable_entity_error(e, data)
+                else:
+                    raise e
+                # e.message
+            except Exception as e:
+                exception_response: object = getattr(e, "response", None)
+                status_code = getattr(e, "status_code", 500)
+                exception_body = getattr(e, "body", None)
+                error_headers = getattr(e, "headers", None)
+                if error_headers is None and exception_response:
+                    error_headers = getattr(exception_response, "headers", None)
+                message = getattr(e, "message", str(e))
+
+                raise OpenAIError(
+                    status_code=status_code,
+                    message=message,
+                    headers=error_headers,
+                    body=exception_body,
+                )
 
     def streaming(
         self,
@@ -1220,7 +1235,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
             except openai.UnprocessableEntityError as e:
                 ## check if body contains unprocessable params - related issue https://github.com/BerriAI/litellm/issues/4800
                 if litellm.drop_params is True or drop_params is True:
-                    data = drop_params_from_unprocessable_entity_error(e, data, model=model, drop_params_gated=True)
+                    data = drop_params_from_unprocessable_entity_error(e, data)
                 else:
                     raise e
             except (
@@ -1254,7 +1269,6 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                         raise OpenAIError(
                             status_code=getattr(e, "status_code", 500),
                             message=str(e),
-                            response=upstream_error_response(e),
                             headers=error_headers,
                             body=exception_body,
                         )
@@ -1382,12 +1396,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
             error_response: Final[object] = getattr(e, "response", None)
             if error_headers is None and error_response:
                 error_headers = getattr(error_response, "headers", None)
-            raise OpenAIError(
-                status_code=status_code,
-                message=error_text,
-                response=upstream_error_response(e),
-                headers=error_headers,
-            )
+            raise OpenAIError(status_code=status_code, message=error_text, headers=error_headers)
 
     def embedding(
         self,
@@ -1477,12 +1486,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
             error_response: Final[object] = getattr(e, "response", None)
             if error_headers is None and error_response:
                 error_headers = getattr(error_response, "headers", None)
-            raise OpenAIError(
-                status_code=status_code,
-                message=error_text,
-                response=upstream_error_response(e),
-                headers=error_headers,
-            )
+            raise OpenAIError(status_code=status_code, message=error_text, headers=error_headers)
 
     async def aimage_generation(
         self,
@@ -1649,11 +1653,7 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                 original_response=str(e),
             )
             if hasattr(e, "status_code"):
-                raise OpenAIError(
-                    status_code=getattr(e, "status_code", 500),
-                    message=str(e),
-                    response=upstream_error_response(e),
-                )
+                raise OpenAIError(status_code=getattr(e, "status_code", 500), message=str(e))
             else:
                 raise OpenAIError(status_code=500, message=str(e))
 
@@ -2148,18 +2148,6 @@ class OpenAIFilesAPI(BaseLLM):
         return response
 
 
-def _with_openai_batch_fields(batches: Sequence[Batch]) -> Sequence[Batch]:
-    return [
-        batch.model_copy(
-            update={
-                "object": batch.object or "batch",
-                "status": openai_batch_status(batch.status),
-            }
-        )
-        for batch in batches
-    ]
-
-
 class OpenAIBatchesAPI(BaseLLM):
     """
     OpenAI methods to support for batches
@@ -2350,7 +2338,7 @@ class OpenAIBatchesAPI(BaseLLM):
     ):
         verbose_logger.debug("listing batches, after= %s, limit= %s", after, limit)
         response: Final = await openai_client.batches.list(after=after, limit=limit)
-        return response.model_copy(update={"data": _with_openai_batch_fields(response.data)})
+        return response
 
     def list_batches(
         self,
@@ -2362,7 +2350,7 @@ class OpenAIBatchesAPI(BaseLLM):
         organization: str | None,
         after: str | None = None,
         limit: int | None = None,
-        client: OpenAI | AsyncOpenAI | None = None,
+        client: OpenAI | None = None,
         litellm_params: Mapping[str, object] | None = None,
     ):
         openai_client: Final[OpenAI | AsyncOpenAI | None] = self.get_openai_client(
@@ -2387,9 +2375,7 @@ class OpenAIBatchesAPI(BaseLLM):
                 )
             return self.alist_batches(openai_client=openai_client, after=after, limit=limit)
         response: Final = openai_client.batches.list(after=after, limit=limit)
-        if not isinstance(response, SyncCursorPage):
-            return response
-        return response.model_copy(update={"data": _with_openai_batch_fields(response.data)})
+        return response
 
 
 class OpenAIAssistantsAPI(BaseLLM):

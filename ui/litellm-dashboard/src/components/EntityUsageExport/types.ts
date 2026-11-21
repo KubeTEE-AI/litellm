@@ -11,7 +11,7 @@ export interface EntityUsageExportModalProps {
   entityType: EntityType;
   onExport: (exportType: ExportType, format: ExportFormat) => Promise<Blob>;
   dateRange: DateRangePickerValue;
-  selectedFilters?: readonly string[];
+  selectedFilters?: string[];
   customTitle?: string;
   teams?: Team[];
 }

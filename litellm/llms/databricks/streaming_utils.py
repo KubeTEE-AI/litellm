@@ -1,8 +1,6 @@
 import json
 from typing import Final
 
-from pydantic import ConfigDict, TypeAdapter
-
 import litellm
 from litellm import verbose_logger
 from litellm.types.llms.openai import (
@@ -23,9 +21,6 @@ def _usage_block(usage: Usage) -> ChatCompletionUsageBlock:
             usage.completion_tokens_details.model_dump() if usage.completion_tokens_details else None
         ),
     )
-
-
-_JSON_CHUNK: Final = TypeAdapter(dict[str, object], config=ConfigDict(strict=True))
 
 
 class ModelResponseIterator:
@@ -104,7 +99,7 @@ class ModelResponseIterator:
             self.response_iterator = self.streaming_response
         chunk: Final = self._next_sse_data()
         try:
-            json_chunk: Final = _JSON_CHUNK.validate_python(json.loads(chunk))
+            json_chunk: Final = json.loads(chunk)
             return self.chunk_parser(chunk=json_chunk)
         except ValueError as e:
             verbose_logger.debug(
@@ -131,7 +126,7 @@ class ModelResponseIterator:
         if chunk == "[DONE]":
             raise StopAsyncIteration
         try:
-            json_chunk: Final = _JSON_CHUNK.validate_python(json.loads(chunk))
+            json_chunk: Final = json.loads(chunk)
             return self.chunk_parser(chunk=json_chunk)
         except ValueError as e:
             verbose_logger.debug(

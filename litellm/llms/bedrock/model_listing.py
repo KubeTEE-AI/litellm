@@ -1,25 +1,20 @@
 from collections.abc import Iterator, Mapping
 from types import MappingProxyType
-from typing import ClassVar, Final, TypeAlias
+from typing import Final, TypeAlias
 from urllib.parse import quote, urlencode
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field
 
 from litellm.litellm_core_utils.aws_partition import get_aws_dns_suffix
 from litellm.llms.bedrock.base_aws_llm import BaseAWSLLM, bedrock_bearer_token
 from litellm.llms.bedrock.common_utils import BedrockError
-from litellm.llms.bedrock.web_identity_session_policy import (
-    BEDROCK_MODEL_LISTING_SESSION_POLICY,
-    WebIdentitySessionPolicy,
-)
 from litellm.llms.custom_httpx.http_handler import HTTPHandler
 from litellm.types.llms.bedrock import AwsAuthParams
 
 LIST_MODELS_TIMEOUT: Final = 10.0
 INFERENCE_PROFILES_PAGE_SIZE: Final = 1000
 INFERENCE_PROFILES_PAGE_CAP: Final = 20
-_DECODED_JSON: Final = TypeAdapter(object)
 
 QueryPairs: TypeAlias = tuple[tuple[str, str], ...]
 
@@ -51,8 +46,6 @@ class ListInferenceProfilesResponse(BaseModel):
 
 
 class BedrockModelLister(BaseAWSLLM):
-    _web_identity_session_policy: ClassVar[WebIdentitySessionPolicy] = BEDROCK_MODEL_LISTING_SESSION_POLICY
-
     def __init__(self, deployment: Mapping[str, object], client: HTTPHandler) -> None:
         super().__init__()
         self._aws_params: Final = dict(deployment)
@@ -110,7 +103,7 @@ class BedrockModelLister(BaseAWSLLM):
                     f"Status code: {response.status_code}, Response: {response.text}"
                 ),
             )
-        return _DECODED_JSON.validate_python(response.json())
+        return response.json()
 
     def _auth_headers(self, url: str) -> Mapping[str, str]:
         if self._bearer_token is not None:

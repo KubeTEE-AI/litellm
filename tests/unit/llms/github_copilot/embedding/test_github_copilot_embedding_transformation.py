@@ -1,14 +1,15 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 from pydantic import ValidationError
 
+
 from litellm.exceptions import AuthenticationError
-from litellm.llms.github_copilot.common_utils import GetAccessTokenError
 from litellm.llms.github_copilot.embedding.transformation import (
     GithubCopilotEmbeddingConfig,
 )
+from litellm.llms.github_copilot.common_utils import GetAPIKeyError
 from litellm.types.utils import EmbeddingResponse
 
 
@@ -40,7 +41,7 @@ def test_github_copilot_embedding_config_validate_environment():
     assert "x-request-id" in validated_headers
 
     # Test with authentication failure
-    config.authenticator.get_api_key.side_effect = GetAccessTokenError(
+    config.authenticator.get_api_key.side_effect = GetAPIKeyError(
         message="Failed to get API key",
         status_code=401,
     )

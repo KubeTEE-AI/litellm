@@ -1,4 +1,3 @@
-import type { TFunction } from "i18next";
 import { z } from "zod";
 
 const isBlank = (value: string): boolean => value.trim() === "";
@@ -12,40 +11,33 @@ const isJsonObject = (value: string): boolean => {
   }
 };
 
-const wholeNumberOrEmpty = (t: TFunction) =>
-  z
-    .string()
-    .refine(
-      (value) => isBlank(value) || /^\d+$/.test(value.trim()),
-      t("organizations.settingsForm.errors.wholeNumber"),
-    );
+const wholeNumberOrEmpty = z
+  .string()
+  .refine((value) => isBlank(value) || /^\d+$/.test(value.trim()), "Must be a non-negative whole number");
 
-const amountOrEmpty = (t: TFunction) =>
-  z
-    .string()
-    .refine(
-      (value) => isBlank(value) || (Number.isFinite(Number(value)) && Number(value) >= 0),
-      t("organizations.settingsForm.errors.nonNegativeNumber"),
-    );
+const amountOrEmpty = z
+  .string()
+  .refine(
+    (value) => isBlank(value) || (Number.isFinite(Number(value)) && Number(value) >= 0),
+    "Must be a non-negative number",
+  );
 
-const buildOrgSettingsShape = (t: TFunction) => ({
-  organization_alias: z.string().min(1, t("organizations.settingsForm.errors.nameRequired")),
+const orgSettingsShape = {
+  organization_alias: z.string().min(1, "Please input an organization name"),
   models: z.array(z.string()),
-  max_budget: amountOrEmpty(t),
+  max_budget: amountOrEmpty,
   budget_duration: z.string(),
-  tpm_limit: wholeNumberOrEmpty(t),
-  rpm_limit: wholeNumberOrEmpty(t),
+  tpm_limit: wholeNumberOrEmpty,
+  rpm_limit: wholeNumberOrEmpty,
   vector_stores: z.array(z.string()),
   mcp: z.object({
     servers: z.array(z.string()),
     accessGroups: z.array(z.string()),
     toolsets: z.array(z.string()),
   }),
-  metadata: z
-    .string()
-    .refine((value) => isBlank(value) || isJsonObject(value), t("organizations.settingsForm.errors.invalidMetadata")),
-});
+  metadata: z.string().refine((value) => isBlank(value) || isJsonObject(value), "Metadata must be a valid JSON object"),
+};
 
-export const buildOrgSettingsSchema = (t: TFunction) => z.object(buildOrgSettingsShape(t));
+export const orgSettingsSchema = z.object(orgSettingsShape);
 
-export type OrgSettingsFormValues = z.output<ReturnType<typeof buildOrgSettingsSchema>>;
+export type OrgSettingsFormValues = z.output<typeof orgSettingsSchema>;

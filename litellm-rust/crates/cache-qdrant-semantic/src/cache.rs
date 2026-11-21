@@ -36,7 +36,7 @@ impl<E: Embedder, C: CacheCodec> QdrantSemanticCache<E, C> {
         let exists = client
             .collection_exists(config.collection_name.clone())
             .await
-            .map_err(Error::unavailable)?;
+            .map_err(|_| Error::Unavailable)?;
         if !exists {
             client
                 .create_collection(
@@ -48,7 +48,7 @@ impl<E: Embedder, C: CacheCodec> QdrantSemanticCache<E, C> {
                         .quantization_config(quantization(&config.quantization)),
                 )
                 .await
-                .map_err(Error::unavailable)?;
+                .map_err(|_| Error::Unavailable)?;
         }
         let _ = client
             .create_field_index(CreateFieldIndexCollectionBuilder::new(
@@ -99,13 +99,13 @@ impl<E: Embedder, C: CacheCodec> QdrantSemanticCache<E, C> {
             .async_embed(&prompt, context.metadata.as_ref())
             .await?;
         let response =
-            String::from_utf8(self.codec.encode(&value)?).map_err(Error::invalid_entry)?;
+            String::from_utf8(self.codec.encode(&value)?).map_err(|_| Error::InvalidEntry)?;
         let payload = Payload::try_from(json!({
             "litellm_cache_key": key,
             "text": prompt,
             "response": response,
         }))
-        .map_err(Error::invalid_entry)?;
+        .map_err(|_| Error::InvalidEntry)?;
         self.client
             .upsert_points(
                 UpsertPointsBuilder::new(
@@ -119,7 +119,7 @@ impl<E: Embedder, C: CacheCodec> QdrantSemanticCache<E, C> {
                 .wait(true),
             )
             .await
-            .map_err(Error::unavailable)?;
+            .map_err(|_| Error::Unavailable)?;
         Ok(())
     }
 
@@ -152,7 +152,7 @@ impl<E: Embedder, C: CacheCodec> QdrantSemanticCache<E, C> {
                     ),
             )
             .await
-            .map_err(Error::unavailable)?;
+            .map_err(|_| Error::Unavailable)?;
         let Some(point) = result.result.into_iter().next() else {
             return Ok(SemanticLookup::miss(Some(0.0)));
         };
@@ -170,7 +170,7 @@ impl<E: Embedder, C: CacheCodec> QdrantSemanticCache<E, C> {
         let response = payload
             .get("response")
             .and_then(Value::as_str)
-            .ok_or(Error::InvalidEntry(None))?;
+            .ok_or(Error::InvalidEntry)?;
         Ok(SemanticLookup {
             value: Some(self.codec.decode(response.as_bytes())?),
             similarity: Some(similarity),

@@ -1,6 +1,5 @@
 import { CircleAlert } from "lucide-react";
 import React, { useState, useEffect } from "react";
-import { Trans, useTranslation } from "react-i18next";
 import { Alert, AlertTitle } from "@/components/shared/Alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,7 +35,6 @@ export default function DeleteResourceModal({
   confirmLoading,
   requiredConfirmation,
 }: DeleteResourceModalProps) {
-  const { t } = useTranslation();
   const [requiredConfirmationInput, setRequiredConfirmationInput] = useState("");
 
   useEffect(() => {
@@ -80,12 +78,7 @@ export default function DeleteResourceModal({
           {requiredConfirmation && (
             <div className="mb-6 mt-4 pt-4 border-t border-border">
               <p className="block text-base font-medium text-foreground mb-2">
-                <Trans
-                  i18nKey="commonComponents.deleteResourceModal.typeToConfirm"
-                  components={{
-                    confirmation: <span className="font-semibold text-destructive">{requiredConfirmation}</span>,
-                  }}
-                />
+                Type <span className="font-semibold text-destructive">{requiredConfirmation}</span> to confirm deletion:
               </p>
               <InputGroup className="rounded-md">
                 <InputGroupAddon>
@@ -103,16 +96,14 @@ export default function DeleteResourceModal({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} disabled={confirmLoading}>
-            {t("commonComponents.deleteResourceModal.cancel")}
+            Cancel
           </Button>
           <Button
             variant="destructive"
             onClick={onOk}
             disabled={(!!requiredConfirmation && requiredConfirmationInput !== requiredConfirmation) || confirmLoading}
           >
-            {confirmLoading
-              ? t("commonComponents.deleteResourceModal.deleting")
-              : t("commonComponents.deleteResourceModal.delete")}
+            {confirmLoading ? "Deleting..." : "Delete"}
           </Button>
         </DialogFooter>
       </DialogContent>

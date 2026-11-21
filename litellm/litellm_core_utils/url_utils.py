@@ -22,11 +22,11 @@ Admins can opt out via two ``litellm`` globals (wired from proxy config):
 import asyncio
 import socket
 from ipaddress import ip_address, ip_network
-from typing import Final, Protocol
+from typing import Any, Final, Protocol
 from urllib.parse import quote, urlparse, urlsplit, urlunparse
 
 import httpx
-from typing_extensions import ReadOnly, TypedDict, Unpack
+from typing_extensions import ReadOnly, TypedDict
 
 import litellm
 
@@ -50,7 +50,6 @@ class _UrlFetcher(Protocol):
         *,
         headers: dict[str, str] | None = None,
         follow_redirects: bool = False,
-        timeout: float | httpx.Timeout | None = None,
     ) -> httpx.Response: ...
 
 
@@ -63,8 +62,6 @@ class _AsyncUrlFetcher(Protocol):
         *,
         headers: dict[str, str] | None = None,
         follow_redirects: bool = False,
-        timeout: float | httpx.Timeout | None = None,
-        max_response_bytes: int | None = None,
     ) -> httpx.Response: ...
 
 
@@ -76,14 +73,8 @@ class _AsyncFetcherView(TypedDict):
     fetcher: ReadOnly[_AsyncUrlFetcher]
 
 
-class _FetchOptions(TypedDict, total=False):
+class _CallerHeadersView(TypedDict):
     headers: ReadOnly[dict[str, str]]
-    follow_redirects: ReadOnly[bool]
-    timeout: ReadOnly[float | httpx.Timeout | None]
-
-
-class _AsyncFetchOptions(_FetchOptions, total=False):
-    max_response_bytes: ReadOnly[int | None]
 
 
 # Cloud-internal IPs that ``ip.is_global`` can report as public. Everything
@@ -100,14 +91,6 @@ _ALLOWED_SCHEMES: Final = ("http", "https")
 
 class SSRFError(ValueError):
     """Raised when a URL targets a blocked network."""
-
-
-def is_https_url_with_host(url: str) -> bool:
-    try:
-        parsed_url: Final = urlsplit(url)
-        return parsed_url.scheme == "https" and bool(parsed_url.hostname)
-    except ValueError:
-        return False
 
 
 def encode_url_path_segment(value: object, *, field_name: str = "path parameter") -> str:
@@ -159,13 +142,6 @@ def _strip_trailing_slashes_keeping_the_scheme(api_base: str) -> str:
 
 def join_api_base(api_base: str, route: str) -> str:
     return f"{_strip_trailing_slashes_keeping_the_scheme(api_base)}/{route.lstrip('/')}"
-
-
-def ensure_api_route(api_base: str, route: str) -> str:
-    base: Final = _strip_trailing_slashes_keeping_the_scheme(api_base)
-    if urlsplit(base).path.endswith(f"/{route.lstrip('/')}"):
-        return base
-    return join_api_base(base, route)
 
 
 def _is_blocked_ip(addr: str) -> bool:
@@ -457,7 +433,7 @@ def _extract_redirect_url(response: httpx.Response, request_url: str) -> str:
     return str(httpx.URL(request_url).join(location))
 
 
-def safe_get(client: _UrlFetcher, url: str, **kwargs: Unpack[_FetchOptions]) -> httpx.Response:
+def safe_get(client: _UrlFetcher, url: str, **kwargs: Any) -> httpx.Response:
     """
     Fetch a user-supplied URL with SSRF protection on every redirect hop.
 
@@ -477,23 +453,21 @@ def safe_get(client: _UrlFetcher, url: str, **kwargs: Unpack[_FetchOptions]) -> 
         The final httpx.Response.
     """
     if not getattr(litellm, "user_url_validation", True):
-        unvalidated_options: Final[_FetchOptions] = {
-            **kwargs,
-            "follow_redirects": kwargs.get("follow_redirects", True),
-        }
-        unvalidated: Final[_ResponseView] = {"response": client.get(url, **unvalidated_options)}
+        kwargs.setdefault("follow_redirects", True)
+        unvalidated: Final[_ResponseView] = {"response": client.get(url, **kwargs)}
         return unvalidated["response"]
     fetcher_view: Final[_FetcherView] = {"fetcher": client}
     fetcher: Final = fetcher_view["fetcher"]
-    caller_headers: Final = kwargs.get("headers", {})
+    kwargs.pop("follow_redirects", None)
+    headers_view: Final[_CallerHeadersView] = {"headers": kwargs.pop("headers", {})}
     for _ in range(_MAX_REDIRECTS):
         validated_url, original_host = validate_url(url)
-        hop_options: _FetchOptions = {
+        response = fetcher.get(
+            validated_url,
+            headers={**headers_view["headers"], "Host": original_host},
+            follow_redirects=False,
             **kwargs,
-            "headers": {**caller_headers, "Host": original_host},
-            "follow_redirects": False,
-        }
-        response = fetcher.get(validated_url, **hop_options)
+        )
         if not response.is_redirect:
             return response
         # Resolve the next hop against the ORIGINAL (pre-rewrite) URL so
@@ -502,26 +476,24 @@ def safe_get(client: _UrlFetcher, url: str, **kwargs: Unpack[_FetchOptions]) -> 
     raise SSRFError("Too many redirects")
 
 
-async def async_safe_get(client: _AsyncUrlFetcher, url: str, **kwargs: Unpack[_AsyncFetchOptions]) -> httpx.Response:
+async def async_safe_get(client: _AsyncUrlFetcher, url: str, **kwargs: Any) -> httpx.Response:
     """Async version of safe_get."""
     if not getattr(litellm, "user_url_validation", True):
-        unvalidated_options: Final[_AsyncFetchOptions] = {
-            **kwargs,
-            "follow_redirects": kwargs.get("follow_redirects", True),
-        }
-        unvalidated: Final[_ResponseView] = {"response": await client.get(url, **unvalidated_options)}
+        kwargs.setdefault("follow_redirects", True)
+        unvalidated: Final[_ResponseView] = {"response": await client.get(url, **kwargs)}
         return unvalidated["response"]
     fetcher_view: Final[_AsyncFetcherView] = {"fetcher": client}
     fetcher: Final = fetcher_view["fetcher"]
-    caller_headers: Final = kwargs.get("headers", {})
+    kwargs.pop("follow_redirects", None)
+    headers_view: Final[_CallerHeadersView] = {"headers": kwargs.pop("headers", {})}
     for _ in range(_MAX_REDIRECTS):
         validated_url, original_host = await asyncio.to_thread(validate_url, url)
-        hop_options: _AsyncFetchOptions = {
+        response = await fetcher.get(
+            validated_url,
+            headers={**headers_view["headers"], "Host": original_host},
+            follow_redirects=False,
             **kwargs,
-            "headers": {**caller_headers, "Host": original_host},
-            "follow_redirects": False,
-        }
-        response = await fetcher.get(validated_url, **hop_options)
+        )
         if not response.is_redirect:
             return response
         # Resolve the next hop against the ORIGINAL (pre-rewrite) URL so

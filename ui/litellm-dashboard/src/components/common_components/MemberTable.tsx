@@ -1,15 +1,12 @@
 import type { ColumnDef, ColumnFiltersState, OnChangeFn, PaginationState, SortingState } from "@tanstack/react-table";
-import type { TFunction } from "i18next";
 import { Crown, Info, User, UserPlus } from "lucide-react";
 import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import { Member } from "@/components/networking";
 import {
   DataTable,
   DataTableFilterDrawer,
   DataTableFilterField,
-  type FilterDraft,
   DataTableSortHeader,
   DataTableToolbar,
   DEFAULT_PAGE_SIZE_OPTIONS,
@@ -73,11 +70,10 @@ function RoleHeaderTitle({ title, tooltip }: { title: string; tooltip?: string }
 }
 
 function ResetSpendAction({ disabledReason, onClick }: { disabledReason: string | null; onClick: () => void }) {
-  const { t } = useTranslation();
   return (
     <TableIconActionButton
       variant="Reset"
-      tooltipText={t("memberTable.actions.resetSpend")}
+      tooltipText="Reset spend"
       disabled={disabledReason !== null}
       disabledTooltipText={disabledReason ?? undefined}
       dataTestId="reset-member-spend"
@@ -89,7 +85,6 @@ function ResetSpendAction({ disabledReason, onClick }: { disabledReason: string 
 const ACTIONS_COLUMN_WIDTH = 120;
 
 interface MemberColumnDeps {
-  t: TFunction;
   canEdit: boolean;
   onEdit: (member: Member) => void;
   onDelete: (member: Member) => void;
@@ -126,7 +121,6 @@ const extraColumnDef = (column: MemberTableColumn): ColumnDef<Member> => {
 };
 
 const buildColumns = ({
-  t,
   canEdit,
   onEdit,
   onDelete,
@@ -140,32 +134,32 @@ const buildColumns = ({
   {
     id: "user_alias",
     accessorFn: (member) => member.user_alias || undefined,
-    header: ({ column }) => <DataTableSortHeader column={column} title={t("memberTable.columns.name")} />,
+    header: ({ column }) => <DataTableSortHeader column={column} title="Name" />,
     sortingFn: "text",
     sortUndefined: "last",
     enableGlobalFilter: true,
-    meta: { title: t("memberTable.columns.name") },
+    meta: { title: "Name" },
     cell: ({ row }) => row.original.user_alias || <span className="text-muted-foreground">-</span>,
   },
   {
     id: "user_email",
     accessorFn: (member) => member.user_email || undefined,
-    header: ({ column }) => <DataTableSortHeader column={column} title={t("memberTable.columns.userEmail")} />,
+    header: ({ column }) => <DataTableSortHeader column={column} title="User Email" />,
     sortingFn: "text",
     sortUndefined: "last",
     enableGlobalFilter: true,
-    meta: { title: t("memberTable.columns.userEmail") },
+    meta: { title: "User Email" },
     cell: ({ row }) => row.original.user_email || "-",
   },
   {
     id: "user_id",
     accessorFn: (member) => member.user_id ?? undefined,
-    header: t("memberTable.columns.userId"),
+    header: "User ID",
     enableSorting: false,
     enableGlobalFilter: true,
     cell: ({ row }) =>
       row.original.user_id === "default_user_id" ? (
-        <StatusBadge tone="info" label={t("memberTable.defaultProxyAdmin")} />
+        <StatusBadge tone="info" label="Default Proxy Admin" />
       ) : (
         row.original.user_id || "-"
       ),
@@ -190,7 +184,7 @@ const buildColumns = ({
   ...extraColumns.map(extraColumnDef),
   {
     id: "actions",
-    header: t("memberTable.columns.actions"),
+    header: "Actions",
     size: ACTIONS_COLUMN_WIDTH,
     enableSorting: false,
     enableGlobalFilter: false,
@@ -200,7 +194,7 @@ const buildColumns = ({
         <span className="inline-flex items-center gap-2">
           <TableIconActionButton
             variant="Edit"
-            tooltipText={t("memberTable.actions.edit")}
+            tooltipText="Edit member"
             dataTestId="edit-member"
             onClick={() => onEdit(row.original)}
           />
@@ -213,7 +207,7 @@ const buildColumns = ({
           {(!showDeleteForMember || showDeleteForMember(row.original)) && (
             <TableIconActionButton
               variant="Delete"
-              tooltipText={t("memberTable.actions.delete")}
+              tooltipText="Delete member"
               dataTestId="delete-member"
               onClick={() => onDelete(row.original)}
             />
@@ -229,7 +223,7 @@ export default function MemberTable({
   onEdit,
   onDelete,
   onAddMember,
-  roleColumnTitle,
+  roleColumnTitle = "Role",
   roleTooltip,
   extraColumns = [],
   showDeleteForMember,
@@ -237,8 +231,6 @@ export default function MemberTable({
   resetSpendDisabledReason,
   emptyText,
 }: MemberTableProps) {
-  const { t } = useTranslation();
-  const roleTitle = roleColumnTitle ?? t("memberTable.columns.role");
   const [globalFilter, setGlobalFilter] = useState("");
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [sorting, setSorting] = useState<SortingState>(DEFAULT_SORTING);
@@ -257,11 +249,10 @@ export default function MemberTable({
   const changeSearch = backToFirstPage(setGlobalFilter);
 
   const columnDeps: MemberColumnDeps = {
-    t,
     canEdit,
     onEdit,
     onDelete,
-    roleColumnTitle: roleTitle,
+    roleColumnTitle,
     roleTooltip,
     extraColumns,
     showDeleteForMember,
@@ -270,7 +261,7 @@ export default function MemberTable({
   };
   const columns = buildColumns(columnDeps);
   const roleFilterItems = [
-    { value: ALL_ROLES, label: t("memberTable.filters.allRoles") },
+    { value: ALL_ROLES, label: "All Roles" },
     ...memberRoleOptions(members).map((role) => ({ value: role, label: role })),
   ];
 
@@ -279,7 +270,7 @@ export default function MemberTable({
   return (
     <div className="flex w-full flex-col gap-2">
       <span className="inline-flex text-sm text-foreground">
-        {t("memberTable.memberCount", { count: members.length })}
+        {members.length} Member{members.length !== 1 ? "s" : ""}
       </span>
       <DataTable
         data={members}
@@ -298,7 +289,7 @@ export default function MemberTable({
         onGlobalFilterChange={changeSearch}
         noDataMessage={
           <span className="text-muted-foreground">
-            {isNarrowed ? t("memberTable.noMatches") : emptyText ?? t("memberTable.noData")}
+            {isNarrowed ? "No members match your search or filters" : emptyText ?? "No data"}
           </span>
         }
         toolbar={(table) => (
@@ -307,7 +298,7 @@ export default function MemberTable({
               table={table}
               searchValue={globalFilter}
               onSearchChange={changeSearch}
-              searchPlaceholder={t("memberTable.searchPlaceholder")}
+              searchPlaceholder="Search by name, email, or user ID"
               onOpenFilters={() => setFiltersOpen(true)}
               showViewOptions={false}
             />
@@ -315,18 +306,18 @@ export default function MemberTable({
               table={table}
               open={filtersOpen}
               onOpenChange={setFiltersOpen}
-              title={t("memberTable.filters.title")}
-              description={t("memberTable.filters.description")}
+              title="Filters"
+              description="Narrow down members"
             >
-              {({ get, set }: FilterDraft<"role">) => (
-                <DataTableFilterField label={roleTitle}>
+              {({ get, set }) => (
+                <DataTableFilterField label={roleColumnTitle}>
                   <Select
                     items={roleFilterItems}
                     value={(get("role") as string | undefined) ?? ALL_ROLES}
                     onValueChange={(value) => set("role", value === ALL_ROLES ? undefined : value)}
                   >
                     <SelectTrigger className="w-full" data-testid="filter-role">
-                      <SelectValue placeholder={t("memberTable.filters.allRoles")} />
+                      <SelectValue placeholder="All Roles" />
                     </SelectTrigger>
                     <SelectContent>
                       {roleFilterItems.map((item) => (
@@ -345,7 +336,7 @@ export default function MemberTable({
       {onAddMember && canEdit && (
         <Button onClick={onAddMember} className="self-start">
           <UserPlus className="size-4" />
-          {t("memberTable.addMember")}
+          Add Member
         </Button>
       )}
     </div>

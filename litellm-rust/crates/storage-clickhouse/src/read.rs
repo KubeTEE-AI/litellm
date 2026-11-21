@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, time::Duration};
 
-use litellm_error::Source;
 use litellm_http::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -116,7 +115,7 @@ async fn execute_read_with_limits(
         .post(url)
         .timeout(Duration::from_secs(15))
         .body(sql.to_owned());
-    let mut response = request.send().await.map_err(litellm_http::Error::from)?;
+    let mut response = request.send().await.map_err(|_| Error::Transport)?;
     if !response.status().is_success() {
         if response
             .headers()
@@ -129,19 +128,20 @@ async fn execute_read_with_limits(
     }
 
     let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(litellm_http::Error::from)? {
+    while let Some(chunk) = response.chunk().await.map_err(|_| Error::Transport)? {
         if body.len() + chunk.len() > limits.response_bytes {
             return Err(Error::ResponseTooLarge);
         }
         body.extend_from_slice(&chunk);
     }
 
-    let json: serde_json::Value = serde_json::from_slice(&body).map_err(invalid_response)?;
+    let json: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|_| Error::InvalidResponse)?;
     if json.get("exception").is_some() || !json.get("data").is_some_and(serde_json::Value::is_array)
     {
-        return Err(Error::UnexpectedResponse);
+        return Err(Error::InvalidResponse);
     }
-    String::from_utf8(body).map_err(invalid_response)
+    String::from_utf8(body).map_err(|_| Error::InvalidResponse)
 }
 
 pub trait Query {
@@ -158,8 +158,8 @@ struct Rows<T> {
 }
 
 fn parameters<T: Serialize>(params: &T) -> Result<BTreeMap<String, Parameter>, Error> {
-    let value = serde_json::to_value(params).map_err(invalid_parameters)?;
-    serde_json::from_value(value).map_err(invalid_parameters)
+    let value = serde_json::to_value(params).map_err(|_| Error::InvalidParameters)?;
+    serde_json::from_value(value).map_err(|_| Error::InvalidParameters)
 }
 
 pub async fn fetch<Q: Query>(
@@ -198,13 +198,5 @@ pub async fn fetch_json<Q: Query>(
 fn decode_rows<T: DeserializeOwned>(body: &str) -> Result<Vec<T>, Error> {
     serde_json::from_str::<Rows<T>>(body)
         .map(|rows| rows.data)
-        .map_err(invalid_response)
-}
-
-pub(crate) fn invalid_response(error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::InvalidResponse(Source::new(error))
-}
-
-fn invalid_parameters(error: serde_json::Error) -> Error {
-    Error::InvalidParameters(Source::new(error))
+        .map_err(|_| Error::InvalidResponse)
 }

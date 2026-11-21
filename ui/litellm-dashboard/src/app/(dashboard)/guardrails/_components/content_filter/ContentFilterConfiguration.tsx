@@ -1,5 +1,4 @@
 import React, { useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { Plus, Upload } from "lucide-react";
 import { validateBlockedWordsFile } from "@/components/networking";
 import { toast } from "@/lib/toast";
@@ -103,7 +102,6 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
   competitorIntentConfig = null,
   onCompetitorIntentChange,
 }) => {
-  const { t } = useTranslation();
   const [patternModalVisible, setPatternModalVisible] = useState(false);
   const [keywordModalVisible, setKeywordModalVisible] = useState(false);
   const [customPatternModalVisible, setCustomPatternModalVisible] = useState(false);
@@ -121,7 +119,7 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
 
   const handleAddPrebuiltPattern = () => {
     if (!selectedPatternName) {
-      toast.error(t("guardrails.contentFilter.configuration.toasts.selectPattern"));
+      toast.error("Please select a pattern");
       return;
     }
 
@@ -142,7 +140,7 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
 
   const handleAddCustomPattern = () => {
     if (!customPatternName || !customPatternRegex) {
-      toast.error(t("guardrails.contentFilter.configuration.toasts.patternNameAndRegexRequired"));
+      toast.error("Please provide pattern name and regex");
       return;
     }
 
@@ -162,7 +160,7 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
 
   const handleAddKeyword = () => {
     if (!newKeyword) {
-      toast.error(t("guardrails.contentFilter.configuration.toasts.keywordRequired"));
+      toast.error("Please enter a keyword");
       return;
     }
 
@@ -190,17 +188,14 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
           if (onFileUpload) {
             onFileUpload(content);
           }
-          toast.success(result.message || t("guardrails.contentFilter.configuration.toasts.uploadSucceeded"));
+          toast.success(result.message || "File uploaded successfully");
         } else {
-          const errorMessage =
-            result.error ||
-            (result.errors && result.errors.join(", ")) ||
-            t("guardrails.contentFilter.configuration.toasts.invalidFile");
-          toast.error(t("guardrails.contentFilter.configuration.toasts.validationFailed", { error: errorMessage }));
+          const errorMessage = result.error || (result.errors && result.errors.join(", ")) || "Invalid file";
+          toast.error(`Validation failed: ${errorMessage}`);
         }
       }
     } catch (error) {
-      toast.error(t("guardrails.contentFilter.configuration.toasts.uploadFailed", { error: String(error) }));
+      toast.error(`Failed to upload file: ${error}`);
     } finally {
       setUploadValidating(false);
     }
@@ -224,7 +219,10 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
     <div className="space-y-6">
       {!showStep && (
         <div>
-          <p className="text-muted-foreground">{t("guardrails.contentFilter.configuration.intro")}</p>
+          <p className="text-muted-foreground">
+            Configure patterns, keywords, and content categories to detect and filter sensitive information in requests
+            and responses.
+          </p>
         </div>
       )}
 
@@ -232,9 +230,9 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle>{t("guardrails.contentFilter.configuration.patterns.title")}</CardTitle>
+              <CardTitle>Pattern Detection</CardTitle>
               <p className="text-sm font-normal text-muted-foreground">
-                {t("guardrails.contentFilter.configuration.patterns.description")}
+                Detect sensitive information using regex patterns (SSN, credit cards, API keys, etc.)
               </p>
             </div>
           </CardHeader>
@@ -242,11 +240,11 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
             <div className="mb-4 flex flex-wrap gap-2">
               <Button onClick={() => setPatternModalVisible(true)}>
                 <Plus />
-                {t("guardrails.contentFilter.configuration.patterns.addPrebuilt")}
+                Add prebuilt pattern
               </Button>
               <Button variant="outline" onClick={() => setCustomPatternModalVisible(true)}>
                 <Plus />
-                {t("guardrails.contentFilter.configuration.patterns.addCustom")}
+                Add custom regex
               </Button>
             </div>
             <PatternTable
@@ -262,9 +260,9 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle>{t("guardrails.contentFilter.configuration.keywords.title")}</CardTitle>
+              <CardTitle>Blocked Keywords</CardTitle>
               <p className="text-sm font-normal text-muted-foreground">
-                {t("guardrails.contentFilter.configuration.keywords.description")}
+                Block or mask specific sensitive terms and phrases
               </p>
             </div>
           </CardHeader>
@@ -272,7 +270,7 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
             <div className="mb-4 flex flex-wrap gap-2">
               <Button onClick={() => setKeywordModalVisible(true)}>
                 <Plus />
-                {t("guardrails.contentFilter.configuration.keywords.addKeyword")}
+                Add keyword
               </Button>
               <input
                 ref={fileInputRef}
@@ -288,7 +286,7 @@ const ContentFilterConfiguration: React.FC<ContentFilterConfigurationProps> = ({
                 onClick={() => fileInputRef.current?.click()}
               >
                 {uploadValidating ? <UiLoadingSpinner className="size-4" /> : <Upload />}
-                {t("guardrails.contentFilter.configuration.keywords.uploadYaml")}
+                Upload YAML file
               </Button>
             </div>
             <KeywordTable keywords={blockedWords} onActionChange={onBlockedWordUpdate} onRemove={onBlockedWordRemove} />

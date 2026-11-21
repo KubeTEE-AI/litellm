@@ -308,7 +308,9 @@ async def new_vector_store(
 
         # Extract and validate metadata
         metadata: Final = vector_store.get("vector_store_metadata")
-        validated_metadata: Final = metadata if isinstance(metadata, dict) else None
+        validated_metadata: dict | None = None
+        if metadata is not None and isinstance(metadata, dict):
+            validated_metadata = metadata
 
         new_vector_store: Final = await create_vector_store_in_db(
             vector_store_id=vector_store_id,
@@ -380,6 +382,7 @@ async def list_vector_stores(
     from litellm.proxy.proxy_server import prisma_client
 
     vector_store_map: Final[dict[str, LiteLLM_ManagedVectorStore]] = {}
+    db_vector_store_ids: Final[set] = set()
 
     try:
         # Get vector stores from database first (source of truth)
@@ -390,7 +393,7 @@ async def list_vector_stores(
             vector_store_id = vector_store.get("vector_store_id", None)
             if vector_store_id:
                 vector_store_map[vector_store_id] = vector_store
-        db_vector_store_ids: Final = frozenset(vector_store_map)
+                db_vector_store_ids.add(vector_store_id)
 
         # Process in-memory vector stores
         if litellm.vector_store_registry is not None:
@@ -644,9 +647,8 @@ async def update_vector_store(
         )
 
         # Handle metadata serialization
-        submitted_metadata: Final[object] = update_data.get("vector_store_metadata")
-        if submitted_metadata is not None:
-            update_data["vector_store_metadata"] = safe_dumps(submitted_metadata)
+        if update_data.get("vector_store_metadata") is not None:
+            update_data["vector_store_metadata"] = safe_dumps(update_data["vector_store_metadata"])
 
         # Handle litellm_params if provided. As with the create path, the
         # embedding-config auto-resolve previously persisted cleartext

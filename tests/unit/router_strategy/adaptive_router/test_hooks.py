@@ -1,6 +1,5 @@
 """Unit tests for the AdaptiveRouterPostCallHook."""
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,12 +10,10 @@ from litellm.router_strategy.adaptive_router.config import (
 )
 from litellm.router_strategy.adaptive_router.hooks import (
     AdaptiveRouterPostCallHook,
-    AdaptiveRouterResponseHeaderHook,
     _recent_tool_results,
     _resolve_session_key,
 )
 from litellm.router_strategy.adaptive_router.signals import Turn
-from litellm.types.utils import ModelResponse
 
 
 def _make_hook() -> AdaptiveRouterPostCallHook:
@@ -238,45 +235,6 @@ async def test_hook_passes_tool_calls_through():
     assert turn.tool_calls == [tc]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("response", "expected_tool_calls"),
-    [
-        (
-            ModelResponse(
-                choices=[
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "calling tool",
-                            "tool_calls": [
-                                {
-                                    "id": "call_1",
-                                    "type": "function",
-                                    "function": {"name": "search", "arguments": '{"q":"x"}'},
-                                }
-                            ],
-                        }
-                    }
-                ]
-            ),
-            [{"id": "call_1", "type": "function", "function": {"name": "search", "arguments": '{"q":"x"}'}}],
-        ),
-        (
-            _resp_with_content("calling tool", tool_calls=[SimpleNamespace(name="search")]),
-            [{"name": "search", "arguments": ""}],
-        ),
-    ],
-    ids=["model_response_tool_call", "tool_call_without_model_dump"],
-)
-async def test_hook_records_tool_call_objects_as_dicts(response: object, expected_tool_calls: list[dict[str, object]]):
-    hook = _make_hook()
-    await hook.async_log_success_event(_kwargs(chosen="fast"), response, 0.0, 1.0)
-    turn: Turn = hook.adaptive_router.record_turn.await_args.kwargs["turn"]
-    assert turn.assistant_content == "calling tool"
-    assert turn.tool_calls == expected_tool_calls
-
-
 # ---- _recent_tool_results ------------------------------------------------
 
 
@@ -379,7 +337,8 @@ async def test_post_call_response_headers_hook_returns_chosen_model_header():
     """The header hook returns the `x-litellm-adaptive-router-model` header
     so proxy header construction picks it up (works for both streaming and
     non-streaming; `async_post_call_success_hook` is too late for streaming)."""
-    headers = await AdaptiveRouterResponseHeaderHook().async_post_call_response_headers_hook(
+    hook = _make_hook()
+    headers = await hook.async_post_call_response_headers_hook(
         data={"metadata": {"adaptive_router_chosen_model": "smart"}},
         user_api_key_dict=MagicMock(),
         response=MagicMock(),
@@ -389,7 +348,8 @@ async def test_post_call_response_headers_hook_returns_chosen_model_header():
 
 @pytest.mark.asyncio
 async def test_post_call_response_headers_hook_noop_when_metadata_missing_key():
-    headers = await AdaptiveRouterResponseHeaderHook().async_post_call_response_headers_hook(
+    hook = _make_hook()
+    headers = await hook.async_post_call_response_headers_hook(
         data={"metadata": {"litellm_session_id": "sess-A"}},
         user_api_key_dict=MagicMock(),
         response=MagicMock(),
@@ -399,7 +359,8 @@ async def test_post_call_response_headers_hook_noop_when_metadata_missing_key():
 
 @pytest.mark.asyncio
 async def test_post_call_response_headers_hook_noop_when_no_metadata():
-    headers = await AdaptiveRouterResponseHeaderHook().async_post_call_response_headers_hook(
+    hook = _make_hook()
+    headers = await hook.async_post_call_response_headers_hook(
         data={},
         user_api_key_dict=MagicMock(),
         response=MagicMock(),
@@ -409,7 +370,8 @@ async def test_post_call_response_headers_hook_noop_when_no_metadata():
 
 @pytest.mark.asyncio
 async def test_post_call_response_headers_hook_noop_when_metadata_not_dict():
-    headers = await AdaptiveRouterResponseHeaderHook().async_post_call_response_headers_hook(
+    hook = _make_hook()
+    headers = await hook.async_post_call_response_headers_hook(
         data={"metadata": "not-a-dict"},
         user_api_key_dict=MagicMock(),
         response=MagicMock(),

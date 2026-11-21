@@ -3,19 +3,28 @@ Budget repository for database operations on LiteLLM_BudgetTable.
 """
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Protocol
 
 from litellm.models.budget import LiteLLM_BudgetTable
 from litellm.repositories.base_repository import BaseRepository
 from litellm.repositories.prisma_protocols import TableActions
-from litellm.repositories.table_repositories import PrismaTableRepository
 
 if TYPE_CHECKING:
     from prisma import models as prisma_models
 
 
-class _BudgetTable(PrismaTableRepository["prisma_models.LiteLLM_BudgetTable"]):
-    table_name = "litellm_budgettable"
+class _BudgetDb(Protocol):
+    """The single Prisma table this repository reaches for on ``prisma_client.db``."""
+
+    @property
+    def litellm_budgettable(self) -> TableActions["prisma_models.LiteLLM_BudgetTable"]: ...
+
+
+class _PrismaClientView(Protocol):
+    """The one attribute this repository reads off the untyped Prisma client wrapper."""
+
+    @property
+    def db(self) -> _BudgetDb: ...
 
 
 class BudgetRepository(BaseRepository[LiteLLM_BudgetTable]):
@@ -23,7 +32,8 @@ class BudgetRepository(BaseRepository[LiteLLM_BudgetTable]):
 
     @property
     def table(self) -> TableActions["prisma_models.LiteLLM_BudgetTable"]:
-        return _BudgetTable(self._prisma_client).table
+        client: Final[_PrismaClientView] = self.prisma_client
+        return client.db.litellm_budgettable
 
     @property
     def model_class(self) -> type[LiteLLM_BudgetTable]:

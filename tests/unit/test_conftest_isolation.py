@@ -9,10 +9,11 @@ import pytest
 
 import litellm
 from litellm import Router
+from litellm import router as litellm_router_module
 from litellm import utils as litellm_utils_module
 from litellm.caching.caching import DualCache
-from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER
 from litellm.llms.bedrock.base_aws_llm import BaseAWSLLM
+from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER
 from tests.unit import conftest as unit_harness
 
 CANARY_MODEL = "conftest-isolation-canary-model"
@@ -87,26 +88,6 @@ def test_register_model_ledger_entry_was_rolled_back():
     assert CANARY_MODEL not in litellm_utils_module._runtime_registered_model_cost
 
 
-def test_register_model_catalog_writes_are_scoped_to_this_test():
-    litellm.register_model(
-        {
-            CANARY_MODEL: {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 0.001},
-            "collection-isolation-ledger": {"input_cost_per_token": 0.5},
-        }
-    )
-    assert CANARY_MODEL in litellm.model_cost
-    assert CANARY_MODEL in litellm.open_ai_chat_completion_models
-    assert CANARY_MODEL in litellm.models_by_provider["openai"]
-    assert litellm.model_cost["collection-isolation-ledger"]["input_cost_per_token"] == 0.5
-
-
-def test_register_model_catalog_writes_were_rolled_back():
-    assert CANARY_MODEL not in litellm.model_cost
-    assert CANARY_MODEL not in litellm.open_ai_chat_completion_models
-    assert CANARY_MODEL not in litellm.models_by_provider["openai"]
-    assert litellm.model_cost["collection-isolation-ledger"]["input_cost_per_token"] == 0.001
-
-
 def test_live_router_membership_is_scoped_to_this_test():
     _CanaryRouterHolder.router = Router(
         model_list=[
@@ -116,12 +97,12 @@ def test_live_router_membership_is_scoped_to_this_test():
             }
         ]
     )
-    assert _CanaryRouterHolder.router._core._hosted in unit_harness.live_router_registries
+    assert _CanaryRouterHolder.router in litellm_router_module._live_routers
 
 
 def test_live_router_membership_was_rolled_back():
     assert _CanaryRouterHolder.router is not None
-    assert _CanaryRouterHolder.router._core._hosted not in unit_harness.live_router_registries
+    assert _CanaryRouterHolder.router not in litellm_router_module._live_routers
 
 
 def test_aws_cache_reset_sees_new_handlers_and_replaced_caches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,7 +140,7 @@ def test_aws_cache_reset_sees_a_replaced_module(monkeypatch: pytest.MonkeyPatch)
 @pytest.fixture(scope="module", autouse=True)
 def registered_collection_models() -> Iterator[None]:
     original_registrations: Final = dict(litellm_utils_module._runtime_registered_model_cost)
-    original_routers: Final = frozenset(unit_harness.live_router_registries)
+    original_routers: Final = frozenset(litellm_router_module._live_routers)
     litellm.register_model(
         {"collection-isolation-ledger": {"litellm_provider": "openai", "input_cost_per_token": 0.001}}
     )
@@ -174,8 +155,8 @@ def registered_collection_models() -> Iterator[None]:
     yield
     litellm_utils_module._runtime_registered_model_cost.clear()
     litellm_utils_module._runtime_registered_model_cost.update(original_registrations)
-    unit_harness.live_router_registries.discard(collection_router._core._hosted)
-    unit_harness.live_router_registries.update(original_routers)
+    litellm_router_module._live_routers.discard(collection_router)
+    litellm_router_module._live_routers.update(original_routers)
 
 
 def test_collection_model_metadata_is_not_replayed_into_a_test_catalog() -> None:

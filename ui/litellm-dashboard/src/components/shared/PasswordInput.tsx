@@ -2,7 +2,6 @@
 
 import { Eye, EyeOff } from "lucide-react";
 import * as React from "react";
-import { useTranslation } from "react-i18next";
 
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 
@@ -12,7 +11,6 @@ export type PasswordInputProps = Omit<React.ComponentPropsWithoutRef<"input">, "
 
 export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputProps>(
   ({ className, groupClassName, disabled, ...props }, ref) => {
-    const { t } = useTranslation();
     const [revealed, setRevealed] = React.useState(false);
 
     return (
@@ -28,7 +26,7 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
           <InputGroupButton
             size="icon-xs"
             disabled={disabled}
-            aria-label={revealed ? t("shared.passwordInput.hide") : t("shared.passwordInput.show")}
+            aria-label={revealed ? "Hide password" : "Show password"}
             onClick={() => setRevealed((current) => !current)}
           >
             {revealed ? <EyeOff /> : <Eye />}

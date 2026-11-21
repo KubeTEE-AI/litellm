@@ -2,7 +2,6 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
-import { useTranslation } from "react-i18next";
 
 import { organizationKeys } from "@/app/(dashboard)/hooks/organizations/useOrganizations";
 import { ModelSelect } from "@/components/ModelSelect/ModelSelect";
@@ -19,8 +18,8 @@ import VectorStoreSelector from "@/components/vector_store_management/VectorStor
 import { useZodForm } from "@/lib/forms/useZodForm";
 import { fetchClient } from "@/lib/http/api";
 
-import { budgetDurationItems, NO_RESET } from "../org-settings/OrgSettingsForm";
-import { buildOrgSettingsSchema } from "../org-settings/schema";
+import { BUDGET_DURATION_OPTIONS, NO_RESET } from "../org-settings/OrgSettingsForm";
+import { orgSettingsSchema } from "../org-settings/schema";
 import { buildOrgCreateBody, emptyOrgFormValues, type OrgCreateBody } from "./mapper";
 
 const defaultCreateOrganization = async (body: OrgCreateBody): Promise<unknown> => {
@@ -41,11 +40,8 @@ export const OrgCreateDialog = ({
   accessToken,
   createOrganization = defaultCreateOrganization,
 }: OrgCreateDialogProps) => {
-  const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const schema = React.useMemo(() => buildOrgSettingsSchema(t), [t]);
-  const form = useZodForm(schema, { defaultValues: emptyOrgFormValues });
-  const budgetDurationOptions = budgetDurationItems(t);
+  const form = useZodForm(orgSettingsSchema, { defaultValues: emptyOrgFormValues });
 
   const closeAndReset = () => {
     form.reset(emptyOrgFormValues);
@@ -55,12 +51,12 @@ export const OrgCreateDialog = ({
   const mutation = useMutation({
     mutationFn: (body: OrgCreateBody) => createOrganization(body),
     onSuccess: () => {
-      toast.success(t("organizations.createDialog.toasts.created"));
+      toast.success("Organization created successfully");
       queryClient.invalidateQueries({ queryKey: organizationKeys.all });
       closeAndReset();
     },
     onError: (error: unknown) =>
-      toast.fromError(error instanceof Error ? error.message : t("organizations.createDialog.toasts.createFailed")),
+      toast.fromError(error instanceof Error ? error.message : "Failed to create organization"),
   });
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -80,20 +76,16 @@ export const OrgCreateDialog = ({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{t("organizations.createDialog.title")}</DialogTitle>
+          <DialogTitle>Create Organization</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={onSubmit} noValidate>
           <FieldGroup>
-            <FormField
-              control={form.control}
-              name="organization_alias"
-              label={t("organizations.createDialog.fields.name")}
-            >
+            <FormField control={form.control} name="organization_alias" label="Organization Name">
               {({ ref, ...field }) => <Input {...field} ref={ref} />}
             </FormField>
 
-            <FormField control={form.control} name="models" label={t("organizations.createDialog.fields.models")}>
+            <FormField control={form.control} name="models" label="Models">
               {(field) => (
                 <ModelSelect
                   value={field.value}
@@ -104,22 +96,14 @@ export const OrgCreateDialog = ({
               )}
             </FormField>
 
-            <FormField
-              control={form.control}
-              name="max_budget"
-              label={t("organizations.createDialog.fields.maxBudget")}
-            >
+            <FormField control={form.control} name="max_budget" label="Max Budget (USD)">
               {({ ref, ...field }) => <Input {...field} ref={ref} type="number" step="any" min={0} />}
             </FormField>
 
-            <FormField
-              control={form.control}
-              name="budget_duration"
-              label={t("organizations.createDialog.fields.budgetDuration")}
-            >
+            <FormField control={form.control} name="budget_duration" label="Reset Budget">
               {({ id, value, onChange, "aria-invalid": ariaInvalid, "aria-describedby": ariaDescribedBy }) => (
                 <Select
-                  items={budgetDurationOptions}
+                  items={BUDGET_DURATION_OPTIONS}
                   value={value === "" ? NO_RESET : value}
                   onValueChange={(selected) => onChange(selected === NO_RESET ? "" : selected)}
                 >
@@ -127,7 +111,7 @@ export const OrgCreateDialog = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {budgetDurationOptions.map((option) => (
+                    {BUDGET_DURATION_OPTIONS.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -137,26 +121,26 @@ export const OrgCreateDialog = ({
               )}
             </FormField>
 
-            <FormField control={form.control} name="tpm_limit" label={t("organizations.createDialog.fields.tpmLimit")}>
+            <FormField control={form.control} name="tpm_limit" label="Tokens per minute Limit (TPM)">
               {({ ref, ...field }) => <Input {...field} ref={ref} type="number" step={1} min={0} />}
             </FormField>
 
-            <FormField control={form.control} name="rpm_limit" label={t("organizations.createDialog.fields.rpmLimit")}>
+            <FormField control={form.control} name="rpm_limit" label="Requests per minute Limit (RPM)">
               {({ ref, ...field }) => <Input {...field} ref={ref} type="number" step={1} min={0} />}
             </FormField>
 
             <FormField
               control={form.control}
               name="vector_stores"
-              label={t("organizations.createDialog.fields.vectorStores")}
-              description={t("organizations.createDialog.fields.vectorStoresDescription")}
+              label="Allowed Vector Stores"
+              description="Select vector stores this organization can access. Leave empty for access to all vector stores"
             >
               {(field) => (
                 <VectorStoreSelector
                   value={field.value}
                   onChange={field.onChange}
                   accessToken={accessToken}
-                  placeholder={t("organizations.createDialog.fields.vectorStoresPlaceholder")}
+                  placeholder="Select vector stores (optional)"
                 />
               )}
             </FormField>
@@ -164,20 +148,20 @@ export const OrgCreateDialog = ({
             <FormField
               control={form.control}
               name="mcp"
-              label={t("organizations.createDialog.fields.mcp")}
-              description={t("organizations.createDialog.fields.mcpDescription")}
+              label="Allowed MCP Servers"
+              description="Select MCP servers, access groups, and toolsets this organization can access. Leave empty for access to all"
             >
               {(field) => (
                 <MCPServerSelector
                   value={field.value}
                   onChange={field.onChange}
                   accessToken={accessToken}
-                  placeholder={t("organizations.createDialog.fields.mcpPlaceholder")}
+                  placeholder="Select MCP servers and access groups (optional)"
                 />
               )}
             </FormField>
 
-            <FormField control={form.control} name="metadata" label={t("organizations.createDialog.fields.metadata")}>
+            <FormField control={form.control} name="metadata" label="Metadata">
               {({ ref, ...field }) => <Textarea {...field} ref={ref} rows={4} />}
             </FormField>
           </FieldGroup>
@@ -189,10 +173,10 @@ export const OrgCreateDialog = ({
               onClick={() => handleOpenChange(false)}
               disabled={mutation.isPending}
             >
-              {t("organizations.createDialog.cancel")}
+              Cancel
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? t("organizations.createDialog.creating") : t("organizations.createDialog.submit")}
+              {mutation.isPending ? "Creating..." : "Create Organization"}
             </Button>
           </DialogFooter>
         </form>

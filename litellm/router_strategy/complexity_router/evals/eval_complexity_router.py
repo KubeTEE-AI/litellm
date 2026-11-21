@@ -239,10 +239,10 @@ def run_eval() -> tuple[int, int, list[dict]]:
         Tuple of (passed, total, failures)
     """
     # Create router with default config
-    mock_ctx: Final = MagicMock()
+    mock_router: Final = MagicMock()
     router: Final = ComplexityRouter(
         model_name="eval-router",
-        ctx=mock_ctx,
+        litellm_router_instance=mock_router,
     )
 
     passed = 0

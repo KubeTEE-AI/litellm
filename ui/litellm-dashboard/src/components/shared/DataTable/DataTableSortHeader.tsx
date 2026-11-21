@@ -4,7 +4,6 @@ import { Menu } from "@base-ui/react/menu";
 import type { Column, SortDirection, Table } from "@tanstack/react-table";
 import { Check, ChevronDown, ChevronsUpDown, ChevronUp, X } from "lucide-react";
 import type * as React from "react";
-import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/cva.config";
 
@@ -36,7 +35,6 @@ export function DataTableSortHeader<TData, TValue>({
   variant = "header-cycle",
   className,
 }: DataTableSortHeaderProps<TData, TValue>) {
-  const { t } = useTranslation();
   const sorted = column.getIsSorted();
 
   if (!column.getCanSort()) {
@@ -53,7 +51,7 @@ export function DataTableSortHeader<TData, TValue>({
               <button
                 type="button"
                 data-testid={`sort-trigger-${column.id}`}
-                aria-label={t("shared.dataTable.sortHeader.sortOptionsFor", { column: column.id })}
+                aria-label={`Sort options for ${column.id}`}
                 onClick={(event) => event.stopPropagation()}
                 className={cn(
                   "inline-flex size-6 items-center justify-center rounded-md hover:bg-muted",
@@ -68,13 +66,13 @@ export function DataTableSortHeader<TData, TValue>({
             <Menu.Positioner side="bottom" align="start" sideOffset={4} className="isolate z-popup">
               <Menu.Popup className="min-w-[9rem] rounded-md bg-popover p-1 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-hidden">
                 <Menu.Item className={MENU_ITEM_CLASS} onClick={() => column.toggleSorting(false)}>
-                  <ChevronUp className="size-3.5" /> {t("shared.dataTable.sortHeader.ascending")}
+                  <ChevronUp className="size-3.5" /> Ascending
                 </Menu.Item>
                 <Menu.Item className={MENU_ITEM_CLASS} onClick={() => column.toggleSorting(true)}>
-                  <ChevronDown className="size-3.5" /> {t("shared.dataTable.sortHeader.descending")}
+                  <ChevronDown className="size-3.5" /> Descending
                 </Menu.Item>
                 <Menu.Item className={MENU_ITEM_CLASS} onClick={() => column.clearSorting()}>
-                  <X className="size-3.5" /> {t("shared.dataTable.sortHeader.reset")}
+                  <X className="size-3.5" /> Reset
                 </Menu.Item>
               </Menu.Popup>
             </Menu.Positioner>
@@ -116,27 +114,14 @@ interface DataTableMultiSortHeaderProps<TData> {
  * without opening the menu. The chevron opens a menu offering each field in both directions.
  */
 export function DataTableMultiSortHeader<TData>({ table, fields, className }: DataTableMultiSortHeaderProps<TData>) {
-  const { t } = useTranslation();
   const active = table.getState().sorting[0];
   const activeField = active !== undefined && fields.some((field) => field.id === active.id) ? active : undefined;
   const activeDirection: SortDirection = activeField?.desc === true ? "desc" : "asc";
   const sorted: false | SortDirection = activeField === undefined ? false : activeDirection;
 
   const options = fields.flatMap((field) => [
-    {
-      key: `${field.id}-asc`,
-      id: field.id,
-      desc: false,
-      label: t("shared.dataTable.multiSortHeader.fieldAscending", { field: field.label }),
-      Icon: ChevronUp,
-    },
-    {
-      key: `${field.id}-desc`,
-      id: field.id,
-      desc: true,
-      label: t("shared.dataTable.multiSortHeader.fieldDescending", { field: field.label }),
-      Icon: ChevronDown,
-    },
+    { key: `${field.id}-asc`, id: field.id, desc: false, label: `${field.label} ascending`, Icon: ChevronUp },
+    { key: `${field.id}-desc`, id: field.id, desc: true, label: `${field.label} descending`, Icon: ChevronDown },
   ]);
 
   const segmentClass = (isActive: boolean): string => {
@@ -170,9 +155,7 @@ export function DataTableMultiSortHeader<TData>({ table, fields, className }: Da
             <button
               type="button"
               data-testid={`sort-trigger-${fields[0]?.id ?? "field"}`}
-              aria-label={t("shared.dataTable.multiSortHeader.sortOptionsFor", {
-                fields: fields.map((field) => field.label).join(t("shared.dataTable.multiSortHeader.fieldSeparator")),
-              })}
+              aria-label={`Sort options for ${fields.map((field) => field.label).join(" or ")}`}
               onClick={(event) => event.stopPropagation()}
               className={cn(
                 "inline-flex size-6 items-center justify-center rounded-md hover:bg-muted",
@@ -200,7 +183,7 @@ export function DataTableMultiSortHeader<TData>({ table, fields, className }: Da
                 );
               })}
               <Menu.Item className={MENU_ITEM_CLASS} onClick={() => table.setSorting([])}>
-                <X className="size-3.5" /> {t("shared.dataTable.multiSortHeader.reset")}
+                <X className="size-3.5" /> Reset
               </Menu.Item>
             </Menu.Popup>
           </Menu.Positioner>

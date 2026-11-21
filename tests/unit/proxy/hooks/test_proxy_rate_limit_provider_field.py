@@ -34,7 +34,6 @@ fallback path (unknown model, missing model) for every limiter.
 
 import sys
 from datetime import datetime
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -123,11 +122,6 @@ class TestProxyRateLimitErrorClass:
         assert e.model == ""
 
 
-def _router_serving(model_list: list) -> SimpleNamespace:
-    """A router whose registry().all() is ``model_list``, the live model list the resolver reads."""
-    return SimpleNamespace(registry=lambda: SimpleNamespace(all=lambda: model_list))
-
-
 class TestResolveLLMProviderForRateLimit:
     @pytest.mark.parametrize(
         "model, expected_provider",
@@ -208,7 +202,7 @@ class TestResolveLLMProviderForRateLimit:
 
         with patch(
             "litellm.proxy.proxy_server.llm_router",
-            _router_serving(_FakeRouter.model_list),
+            _FakeRouter(),
         ):
             resolved_model, provider = resolve_llm_provider_for_rate_limit("tpm-locked")
         assert provider == "openai", (
@@ -246,7 +240,7 @@ class TestResolveLLMProviderForRateLimit:
 
         with patch(
             "litellm.proxy.proxy_server.llm_router",
-            _router_serving(_FakeRouter.model_list),
+            _FakeRouter(),
         ):
             _, provider = resolve_llm_provider_for_rate_limit("claude-pool")
         assert provider == "anthropic"
@@ -268,7 +262,7 @@ class TestResolveLLMProviderForRateLimit:
 
         with patch(
             "litellm.proxy.proxy_server.llm_router",
-            _router_serving(_FakeRouter.model_list),
+            _FakeRouter(),
         ):
             resolved_model, provider = resolve_llm_provider_for_rate_limit("not-an-alias")
         assert provider == PROXY_LLM_PROVIDER_FALLBACK
@@ -294,7 +288,7 @@ class TestResolveLLMProviderForRateLimit:
 
         with patch(
             "litellm.proxy.proxy_server.llm_router",
-            _router_serving(_FakeRouter.model_list),
+            _FakeRouter(),
         ):
             resolved_model, provider = resolve_llm_provider_for_rate_limit("broken")
         assert provider == PROXY_LLM_PROVIDER_FALLBACK

@@ -9,9 +9,8 @@ from typing_extensions import ReadOnly, TypedDict
 
 import litellm
 from litellm.constants import RUNWAYML_DEFAULT_API_VERSION
-from litellm.litellm_core_utils.url_utils import encode_url_path_segment, join_api_base
+from litellm.litellm_core_utils.url_utils import encode_url_path_segment
 from litellm.llms.base_llm.chat.transformation import BaseLLMException
-from litellm.llms.base_llm.videos.async_task_utils import unsupported_video_fields
 from litellm.llms.base_llm.videos.transformation import BaseVideoConfig
 from litellm.llms.custom_httpx.http_handler import (
     AsyncHTTPHandler,
@@ -120,7 +119,7 @@ class RunwayMLVideoConfig(BaseVideoConfig):
 
     @staticmethod
     def _parse_task_response(raw_response: httpx.Response) -> _RunwayTaskResponse:
-        return _parse_runway_task_response(raw_response)
+        return raw_response.json()
 
     def get_supported_openai_params(self, model: str) -> list:
         """
@@ -156,23 +155,12 @@ class RunwayMLVideoConfig(BaseVideoConfig):
         - size -> ratio (convert "WIDTHxHEIGHT" to "WIDTH:HEIGHT")
         - seconds -> duration (convert to integer)
         """
-        unsupported: Final = unsupported_video_fields(
-            video_create_optional_params,
-            model,
-            "runwayml",
-            drop_params,
-            frozenset({"seed", "duration", "aspect_ratio", "generate_audio"}),
-        )
         supported_openai_params: Final = self.get_supported_openai_params(model)
         return {
             **self._prompt_image_param(video_create_optional_params),
             **self._ratio_param(video_create_optional_params),
             **self._duration_param(video_create_optional_params),
-            **{
-                key: value
-                for key, value in video_create_optional_params.items()
-                if key not in supported_openai_params and key not in unsupported
-            },
+            **{key: value for key, value in video_create_optional_params.items() if key not in supported_openai_params},
         }
 
     @staticmethod
@@ -286,7 +274,7 @@ class RunwayMLVideoConfig(BaseVideoConfig):
 
         files_list: Final[RequestFiles] = []
 
-        return request_data, files_list, join_api_base(api_base, endpoint)
+        return request_data, files_list, f"{api_base}/{endpoint}"
 
     def _select_generation_endpoint(self, request_data: Mapping[str, object]) -> str:
         if request_data.get("promptVideo") is not None or request_data.get("videoUri") is not None:
@@ -425,7 +413,7 @@ class RunwayMLVideoConfig(BaseVideoConfig):
         encoded_video_id: Final = encode_url_path_segment(original_video_id, field_name="video_id")
 
         # Get task status to retrieve video URL
-        url: Final = join_api_base(api_base, f"tasks/{encoded_video_id}")
+        url: Final = f"{api_base}/tasks/{encoded_video_id}"
 
         return url, dict[str, str]()
 
@@ -583,7 +571,7 @@ class RunwayMLVideoConfig(BaseVideoConfig):
         encoded_video_id: Final = encode_url_path_segment(original_video_id, field_name="video_id")
 
         # Construct the URL for task cancellation
-        url: Final = join_api_base(api_base, f"tasks/{encoded_video_id}/cancel")
+        url: Final = f"{api_base}/tasks/{encoded_video_id}/cancel"
 
         return url, dict[str, str]()
 
@@ -620,7 +608,7 @@ class RunwayMLVideoConfig(BaseVideoConfig):
         encoded_video_id: Final = encode_url_path_segment(original_video_id, field_name="video_id")
 
         # Construct the full URL for task status retrieval
-        url: Final = join_api_base(api_base, f"tasks/{encoded_video_id}")
+        url: Final = f"{api_base}/tasks/{encoded_video_id}"
 
         # Empty dict for GET request (no body)
         return url, dict[str, str]()

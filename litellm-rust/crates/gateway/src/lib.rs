@@ -1,9 +1,7 @@
 mod auth;
 mod error;
-mod redis;
 mod secrets;
 pub use error::Error;
-pub use redis::RedisClients;
 
 use std::{sync::Arc, time::Instant};
 
@@ -37,7 +35,6 @@ pub fn build_inference(config: &Config) -> Result<Arc<Gateway>, Error> {
             .map(|value| value.expose().to_owned())
             .or_else(|| std::env::var(name).ok())
     };
-    let router = ModelRouter::from_config(config, &lookup);
     let settings = &config.litellm_settings;
     let http_settings = HttpSettings::from_layers([
         HttpSettingsLayer::from_environment(&lookup),
@@ -65,32 +62,12 @@ pub fn build_inference(config: &Config) -> Result<Arc<Gateway>, Error> {
         Arc::new(EnvironmentSecrets::python_compatible(client)),
     ));
     let resources = CoreResources::new(pool);
-    Ok(Arc::new(Gateway::new(resources, http, secrets, router)?))
-}
-
-pub fn install_crypto_provider() {
-    if rustls::crypto::CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
-}
-
-pub async fn build_redis(
-    config: &Config,
-    pool: &HttpClientPool,
-    http: &litellm_http::HttpClientConfig,
-) -> Result<RedisClients, Error> {
-    let environment = Arc::new(secrets::environment_values(&config.environment_variables)?);
-    let lookup: litellm_redis_connect::SharedEnvironment = Arc::new(move |name: &str| {
-        environment
-            .get(name)
-            .map(|value| value.expose().to_owned())
-            .or_else(|| std::env::var(name).ok())
-    });
-    let resources = redis::Resources {
-        http: pool.client(http, ClientVariant::Provider)?,
-        lookup: lookup.clone(),
-    };
-    redis::connect(config, &*lookup, &resources).await
+    Ok(Arc::new(Gateway::new(
+        resources,
+        http,
+        secrets,
+        ModelRouter::from_model_list(&config.model_list),
+    )?))
 }
 
 pub async fn build_mcp(
@@ -119,16 +96,16 @@ pub async fn build_mcp(
         || !config.policies.is_empty()
         || !config.policy_attachments.is_empty()
     {
-        return Err(Error::McpGuardrails);
+        return Err(Error::McpSetting("guardrails or policies".into()));
     }
     Auth::from_config(config, secrets.clone())
         .validate()
         .await?;
-    let client = pool.client(http, ClientVariant::NoRedirect)?;
+    let client = pool.mcp_client(http)?;
     Ok(Some(
         litellm_gateway_mcp::ConfiguredGateway::connect(
             &config.mcp_servers,
-            (*client).clone(),
+            client,
             secrets.as_ref(),
             shutdown,
         )
@@ -151,15 +128,10 @@ pub fn router(
             litellm_gateway_auth::authenticate,
         ))
         .layer(axum::middleware::from_fn(log_request));
-    let health = Router::new().route("/health/readiness", axum::routing::get(readiness));
     match ui {
-        Some(ui) => inference.merge(ui).merge(health),
-        None => inference.merge(health),
+        Some(ui) => inference.merge(ui),
+        None => inference,
     }
-}
-
-async fn readiness() -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({"status": "healthy", "db": "Not connected"}))
 }
 
 async fn log_request(request: Request, next: Next) -> Response {

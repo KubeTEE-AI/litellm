@@ -1,14 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { ArrowLeft, ChevronDown, RefreshCw } from "lucide-react";
 import type { ColumnDef, ColumnFiltersState } from "@tanstack/react-table";
-import type { ParseKeys, TFunction } from "i18next";
-import { useTranslation } from "react-i18next";
 import { getGlobalLitellmHeaderName, proxyBaseUrl } from "@/components/networking";
 import {
   DataTable,
   DataTableFilterDrawer,
   DataTableFilterField,
-  type FilterDraft,
   DataTableToolbar,
 } from "@/components/shared/DataTable";
 import { Button } from "@/components/ui/button";
@@ -73,12 +70,12 @@ const STATUS_DOT: Record<RunStatus, string> = {
 };
 
 const RUN_STATUS_OPTIONS: RunStatus[] = ["pending", "running", "paused", "completed", "failed"];
-const STATUS_LABEL_KEYS: Record<RunStatus, ParseKeys> = {
-  pending: "workflows.status.pending",
-  running: "workflows.status.running",
-  paused: "workflows.status.paused",
-  completed: "workflows.status.completed",
-  failed: "workflows.status.failed",
+const STATUS_LABELS: Record<RunStatus, string> = {
+  pending: "Pending",
+  running: "Running",
+  paused: "Paused",
+  completed: "Completed",
+  failed: "Failed",
 };
 
 const EVENT_COLOR: Record<string, { bar: string; text: string }> = {
@@ -94,22 +91,22 @@ function eventStyle(type: string) {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-function timeAgo(iso: string, t: TFunction): string {
+function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (isNaN(diff)) return iso;
   const s = Math.floor(diff / 1000);
-  if (s < 60) return t("workflows.timeAgo.seconds", { count: s });
+  if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
-  if (m < 60) return t("workflows.timeAgo.minutes", { count: m });
+  if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return t("workflows.timeAgo.hours", { count: h });
-  return t("workflows.timeAgo.days", { count: Math.floor(h / 24) });
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
-function fmtDuration(ms: number, t: TFunction): string {
+function fmtDuration(ms: number): string {
   if (ms < 0) return "";
-  if (ms < 1000) return t("workflows.duration.ms", { count: ms });
-  return t("workflows.duration.seconds", { value: (ms / 1000).toFixed(1) });
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function runTitle(run: WorkflowRun): string {
@@ -133,7 +130,6 @@ const StatusDot: React.FC<{ status: RunStatus; className?: string }> = ({ status
 const TRUNCATE_AT = 120;
 
 const TruncatedValue: React.FC<{ value: string }> = ({ value }) => {
-  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   if (value.length <= TRUNCATE_AT) {
     return <span className="break-all text-foreground">{value}</span>;
@@ -142,7 +138,7 @@ const TruncatedValue: React.FC<{ value: string }> = ({ value }) => {
     <span className="break-all text-foreground">
       {expanded ? value : value.slice(0, TRUNCATE_AT) + "…"}
       <Button variant="link" size="xs" className="h-auto px-1 py-0 text-[11px]" onClick={() => setExpanded((e) => !e)}>
-        {expanded ? t("workflows.truncate.less") : t("workflows.truncate.more")}
+        {expanded ? "less" : "more"}
       </Button>
     </span>
   );
@@ -151,14 +147,13 @@ const TruncatedValue: React.FC<{ value: string }> = ({ value }) => {
 // ── metadata card ─────────────────────────────────────────────────────────────
 
 const MetadataCard: React.FC<{ run: WorkflowRun }> = ({ run }) => {
-  const { t } = useTranslation();
   const meta = run.metadata ?? {};
 
   const primaryFields: { key: string; label: string }[] = [
-    { key: "state", label: t("workflows.metadata.state") },
-    { key: "worktree_path", label: t("workflows.metadata.worktree") },
-    { key: "grill_session_id", label: t("workflows.metadata.grillSession") },
-    { key: "session_id", label: t("workflows.metadata.session") },
+    { key: "state", label: "state" },
+    { key: "worktree_path", label: "worktree" },
+    { key: "grill_session_id", label: "grill session" },
+    { key: "session_id", label: "session" },
   ];
 
   const primaryKeys = new Set(["title", ...primaryFields.map((f) => f.key)]);
@@ -180,15 +175,15 @@ const MetadataCard: React.FC<{ run: WorkflowRun }> = ({ run }) => {
 
       {/* key fields grid */}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-6 gap-y-2 px-5 py-3 font-mono text-xs">
-        <FieldPair label={t("workflows.metadata.status")}>
+        <FieldPair label="status">
           <span className="capitalize text-foreground">{run.status}</span>
         </FieldPair>
-        <FieldPair label={t("workflows.metadata.created")}>
-          <span className="text-foreground">{timeAgo(run.created_at, t)}</span>
+        <FieldPair label="created">
+          <span className="text-foreground">{timeAgo(run.created_at)}</span>
         </FieldPair>
 
         {meta.pr_url && (
-          <FieldPair label={t("workflows.metadata.pr")}>
+          <FieldPair label="pr">
             <a
               href={String(meta.pr_url)}
               target="_blank"
@@ -237,16 +232,15 @@ const GanttTimeline: React.FC<{
   run: WorkflowRun;
   events: WorkflowRunEvent[];
 }> = ({ run, events }) => {
-  const { t } = useTranslation();
   if (events.length === 0) {
-    return <div className="py-4 font-mono text-xs text-muted-foreground">{t("workflows.drawer.noEvents")}</div>;
+    return <div className="py-4 font-mono text-xs text-muted-foreground">No events recorded</div>;
   }
 
   const runStart = new Date(run.created_at).getTime();
   const eventTimes = events.map((e) => new Date(e.created_at).getTime());
   const lastTime = Math.max(...eventTimes);
   const totalSpan = Math.max(lastTime - runStart, 1);
-  const totalDur = fmtDuration(lastTime - runStart, t);
+  const totalDur = fmtDuration(lastTime - runStart);
 
   return (
     <TooltipProvider delay={300}>
@@ -281,7 +275,7 @@ const GanttTimeline: React.FC<{
                 : lastTime + Math.max(totalSpan * 0.12, 500);
             const widthPct = Math.max(8, ((nextTime - evTime) / totalSpan) * 100);
             const style = eventStyle(ev.event_type);
-            const dur = fmtDuration(nextTime - evTime, t);
+            const dur = fmtDuration(nextTime - evTime);
 
             return (
               <React.Fragment key={ev.event_id}>
@@ -309,24 +303,24 @@ const GanttTimeline: React.FC<{
                     <TooltipContent className="font-mono text-[11px] leading-relaxed">
                       <div className="flex flex-col">
                         <div>
-                          <span className="opacity-70">{t("workflows.tooltip.type")}</span>
+                          <span className="opacity-70">type: </span>
                           <span>{ev.event_type}</span>
                         </div>
                         <div>
-                          <span className="opacity-70">{t("workflows.tooltip.step")}</span>
+                          <span className="opacity-70">step: </span>
                           {ev.step_name}
                         </div>
                         <div>
-                          <span className="opacity-70">{t("workflows.tooltip.seq")}</span>
+                          <span className="opacity-70">seq: </span>
                           {ev.sequence_number}
                         </div>
                         <div>
-                          <span className="opacity-70">{t("workflows.tooltip.time")}</span>
-                          {timeAgo(ev.created_at, t)}
+                          <span className="opacity-70">time: </span>
+                          {timeAgo(ev.created_at)}
                         </div>
                         {ev.data && Object.keys(ev.data).length > 0 && (
                           <div>
-                            <span className="opacity-70">{t("workflows.tooltip.data")}</span>
+                            <span className="opacity-70">data: </span>
                             {JSON.stringify(ev.data)}
                           </div>
                         )}
@@ -352,18 +346,15 @@ const ROLE_COLOR: Record<string, string> = {
   tool_result: "text-warning",
 };
 
-const MessageRow: React.FC<{ msg: WorkflowRunMessage }> = ({ msg }) => {
-  const { t } = useTranslation();
-  return (
-    <div className="grid grid-cols-[80px_minmax(0,1fr)] items-start gap-x-4 border-b py-2.5 font-mono text-xs">
-      <span className={cn("pt-px", ROLE_COLOR[msg.role] ?? "text-muted-foreground")}>[{msg.role}]</span>
-      <div>
-        <span className="block whitespace-pre-wrap break-words leading-relaxed text-foreground">{msg.content}</span>
-        <span className="mt-0.5 block text-[11px] text-muted-foreground">{timeAgo(msg.created_at, t)}</span>
-      </div>
+const MessageRow: React.FC<{ msg: WorkflowRunMessage }> = ({ msg }) => (
+  <div className="grid grid-cols-[80px_minmax(0,1fr)] items-start gap-x-4 border-b py-2.5 font-mono text-xs">
+    <span className={cn("pt-px", ROLE_COLOR[msg.role] ?? "text-muted-foreground")}>[{msg.role}]</span>
+    <div>
+      <span className="block whitespace-pre-wrap break-words leading-relaxed text-foreground">{msg.content}</span>
+      <span className="mt-0.5 block text-[11px] text-muted-foreground">{timeAgo(msg.created_at)}</span>
     </div>
-  );
-};
+  </div>
+);
 
 // ── collapsible section ───────────────────────────────────────────────────────
 
@@ -388,7 +379,6 @@ const DetailSection: React.FC<{
 // ── main component ────────────────────────────────────────────────────────────
 
 const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
-  const { t } = useTranslation();
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [selectedRun, setSelectedRun] = useState<WorkflowRun | null>(null);
@@ -465,8 +455,8 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
       {
         id: "run",
         accessorFn: (row) => `${runTitle(row)} ${row.run_id}`,
-        header: t("workflows.table.columns.run"),
-        meta: { title: t("workflows.table.columns.run"), skeleton: "twoLine" },
+        header: "Run",
+        meta: { title: "Run", skeleton: "twoLine" },
         cell: ({ row }) => {
           const run = row.original;
           return (
@@ -482,8 +472,8 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
       },
       {
         accessorKey: "workflow_type",
-        header: t("workflows.table.columns.type"),
-        meta: { title: t("workflows.table.columns.type") },
+        header: "Type",
+        meta: { title: "Type" },
         filterFn: "includesString",
         cell: ({ row }) => (
           <span className="font-mono text-xs text-muted-foreground">{row.original.workflow_type}</span>
@@ -492,8 +482,8 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
       {
         id: "status",
         accessorKey: "status",
-        header: t("workflows.table.columns.status"),
-        meta: { title: t("workflows.table.columns.status") },
+        header: "Status",
+        meta: { title: "Status" },
         filterFn: "equalsString",
         cell: ({ row }) => {
           const run = row.original;
@@ -507,22 +497,22 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
       },
       {
         accessorKey: "created_at",
-        header: t("workflows.table.columns.created"),
-        meta: { title: t("workflows.table.columns.created") },
-        cell: ({ row }) => <span className="text-xs text-muted-foreground">{timeAgo(row.original.created_at, t)}</span>,
+        header: "Created",
+        meta: { title: "Created" },
+        cell: ({ row }) => <span className="text-xs text-muted-foreground">{timeAgo(row.original.created_at)}</span>,
       },
     ],
-    [t],
+    [],
   );
-
-  const statusLabels = Object.fromEntries(RUN_STATUS_OPTIONS.map((status) => [status, t(STATUS_LABEL_KEYS[status])]));
 
   return (
     <div className="w-full px-8 py-6">
       {/* page header */}
       <div className="mb-5">
-        <div className="text-lg font-semibold text-foreground">{t("workflows.header.title")}</div>
-        <div className="mt-0.5 text-[13px] text-muted-foreground">{t("workflows.header.subtitle")}</div>
+        <div className="text-lg font-semibold text-foreground">Workflow Runs</div>
+        <div className="mt-0.5 text-[13px] text-muted-foreground">
+          Durable state tracking for agents and automated workflows
+        </div>
       </div>
 
       <DataTable
@@ -530,10 +520,8 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
         columns={columns}
         getRowId={(run) => run.run_id}
         isLoading={loadingRuns}
-        loadingMessage={t("workflows.table.loading")}
-        noDataMessage={
-          <div className="py-6 text-center text-[13px] text-muted-foreground">{t("workflows.table.empty")}</div>
-        }
+        loadingMessage="Loading workflow runs…"
+        noDataMessage={<div className="py-6 text-center text-[13px] text-muted-foreground">No workflow runs yet</div>}
         paginationMode="client"
         pageSizeOptions={[50, 100]}
         filterMode="client"
@@ -549,7 +537,7 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
               table={table}
               searchValue={globalFilter}
               onSearchChange={setGlobalFilter}
-              searchPlaceholder={t("workflows.table.searchPlaceholder")}
+              searchPlaceholder="Search runs…"
               onRefresh={fetchRuns}
               isRefreshing={loadingRuns}
               onOpenFilters={() => setFiltersOpen(true)}
@@ -558,35 +546,35 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
               table={table}
               open={filtersOpen}
               onOpenChange={setFiltersOpen}
-              title={t("workflows.filters.title")}
-              description={t("workflows.filters.description")}
+              title="Filters"
+              description="Narrow down workflow runs"
             >
-              {({ get, set }: FilterDraft<"status" | "workflow_type">) => (
+              {({ get, set }) => (
                 <>
-                  <DataTableFilterField label={t("workflows.filters.status")}>
+                  <DataTableFilterField label="Status">
                     <Select
-                      items={statusLabels}
+                      items={STATUS_LABELS}
                       value={(get("status") as string) || null}
                       onValueChange={(value: string | null) => set("status", value ?? "")}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder={t("workflows.filters.allStatuses")} />
+                        <SelectValue placeholder="All statuses" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={null}>{t("workflows.filters.allStatuses")}</SelectItem>
+                        <SelectItem value={null}>All statuses</SelectItem>
                         {RUN_STATUS_OPTIONS.map((status) => (
                           <SelectItem key={status} value={status}>
-                            {statusLabels[status]}
+                            {STATUS_LABELS[status]}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </DataTableFilterField>
-                  <DataTableFilterField label={t("workflows.filters.type")}>
+                  <DataTableFilterField label="Type">
                     <Input
                       value={(get("workflow_type") as string) ?? ""}
                       onChange={(event) => set("workflow_type", event.target.value)}
-                      placeholder={t("workflows.filters.typePlaceholder")}
+                      placeholder="Filter by type…"
                     />
                   </DataTableFilterField>
                 </>
@@ -602,8 +590,10 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
           showCloseButton={false}
           className="overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[680px]"
         >
-          <SheetTitle className="sr-only">{t("workflows.drawer.srTitle")}</SheetTitle>
-          <SheetDescription className="sr-only">{t("workflows.drawer.srDescription")}</SheetDescription>
+          <SheetTitle className="sr-only">Workflow run details</SheetTitle>
+          <SheetDescription className="sr-only">
+            Metadata, timeline and messages for the selected workflow run
+          </SheetDescription>
           {!selectedRun ? null : loadingDetail ? (
             <div className="flex justify-center py-20">
               <UiLoadingSpinner className="size-8 text-muted-foreground" />
@@ -619,11 +609,11 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
                   onClick={() => setDrawerOpen(false)}
                 >
                   <ArrowLeft />
-                  {t("workflows.drawer.close")}
+                  close
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => fetchRunDetail(selectedRun)}>
                   <RefreshCw />
-                  {t("workflows.drawer.refresh")}
+                  Refresh
                 </Button>
               </div>
 
@@ -633,17 +623,19 @@ const WorkflowRuns: React.FC<WorkflowRunsProps> = ({ accessToken }) => {
               {/* collapsible sections */}
               <div className="divide-y overflow-hidden rounded-lg border">
                 <DetailSection
-                  title={t("workflows.drawer.timeline")}
-                  meta={t("workflows.drawer.eventCount", { count: events.length })}
+                  title="Timeline"
+                  meta={
+                    <>
+                      {events.length} {events.length === 1 ? "event" : "events"}
+                    </>
+                  }
                   defaultOpen
                 >
                   <GanttTimeline run={selectedRun} events={events} />
                 </DetailSection>
-                <DetailSection title={t("workflows.drawer.messages")} meta={messages.length}>
+                <DetailSection title="Messages" meta={messages.length}>
                   {messages.length === 0 ? (
-                    <div className="py-3 font-mono text-xs text-muted-foreground">
-                      {t("workflows.drawer.noMessages")}
-                    </div>
+                    <div className="py-3 font-mono text-xs text-muted-foreground">No messages</div>
                   ) : (
                     <div>
                       {messages.map((msg) => (

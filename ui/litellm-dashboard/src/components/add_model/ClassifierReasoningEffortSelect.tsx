@@ -1,5 +1,4 @@
 import { Info } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ReasoningEffort } from "./complexity_router_tiers";
@@ -30,7 +29,6 @@ const ClassifierReasoningEffortSelect = ({
   explicitlySupported,
   onChange,
 }: ClassifierReasoningEffortSelectProps) => {
-  const { t } = useTranslation();
   const status = effortStatusFor(value, explicitlySupported);
   const options = Array.from(new Set([...(explicitlySupported ?? []), ...(value ? [value] : [])]));
 
@@ -42,14 +40,14 @@ const ClassifierReasoningEffortSelect = ({
   return (
     <div>
       <div className="flex items-center gap-2 mb-1">
-        <strong className="font-semibold">{t("addModel.classifierReasoningEffortSelect.title")}</strong>
-        <SimpleTooltip content={t("addModel.classifierReasoningEffortSelect.tooltip")}>
+        <strong className="font-semibold">Reasoning Effort</strong>
+        <SimpleTooltip content="Sent only to the classifier call. Default leaves the classifier deployment or provider setting unchanged.">
           <Info className="size-4 text-muted-foreground" />
         </SimpleTooltip>
       </div>
       <Select
         items={[
-          { value: PROVIDER_DEFAULT, label: t("addModel.classifierReasoningEffortSelect.default") },
+          { value: PROVIDER_DEFAULT, label: "Default" },
           ...options.map((effort) => ({ value: effort, label: optionLabel(effort) })),
         ]}
         value={value ?? PROVIDER_DEFAULT}
@@ -57,14 +55,11 @@ const ClassifierReasoningEffortSelect = ({
           effort && onChange(effort === PROVIDER_DEFAULT ? undefined : (effort as ReasoningEffort))
         }
       >
-        <SelectTrigger
-          aria-label={t("addModel.classifierReasoningEffortSelect.ariaLabel", { model })}
-          className="w-full"
-        >
+        <SelectTrigger aria-label={`Reasoning effort for classifier model ${model}`} className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={PROVIDER_DEFAULT}>{t("addModel.classifierReasoningEffortSelect.default")}</SelectItem>
+          <SelectItem value={PROVIDER_DEFAULT}>Default</SelectItem>
           {options.map((effort) => (
             <SelectItem key={effort} value={effort}>
               {optionLabel(effort)}
@@ -74,11 +69,15 @@ const ClassifierReasoningEffortSelect = ({
       </Select>
       {status === "unverified" && (
         <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-          {t("addModel.classifierReasoningEffortSelect.unverified")}
+          This saved effort cannot be verified for the selected model. Choose Default unless you have confirmed provider
+          support.
         </p>
       )}
       {status === "unsupported" && (
-        <p className="mt-1 text-xs text-destructive">{t("addModel.classifierReasoningEffortSelect.unsupported")}</p>
+        <p className="mt-1 text-xs text-destructive">
+          This saved effort is not supported by every deployment in the selected model group. Choose Default or a
+          supported value before saving.
+        </p>
       )}
     </div>
   );

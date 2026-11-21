@@ -1,6 +1,4 @@
 import React from "react";
-import type { ParseKeys } from "i18next";
-import { useTranslation } from "react-i18next";
 import { ChartColumnStacked } from "lucide-react";
 import { BarChart, CustomTooltip } from "@/components/shared/charts";
 import { MetricWithMetadata } from "@/components/UsagePage/types";
@@ -13,16 +11,11 @@ interface EndpointUsageBarChartProps {
 const SUCCESS_COLOR = "#2b3fd6";
 const FAILED_COLOR = "#ef4444";
 const CATEGORIES = ["Successful", "Failed"] as const;
-const CATEGORY_LABELS: Record<(typeof CATEGORIES)[number], ParseKeys> = {
-  Successful: "usage.endpointUsage.barChart.successful",
-  Failed: "usage.endpointUsage.barChart.failed",
-};
 const COLORS = [SUCCESS_COLOR, FAILED_COLOR] as const;
 
 const valueFormatter = (value: number) => value.toLocaleString();
 
 const EndpointUsageBarChart: React.FC<EndpointUsageBarChartProps> = ({ endpointData }) => {
-  const { t } = useTranslation();
   // Transform endpoint data into chart format
   const chartData = React.useMemo(() => {
     return Object.entries(endpointData || {}).map(([endpoint, data]) => ({
@@ -44,13 +37,13 @@ const EndpointUsageBarChart: React.FC<EndpointUsageBarChartProps> = ({ endpointD
   return (
     <Panel
       icon={ChartColumnStacked}
-      title={t("usage.endpointUsage.barChart.title")}
+      title="Success vs Failed Requests by Endpoint"
       action={
         <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
           {CATEGORIES.map((category, i) => (
             <span key={category} className="flex items-center gap-1.5">
               <span aria-hidden="true" className="size-2 rounded-[2px]" style={{ backgroundColor: COLORS[i] }} />
-              <span>{t(CATEGORY_LABELS[category])}</span>
+              <span>{category}</span>
               <span className="tabular-nums text-foreground">{totals[category].toLocaleString()}</span>
             </span>
           ))}

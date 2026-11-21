@@ -3,7 +3,6 @@ import os
 from typing import Final, cast
 
 import httpx
-from pydantic import ConfigDict, TypeAdapter
 
 from litellm._logging import verbose_proxy_logger
 from litellm.llms.custom_httpx.http_handler import (
@@ -11,8 +10,6 @@ from litellm.llms.custom_httpx.http_handler import (
     httpxSpecialProvider,
 )
 from litellm.proxy._types import CommonProxyErrors, LitellmUserRoles, UserAPIKeyAuth
-
-_TOKEN_INFO_RESPONSE: Final = TypeAdapter(dict[str, object], config=ConfigDict(strict=True, hide_input_in_errors=True))
 
 
 class OAuth2TokenValidationError(ValueError):
@@ -187,7 +184,7 @@ class Oauth2Handler:
             response.raise_for_status()
 
             # If we get here, the request was successful
-            data = _TOKEN_INFO_RESPONSE.validate_python(response.json())
+            data = response.json()
 
             verbose_proxy_logger.debug(
                 "Oauth2 token validation for token=%s, response from endpoint=%s",

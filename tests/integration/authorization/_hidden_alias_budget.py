@@ -150,10 +150,6 @@ def error_type(response: httpx.Response) -> str:
     return str(object_value(JSON_OBJECT.validate_json(response.content)["error"])["type"])
 
 
-def budget_refusal_error_type(route: str) -> str:
-    return "invalid_request_error" if route == "messages" else "budget_exceeded"
-
-
 def settle(
     send: Callable[[str], httpx.Response], status: int, *, burst: int = GATEWAY_BURST, seconds: float = 60
 ) -> None:
@@ -205,14 +201,10 @@ def exhausted_key(rig: AliasRig, scenario: Scenario) -> str:
 
 
 def upstream_requests(upstream_url: str) -> tuple[str, ...]:
-    observed: Final = JSON_OBJECT.validate_json(
+    drained: Final = JSON_OBJECT.validate_json(
         httpx.get(f"{upstream_url}/__observations", timeout=15, trust_env=False).content
     )
-    return tuple(json.dumps(entry) for entry in JSON_LIST.validate_python(observed["requests"]))
-
-
-def reset_upstream_requests(upstream_url: str) -> None:
-    httpx.delete(f"{upstream_url}/__observations", timeout=15, trust_env=False).raise_for_status()
+    return tuple(json.dumps(entry) for entry in JSON_LIST.validate_python(drained["requests"]))
 
 
 def upstream_hits(observed: tuple[str, ...], marker: str) -> int:

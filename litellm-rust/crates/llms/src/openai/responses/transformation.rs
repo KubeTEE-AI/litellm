@@ -3,11 +3,10 @@ use litellm_llms_types::formats::responses::{
 };
 use serde_json::{Map, Value};
 
-use litellm_auth::CredentialPlacement;
-use litellm_secret_value::SecretValue;
+use litellm_auth::{CredentialPlacement, SecretValue};
 
 use crate::{
-    Error, ErrorDetail,
+    Error,
     base_llm::{
         auth::{AuthScheme, ValidatedEnvironment},
         responses::transformation::{
@@ -181,19 +180,15 @@ pub fn responses_request(
     params: Map<String, Value>,
 ) -> Result<Value, Error> {
     if !input.is_string() && !input.is_array() {
-        return Err(Error::InvalidRequest(ErrorDetail::Expected {
-            subject: "responses input",
-            expected: "a string or an array",
-        }));
+        return Err(Error::InvalidRequest(
+            "responses input must be a string or an array".into(),
+        ));
     }
     if params
         .get("stream")
         .is_some_and(|stream| !stream.is_boolean())
     {
-        return Err(Error::InvalidRequest(ErrorDetail::Expected {
-            subject: "stream",
-            expected: "a boolean",
-        }));
+        return Err(Error::InvalidRequest("stream must be a boolean".into()));
     }
     Ok(Value::Object(
         params
@@ -207,9 +202,7 @@ pub fn responses_request(
 }
 
 pub fn responses_response(body: Value) -> Result<ResponsesApiResponse, Error> {
-    serde_json::from_value(body).map_err(|error| {
-        Error::InvalidResponse(ErrorDetail::invalid("Responses API response", error))
-    })
+    serde_json::from_value(body).map_err(|error| Error::InvalidResponse(error.to_string().into()))
 }
 
 #[cfg(test)]

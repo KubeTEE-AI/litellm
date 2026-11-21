@@ -7,12 +7,10 @@ use std::sync::Arc;
 #[case::failure(503)]
 #[tokio::test]
 async fn google_resolver_distinguishes_absence_from_failure(#[case] status: u16) {
-    use litellm_secret_value::SecretValue;
     use litellm_secrets::{
         Error, FailurePolicy, KeyManagementSettings, OidcResolver, SecretManager,
-        SecretManagerState, SecretResolver, google::GoogleSecretManager,
+        SecretManagerState, SecretResolver, SecretValue, google::GoogleSecretManager,
     };
-
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -27,7 +25,7 @@ async fn google_resolver_distinguishes_absence_from_failure(#[case] status: u16)
             _ => None,
         });
     let manager = GoogleSecretManager::with_client(
-        litellm_http::Client::for_test(),
+        litellm_http::Client::plain_for_test(),
         server.uri().parse().unwrap(),
         "project".into(),
         environment.clone(),
@@ -42,7 +40,7 @@ async fn google_resolver_distinguishes_absence_from_failure(#[case] status: u16)
     let resolver = SecretResolver::new_python_compatible(
         Arc::new(state),
         environment,
-        OidcResolver::new(litellm_http::Client::for_test()),
+        OidcResolver::new(litellm_http::Client::plain_for_test()),
     )
     .with_failure_policy(FailurePolicy::Propagate);
     let result = resolver.get_secret_str("KEY", None).await;
@@ -110,7 +108,7 @@ async fn google_handler_requires_canonical_base64_and_preserves_plaintext_whites
             STANDARD.encode("encrypted")
         )))
         .await,
-        Err(Error::InvalidCiphertext(_))
+        Err(Error::InvalidCiphertext)
     ));
     assert!(matches!(
         get_secret_from_manager(&manager, "KEY", &settings, &|_: &str| None).await,

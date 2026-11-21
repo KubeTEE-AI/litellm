@@ -9,13 +9,9 @@ import uuid
 from typing import Final
 
 import httpx
-from pydantic import TypeAdapter
 
 from litellm._logging import verbose_logger
-from litellm.llms.custom_httpx.sse_lines import aiter_sse_lines, iter_sse_lines
 from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
-
-_DECODED_JSON: Final = TypeAdapter(object)
 
 
 class LangGraphSSEStreamIterator:
@@ -37,13 +33,12 @@ class LangGraphSSEStreamIterator:
 
     def __iter__(self):
         """Initialize sync iteration."""
-        self.line_iterator = iter_sse_lines(self.response.iter_text())
+        self.line_iterator = self.response.iter_lines()
         return self
 
     def __aiter__(self):
-        """Initialize async iteration once; CustomStreamWrapper re-enters `async for` on every chunk."""
-        if self.async_line_iterator is None:
-            self.async_line_iterator = aiter_sse_lines(self.response.aiter_text())
+        """Initialize async iteration."""
+        self.async_line_iterator = self.response.aiter_lines()
         return self
 
     def _parse_sse_line(self, line: str) -> ModelResponseStream | None:
@@ -65,7 +60,7 @@ class LangGraphSSEStreamIterator:
                 return None
 
             try:
-                data: Final = _DECODED_JSON.validate_python(json.loads(json_str))
+                data: Final = json.loads(json_str)
                 return self._process_data(data)
             except json.JSONDecodeError:
                 verbose_logger.debug("Skipping non-JSON SSE line: %s", line[:100])

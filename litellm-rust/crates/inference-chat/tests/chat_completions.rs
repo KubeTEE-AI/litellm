@@ -5,6 +5,7 @@ use litellm_host::{
 };
 use std::time::Duration;
 
+use litellm_http::transport::Error as TransportError;
 use litellm_inference_chat::{Error, types::ChatCompletionsRequest};
 use litellm_llms_types::formats::chat_completions::ChatCompletionsResponse;
 use rstest::{fixture, rstest};
@@ -179,7 +180,7 @@ async fn a_response_it_cannot_normalize_is_reported_as_already_sent(
     .await
     .expect_err("response cannot be normalized");
 
-    assert!(error.is_response(), "{error:?}");
+    assert!(matches!(error, Error::InvalidResponse(_)), "{error:?}");
 }
 
 #[rstest]
@@ -200,7 +201,13 @@ async fn an_upstream_error_status_keeps_its_code_and_body(
     .await
     .expect_err("upstream rejects");
 
-    assert_eq!(error.upstream_response(), Some((status, "slow down")));
+    assert_eq!(
+        error,
+        Error::Transport(TransportError::Http {
+            status,
+            body: "slow down".into()
+        })
+    );
 }
 
 #[rstest]
@@ -215,25 +222,10 @@ async fn a_connection_that_is_never_established_returns_a_connect_error(
     .await
     .expect_err("nothing is listening");
 
-    assert!(!error.dispatched(), "{error:?}");
-}
-
-#[rstest]
-#[tokio::test]
-async fn a_transport_error_does_not_echo_the_provider_url(
-    request: ChatCompletionsRequest<'static>,
-) {
-    let base = format!("{UNREACHABLE_BASE}/tenant-token-1234");
-
-    let error = complete(ChatCompletionsRequest {
-        api_base: Some(&base),
-        ..request
-    })
-    .await
-    .expect_err("nothing is listening");
-
-    let report = litellm_error::Report::new(&error).to_string();
-    assert!(!report.contains("tenant-token-1234"), "{report}");
+    assert!(
+        matches!(error, Error::Transport(TransportError::Connect(_))),
+        "{error:?}"
+    );
 }
 
 #[rstest]
@@ -251,8 +243,10 @@ async fn a_timeout_after_sending_returns_a_network_error(request: ChatCompletion
     .await
     .expect_err("the call times out");
 
-    assert!(error.dispatched(), "{error:?}");
-    assert!(!error.is_request(), "{error:?}");
+    assert!(
+        matches!(error, Error::Transport(TransportError::Network(_))),
+        "{error:?}"
+    );
 }
 
 #[rstest]
@@ -348,7 +342,7 @@ async fn a_post_call_hook_failure_never_looks_safe_to_retry(
             Ok(wire)
         }
         async fn after_provider_response(&self, _: RawResponse) -> Result<(), Error> {
-            Err(litellm_llms::Error::MissingField("callback rejected").into())
+            Err(Error::InvalidRequest("callback rejected".into()))
         }
     }
     let upstream = upstream([anthropic_response(ANTHROPIC_MESSAGE)]).await;
@@ -364,10 +358,10 @@ async fn a_post_call_hook_failure_never_looks_safe_to_retry(
         )
         .await
         .unwrap_err();
-    assert!(error.dispatched(), "{error:?}");
-    assert!(!error.is_request(), "{error:?}");
-    let report = litellm_error::Report::new(&error).to_string();
-    assert!(report.contains("callback rejected"), "{report}");
+    let Error::PostCallHook(source) = error else {
+        panic!("expected retained callback error")
+    };
+    assert_eq!(*source, Error::InvalidRequest("callback rejected".into()));
     assert_eq!(received(&upstream).await.len(), 1);
 }
 

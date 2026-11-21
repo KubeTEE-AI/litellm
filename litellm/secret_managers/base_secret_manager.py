@@ -1,6 +1,6 @@
 import re
 from abc import ABC, abstractmethod
-from typing import Final
+from typing import Any, Final
 
 import httpx
 
@@ -73,7 +73,7 @@ class BaseSecretManager(ABC):
         optional_params: dict | None = None,
         timeout: float | httpx.Timeout | None = None,
         tags: dict | list | None = None,
-    ) -> dict[str, object]:
+    ) -> dict[str, Any]:
         """
         Asynchronously write a secret to the secret manager.
 

@@ -1,7 +1,6 @@
 from collections.abc import Mapping
 from typing import Final
 
-from integration._support.client import object_value
 from integration.translation.case import TranslationTestCase
 from integration.translation.messages.templates import MESSAGES_REQUEST, MESSAGES_RESPONSE
 from integration.translation.templates.anthropic import ANTHROPIC_MESSAGES_REQUEST, ANTHROPIC_MESSAGES_RESPONSE
@@ -32,10 +31,10 @@ CLAUDE_HAIKU_4_5_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-haiku-4-5-20251001",
-        "id": "msg_011Cg7vB62SdiZVj3M7xJXpr",
+        "id": "msg_011Cfjax2zxeHkddgerkEGRY",
         "type": "message",
         "role": "assistant",
-        "content": [{"type": "text", "text": "Hello!"}],
+        "content": [{"type": "text", "text": "Hello."}],
         "container": None,
         "stop_reason": "end_turn",
         "stop_sequence": None,
@@ -48,16 +47,15 @@ CLAUDE_HAIKU_4_5_TEST_CASE: Final = TranslationTestCase(
             "output_tokens": 5,
             "service_tier": "standard",
             "inference_geo": "not_available",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
     expected_litellm_response={
         "model": "azure_ai/claude-haiku-4-5",
-        "id": "msg_011Cg7vB62SdiZVj3M7xJXpr",
+        "id": "msg_011Cfjax2zxeHkddgerkEGRY",
         "type": "message",
         "role": "assistant",
-        "content": [{"type": "text", "text": "Hello!"}],
+        "content": [{"type": "text", "text": "Hello."}],
         "container": None,
         "stop_reason": "end_turn",
         "stop_sequence": None,
@@ -70,7 +68,6 @@ CLAUDE_HAIKU_4_5_TEST_CASE: Final = TranslationTestCase(
             "output_tokens": 5,
             "service_tier": "standard",
             "inference_geo": "not_available",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -101,7 +98,7 @@ CLAUDE_SONNET_4_6_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-sonnet-4-6",
-        "id": "msg_011Cg7vCCFGaPEhwGwoS6VPy",
+        "id": "msg_011CfjaxAknNm3ZLkVxQRj8M",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello!"}],
@@ -117,13 +114,12 @@ CLAUDE_SONNET_4_6_TEST_CASE: Final = TranslationTestCase(
             "output_tokens": 5,
             "service_tier": "standard",
             "inference_geo": "not_available",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
     expected_litellm_response={
         "model": "azure_ai/claude-sonnet-4-6",
-        "id": "msg_011Cg7vCCFGaPEhwGwoS6VPy",
+        "id": "msg_011CfjaxAknNm3ZLkVxQRj8M",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello!"}],
@@ -139,7 +135,6 @@ CLAUDE_SONNET_4_6_TEST_CASE: Final = TranslationTestCase(
             "output_tokens": 5,
             "service_tier": "standard",
             "inference_geo": "not_available",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -239,7 +234,7 @@ CLAUDE_OPUS_4_8_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-opus-4-8",
-        "id": "msg_011Cg7vBVpRK6kd1kkYXJXyb",
+        "id": "msg_011CfjaxPE8FBKSJ9KbtQzDE",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello."}],
@@ -256,13 +251,12 @@ CLAUDE_OPUS_4_8_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 0},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
     expected_litellm_response={
         "model": "azure_ai/claude-opus-4-8",
-        "id": "msg_011Cg7vBVpRK6kd1kkYXJXyb",
+        "id": "msg_011CfjaxPE8FBKSJ9KbtQzDE",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello."}],
@@ -279,7 +273,6 @@ CLAUDE_OPUS_4_8_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 0},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -490,13 +483,11 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
         **ANTHROPIC_MESSAGES_RESPONSE,
         **CLAUDE_HAIKU_5_5_RESPONSE_FIELDS,
         "model": "claude-haiku-5-5",
-        "usage": {**object_value(CLAUDE_HAIKU_5_5_RESPONSE_FIELDS["usage"]), "speed": "standard"},
     },
     expected_litellm_response={
         **MESSAGES_RESPONSE,
         **CLAUDE_HAIKU_5_5_RESPONSE_FIELDS,
         "model": "azure_ai/claude-haiku-5-5",
-        "usage": {**object_value(CLAUDE_HAIKU_5_5_RESPONSE_FIELDS["usage"]), "speed": "standard"},
     },
 )
 
@@ -550,12 +541,10 @@ CLAUDE_FABLE_5_1_TEST_CASE: Final = TranslationTestCase(
         **ANTHROPIC_MESSAGES_RESPONSE,
         **CLAUDE_FABLE_5_1_RESPONSE_FIELDS,
         "model": "claude-fable-5-1",
-        "usage": {**object_value(CLAUDE_FABLE_5_1_RESPONSE_FIELDS["usage"]), "speed": "standard"},
     },
     expected_litellm_response={
         **MESSAGES_RESPONSE,
         **CLAUDE_FABLE_5_1_RESPONSE_FIELDS,
         "model": "azure_ai/claude-fable-5-1",
-        "usage": {**object_value(CLAUDE_FABLE_5_1_RESPONSE_FIELDS["usage"]), "speed": "standard"},
     },
 )

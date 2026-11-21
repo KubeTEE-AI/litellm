@@ -15,7 +15,6 @@ import httpx
 from pydantic import ConfigDict, TypeAdapter
 
 from litellm.litellm_core_utils.hidden_params import HIDDEN_PARAMS_ATTR
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.sandbox.transformation import (
     SANDBOX_MAX_OUTPUT_BYTES,
     BaseSandboxConfig,
@@ -79,7 +78,7 @@ class E2BSandboxConfig(BaseSandboxConfig):
             body["metadata"] = metadata
 
         response: Final = await self._http(client).post(
-            url=join_api_base(base, "sandboxes"),
+            url=f"{base}/sandboxes",
             headers={"X-API-Key": key, "Content-Type": "application/json"},
             json=body,
         )
@@ -152,10 +151,10 @@ class E2BSandboxConfig(BaseSandboxConfig):
             dict[str, object], getattr(handle, HIDDEN_PARAMS_ATTR)
         )
         key: Final = api_key or hidden_params.get("api_key") or self.validate_environment()
-        base: Final = str(api_base or hidden_params.get("api_base") or E2B_API_BASE)
+        base: Final = api_base or hidden_params.get("api_base") or E2B_API_BASE
         try:
             response: Final = await self._http(client).delete(
-                url=join_api_base(base, f"sandboxes/{handle.id}"),
+                url=f"{base}/sandboxes/{handle.id}",
                 headers={"X-API-Key": key},
             )
         except httpx.HTTPStatusError as e:

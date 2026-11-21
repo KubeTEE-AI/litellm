@@ -26,7 +26,7 @@ pub(super) async fn resolve_entra(
         .get_azure_ad_token(config, env_lookup)
         .await
         .or_else(|error| match error {
-            litellm_auth::Error::EmptyCallerCredential { .. } => Ok(None),
+            litellm_auth::Error::EmptyCallerCredential(_) => Ok(None),
             other => Err(other),
         })
         .map(|credential| {
@@ -48,7 +48,7 @@ pub(super) fn validate_destination(
         && credential_source != InputSource::Request
     {
         return Err(litellm_auth::Error::InvalidConfiguration(
-            litellm_auth::ErrorDetail::RequestControlledEndpoint { provider: "Azure" },
+            "host credentials cannot be sent to a request-controlled Azure endpoint".into(),
         )
         .into());
     }

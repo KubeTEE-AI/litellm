@@ -6,7 +6,7 @@ from typing import Final, cast  # noqa: TID251  # narrows the async binding's un
 
 import pytest
 
-from litellm.rust_bridge import _native, bindings
+from litellm.rust_bridge import bindings
 from litellm.rust_bridge.chat_completions import entrypoints as chat_completions
 from litellm.rust_bridge.embeddings import entrypoints as embeddings
 from litellm.rust_bridge.execution import Complete, Step
@@ -17,15 +17,12 @@ from litellm.rust_bridge.responses import entrypoints as responses
 from litellm.rust_bridge.transcription import native as transcription
 
 
-def test_binding_distinguishes_disable_from_reset() -> None:
-    def route() -> str:
-        return "native"
+def test_binding_distinguishes_disable_from_reset(monkeypatch) -> None:
+    native = SimpleNamespace(route=lambda: "native")
+    monkeypatch.setattr(bindings, "get_native_bridge", lambda: native)
+    binding: bindings.NativeBinding[object] = bindings.NativeBinding("route", validate=lambda value: value)
 
-    binding: bindings.NativeBinding[object] = bindings.NativeBinding(
-        "route", validate=lambda value: value, source=SimpleNamespace(route=route)
-    )
-
-    assert binding.load() is route
+    assert binding.load() is native.route
 
     binding.override(None)
     assert binding.load() is None
@@ -35,15 +32,16 @@ def test_binding_distinguishes_disable_from_reset() -> None:
     assert binding.load() is replacement
 
     binding.reset()
-    assert binding.load() is route
+    assert binding.load() is native.route
 
 
 @pytest.mark.parametrize(("value", "expected"), ((3, 3), ("invalid", None), (None, None)))
-def test_binding_validates_native_attribute(value: object, expected: int | None) -> None:
+def test_binding_validates_native_attribute(
+    monkeypatch: pytest.MonkeyPatch, value: object, expected: int | None
+) -> None:
     native: Final = SimpleNamespace(route=value)
-    binding: Final = bindings.NativeBinding(
-        "route", validate=lambda item: item if isinstance(item, int) else None, source=native
-    )
+    monkeypatch.setattr(bindings, "get_native_bridge", lambda: native)
+    binding: Final = bindings.NativeBinding("route", validate=lambda item: item if isinstance(item, int) else None)
 
     assert binding.load() == expected
 
@@ -74,33 +72,28 @@ ROUTE_BINDINGS: Final = tuple((attribute, binding) for attribute, binding, _ in 
 @pytest.mark.parametrize(
     ("attribute", "route_binding"), ROUTE_BINDINGS, ids=[attribute for attribute, _ in ROUTE_BINDINGS]
 )
-def test_route_bindings_resolve_the_packaged_native_route(
-    attribute: str, route_binding: bindings.NativeBinding[object]
-) -> None:
-    route_binding.reset()
-    assert attribute in dir(_native)
-    assert callable(route_binding.load())
-
-
-@pytest.mark.parametrize(
-    ("attribute", "route_binding"), ROUTE_BINDINGS, ids=[attribute for attribute, _ in ROUTE_BINDINGS]
-)
 def test_route_bindings_reject_non_callable_native_attributes(
-    attribute: str, route_binding: bindings.NativeBinding[object]
+    monkeypatch: pytest.MonkeyPatch, attribute: str, route_binding: bindings.NativeBinding[object]
 ) -> None:
-    assert route_binding.with_source(SimpleNamespace(**{attribute: "not callable"})).load() is None
+    monkeypatch.setattr(bindings, "get_native_bridge", lambda: SimpleNamespace(**{attribute: "not callable"}))
+    route_binding.reset()
+    assert route_binding.load() is None
+    route_binding.reset()
 
 
 @pytest.mark.parametrize(
     ("attribute", "route_binding"), TRANSCRIPTION_BINDINGS, ids=[attribute for attribute, _ in TRANSCRIPTION_BINDINGS]
 )
 def test_transcription_bindings_expose_the_native_callable_itself(
-    attribute: str, route_binding: bindings.NativeBinding[object]
+    monkeypatch: pytest.MonkeyPatch, attribute: str, route_binding: bindings.NativeBinding[object]
 ) -> None:
     def native_route() -> None:
         pass
 
-    assert route_binding.with_source(SimpleNamespace(**{attribute: native_route})).load() is native_route
+    monkeypatch.setattr(bindings, "get_native_bridge", lambda: SimpleNamespace(**{attribute: native_route}))
+    route_binding.reset()
+    assert route_binding.load() is native_route
+    route_binding.reset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +116,7 @@ class _EchoingExecution:
     ids=[attribute for attribute, _, _ in EXECUTION_BINDINGS],
 )
 def test_execution_bindings_start_the_native_execution_and_return_its_result(
+    monkeypatch: pytest.MonkeyPatch,
     attribute: str,
     route_binding: bindings.NativeBinding[object],
     asynchronous: bool,
@@ -134,7 +128,9 @@ def test_execution_bindings_start_the_native_execution_and_return_its_result(
         received.append(incoming)
         return _EchoingExecution()
 
-    bound: Final = route_binding.with_source(SimpleNamespace(**{attribute: native_route})).load()
+    monkeypatch.setattr(bindings, "get_native_bridge", lambda: SimpleNamespace(**{attribute: native_route}))
+    route_binding.reset()
+    bound: Final = route_binding.load()
     assert callable(bound)
 
     outcome: Final = bound(call)
@@ -143,6 +139,7 @@ def test_execution_bindings_start_the_native_execution_and_return_its_result(
         if asynchronous
         else outcome
     )
+    route_binding.reset()
 
     assert received == [call]
     assert result == ("completed with", None)

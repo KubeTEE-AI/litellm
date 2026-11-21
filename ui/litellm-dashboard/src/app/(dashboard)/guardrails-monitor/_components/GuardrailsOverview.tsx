@@ -1,7 +1,6 @@
 import type { ColumnDef, OnChangeFn, SortingState } from "@tanstack/react-table";
 import { CircleDollarSign, Download, HeartPulse, Settings, TrendingUp, TriangleAlert } from "lucide-react";
 import React, { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { DataTable, DataTableSortHeader } from "@/components/shared/DataTable";
 import { MoneyCell } from "@/components/shared/table_cells/money_cell";
 import { CellTooltip } from "@/components/shared/table_cells/cell_tooltip";
@@ -81,32 +80,29 @@ function TotalCostMath({
   total: number | null;
   untracked: UsageUnits;
 }) {
-  const { t } = useTranslation();
   return (
-    <CalcPopover
-      title={t("guardrailsMonitor.overview.costMath.title")}
-      formula={t("guardrailsMonitor.overview.costMath.formula")}
-    >
+    <CalcPopover title="How this cost is calculated" formula="guardrail + guardrail + … = guardrail cost">
       <MathTable
         rows={rows
           .filter((row) => row.cost != null)
           .map((row) => ({ label: row.name, parts: [formatCost(row.cost)], note: null }))}
         total={formatCost(total)}
       />
-      <p className="text-xs text-muted-foreground">{t("guardrailsMonitor.overview.costMath.explanation")}</p>
+      <p className="text-xs text-muted-foreground">
+        {`Each guardrail's cost is its units per counter × that counter's per-unit price from the cost map. Open a guardrail for its per-counter math.`}
+      </p>
       <UnpricedNote unpriced={untracked} />
     </CalcPopover>
   );
 }
 
 function CostCell({ row }: { row: GuardrailUsageOverviewRow }) {
-  const { t } = useTranslation();
-  const unpriced = unpricedSummary(row.untrackedUsageUnits, t);
+  const unpriced = unpricedSummary(row.untrackedUsageUnits);
   return (
     <span className="inline-flex w-full items-center justify-end gap-1">
       {unpriced && (
         <CellTooltip
-          content={t("guardrailsMonitor.overview.unpricedTooltip", { summary: unpriced })}
+          content={`${unpriced}: these units have no known price and are left out of the cost`}
           trigger={<TriangleAlert aria-label={unpriced} className="size-3.5 shrink-0 text-warning" />}
         />
       )}
@@ -122,7 +118,6 @@ export function GuardrailsOverview({
   onSelectGuardrail,
   dateRangeControl,
 }: GuardrailsOverviewProps) {
-  const { t } = useTranslation();
   const [sortBy, setSortBy] = useState<SortKey>("failRate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [evaluationModalOpen, setEvaluationModalOpen] = useState(false);
@@ -163,7 +158,7 @@ export function GuardrailsOverview({
 
   const columns: ColumnDef<GuardrailUsageOverviewRow>[] = [
     {
-      header: t("guardrailsMonitor.overview.columns.status"),
+      header: "Status",
       accessorKey: "status",
       enableSorting: false,
       cell: ({ row }) => (
@@ -182,7 +177,7 @@ export function GuardrailsOverview({
       ),
     },
     {
-      header: t("guardrailsMonitor.overview.columns.guardrail"),
+      header: "Guardrail",
       accessorKey: "name",
       enableSorting: false,
       cell: ({ row }) => (
@@ -196,7 +191,7 @@ export function GuardrailsOverview({
       ),
     },
     {
-      header: t("guardrailsMonitor.overview.columns.provider"),
+      header: "Provider",
       accessorKey: "provider",
       enableSorting: false,
       cell: ({ row }) => (
@@ -210,18 +205,14 @@ export function GuardrailsOverview({
       ),
     },
     {
-      header: ({ column }) => (
-        <DataTableSortHeader column={column} title={t("guardrailsMonitor.overview.columns.requests")} />
-      ),
+      header: ({ column }) => <DataTableSortHeader column={column} title="Requests" />,
       accessorKey: "requestsEvaluated",
       meta: { numeric: true },
       sortDescFirst: false,
       cell: ({ row }) => row.original.requestsEvaluated.toLocaleString(),
     },
     {
-      header: ({ column }) => (
-        <DataTableSortHeader column={column} title={t("guardrailsMonitor.overview.columns.failRate")} />
-      ),
+      header: ({ column }) => <DataTableSortHeader column={column} title="Fail Rate" />,
       accessorKey: "failRate",
       meta: { numeric: true },
       sortDescFirst: false,
@@ -242,9 +233,7 @@ export function GuardrailsOverview({
       ),
     },
     {
-      header: ({ column }) => (
-        <DataTableSortHeader column={column} title={t("guardrailsMonitor.overview.columns.avgLatency")} />
-      ),
+      header: ({ column }) => <DataTableSortHeader column={column} title="Avg. latency added" />,
       accessorKey: "avgLatency",
       meta: { numeric: true },
       sortDescFirst: false,
@@ -260,23 +249,19 @@ export function GuardrailsOverview({
                   : "text-success"
           }
         >
-          {row.original.avgLatency != null
-            ? t("guardrailsMonitor.overview.columns.latencyValue", { value: row.original.avgLatency })
-            : "—"}
+          {row.original.avgLatency != null ? `${row.original.avgLatency}ms` : "—"}
         </span>
       ),
     },
     {
-      header: t("guardrailsMonitor.overview.columns.usageUnits"),
+      header: "Usage Units",
       accessorKey: "usageUnits",
       enableSorting: false,
       meta: { numeric: true },
       cell: ({ row }) => <UsageUnitsCell units={row.original.usageUnits} />,
     },
     {
-      header: ({ column }) => (
-        <DataTableSortHeader column={column} title={t("guardrailsMonitor.overview.columns.cost")} />
-      ),
+      header: ({ column }) => <DataTableSortHeader column={column} title="Cost" />,
       accessorKey: "cost",
       meta: { numeric: true },
       sortDescFirst: false,
@@ -300,51 +285,48 @@ export function GuardrailsOverview({
       <PageHeader>
         <PageHeaderTitle>
           <HeartPulse />
-          {t("guardrailsMonitor.overview.title")}
+          Guardrails Monitor
         </PageHeaderTitle>
-        <PageHeaderDescription>{t("guardrailsMonitor.overview.description")}</PageHeaderDescription>
+        <PageHeaderDescription>Monitor guardrail performance across all requests</PageHeaderDescription>
         <PageHeaderControls className="justify-end">
           {dateRangeControl}
-          <Button variant="outline" title={t("guardrailsMonitor.overview.export.comingSoon")}>
+          <Button variant="outline" title="Coming soon">
             <Download className="size-4" />
-            {t("guardrailsMonitor.overview.export.label")}
+            Export Data
           </Button>
         </PageHeaderControls>
       </PageHeader>
 
       <div className="mt-6 mb-6 grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-4">
+        <MetricCard label="Total Evaluations" value={metrics.totalRequests.toLocaleString()} />
         <MetricCard
-          label={t("guardrailsMonitor.overview.metrics.totalEvaluations")}
-          value={metrics.totalRequests.toLocaleString()}
-        />
-        <MetricCard
-          label={t("guardrailsMonitor.overview.metrics.blockedRequests")}
+          label="Blocked Requests"
           value={metrics.totalBlocked.toLocaleString()}
           valueColor="text-destructive"
           icon={<TriangleAlert className="size-4 text-destructive" />}
         />
         <MetricCard
-          label={t("guardrailsMonitor.overview.metrics.passRate")}
+          label="Pass Rate"
           value={`${metrics.passRate}%`}
           valueColor="text-success"
           icon={<TrendingUp className="size-4 text-success" />}
         />
         <MetricCard
-          label={t("guardrailsMonitor.overview.metrics.avgLatency")}
-          value={t("guardrailsMonitor.overview.metrics.latencyValue", { value: metrics.avgLatency })}
+          label="Avg. latency added"
+          value={`${metrics.avgLatency}ms`}
           valueColor={
             metrics.avgLatency > 150 ? "text-destructive" : metrics.avgLatency > 50 ? "text-warning" : "text-success"
           }
         />
         <MetricCard
-          label={t("guardrailsMonitor.overview.metrics.guardrailCost")}
+          label="Guardrail Cost"
           value={formatCost(metrics.totalCost)}
           valueColor={metrics.totalCost != null ? "text-foreground" : "text-muted-foreground"}
           icon={<CircleDollarSign className="size-4" />}
-          subtitle={unpricedSummary(metrics.untracked, t) ?? undefined}
+          subtitle={unpricedSummary(metrics.untracked) ?? undefined}
           hint={<TotalCostMath rows={activeData} total={metrics.totalCost} untracked={metrics.untracked} />}
         />
-        <MetricCard label={t("guardrailsMonitor.overview.metrics.activeGuardrails")} value={metrics.count} />
+        <MetricCard label="Active Guardrails" value={metrics.count} />
       </div>
 
       <div className="mb-6">
@@ -355,16 +337,11 @@ export function GuardrailsOverview({
         {(isLoading || error) && (
           <div className="mb-2 flex items-center gap-2">
             {isLoading && (
-              <span
-                role="status"
-                aria-busy="true"
-                aria-label={t("guardrailsMonitor.overview.loading")}
-                className="inline-flex"
-              >
+              <span role="status" aria-busy="true" aria-label="Loading" className="inline-flex">
                 <UiLoadingSpinner className="size-4 text-primary" />
               </span>
             )}
-            {error && <span className="text-sm text-destructive">{t("guardrailsMonitor.overview.loadFailed")}</span>}
+            {error && <span className="text-sm text-destructive">Failed to load data. Try again.</span>}
           </div>
         )}
         <DataTable
@@ -372,7 +349,7 @@ export function GuardrailsOverview({
           data={sorted}
           getRowId={(row) => row.id}
           isLoading={isLoading}
-          noDataMessage={t("guardrailsMonitor.overview.empty")}
+          noDataMessage="No data for this period"
           onRowClick={(row) => onSelectGuardrail(row.id)}
           rowClassName={() => "cursor-pointer"}
           sortingMode="server"
@@ -383,11 +360,9 @@ export function GuardrailsOverview({
           toolbar={() => (
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h5 className="mb-0 text-base font-semibold text-foreground">
-                  {t("guardrailsMonitor.overview.table.title")}
-                </h5>
+                <h5 className="mb-0 text-base font-semibold text-foreground">Guardrail Performance</h5>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {t("guardrailsMonitor.overview.table.description")}
+                  Click a guardrail to view details, logs, and configuration
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -395,7 +370,7 @@ export function GuardrailsOverview({
                   variant="outline"
                   size="icon"
                   onClick={() => setEvaluationModalOpen(true)}
-                  title={t("guardrailsMonitor.overview.table.evaluationSettings")}
+                  title="Evaluation settings"
                 >
                   <Settings className="size-4" />
                 </Button>

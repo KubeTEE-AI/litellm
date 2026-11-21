@@ -1,10 +1,9 @@
 import asyncio
 import time
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final
 
 import httpx
-from pydantic import TypeAdapter
 from typing_extensions import ReadOnly, TypedDict
 
 from litellm._logging import verbose_logger
@@ -12,8 +11,6 @@ from litellm.constants import (
     RUNWAYML_DEFAULT_API_VERSION,
     RUNWAYML_POLLING_TIMEOUT,
 )
-from litellm.litellm_core_utils.core_helpers import decoded_json_object
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.image_generation.transformation import (
     BaseImageGenerationConfig,
 )
@@ -38,25 +35,9 @@ class _RunwayMLTask(TypedDict, total=False):
 
     id: ReadOnly[str]
     status: ReadOnly[str]
-    output: ReadOnly[Sequence[str | Mapping[str, str | None]] | None]
-    failure: ReadOnly[str | None]
-    failureCode: ReadOnly[str | None]
-
-
-_JSON_VALUE: Final = TypeAdapter(object)
-
-
-def _decoded_json(response: httpx.Response) -> object:
-    return _JSON_VALUE.validate_python(response.json())
-
-
-def _runway_task(decoded: object) -> _RunwayMLTask:
-    task: Final = decoded_json_object(decoded)
-    return cast(_RunwayMLTask, task)  # cast-ok: the payload passes through unvalidated, as before it was typed
-
-
-def _parse_runway_task(response: httpx.Response) -> _RunwayMLTask:
-    return _runway_task(_decoded_json(response))
+    output: ReadOnly[Sequence[str | Mapping[str, str]]]
+    failure: ReadOnly[str]
+    failureCode: ReadOnly[str]
 
 
 class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
@@ -81,8 +62,12 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
 
         Some providers need `model` in `api_base`
         """
-        base_url: Final = api_base or get_secret_str("RUNWAYML_API_BASE") or self.DEFAULT_BASE_URL
-        return join_api_base(base_url, self.IMAGE_GENERATION_ENDPOINT)
+        complete_url: str = api_base or get_secret_str("RUNWAYML_API_BASE") or self.DEFAULT_BASE_URL
+
+        complete_url = complete_url.rstrip("/")
+        if self.IMAGE_GENERATION_ENDPOINT:
+            complete_url = f"{complete_url}/{self.IMAGE_GENERATION_ENDPOINT}"
+        return complete_url
 
     def validate_environment(
         self,
@@ -241,7 +226,8 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         start_time: Final = time.time()
 
         # Build task status URL
-        task_url: Final = join_api_base(api_base, f"v1/tasks/{task_id}")
+        api_base = api_base.rstrip("/")
+        task_url: Final = f"{api_base}/v1/tasks/{task_id}"
 
         verbose_logger.debug("Polling RunwayML task: %s", task_url)
 
@@ -252,7 +238,7 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
             response = client.get(url=task_url, headers=headers)
             response.raise_for_status()
 
-            response_data: _RunwayMLTask = _parse_runway_task(response)
+            response_data: _RunwayMLTask = response.json()
 
             # Check task status
             status = self._check_task_status(response_data=response_data)
@@ -289,7 +275,8 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         start_time: Final = time.time()
 
         # Build task status URL
-        task_url: Final = join_api_base(api_base, f"v1/tasks/{task_id}")
+        api_base = api_base.rstrip("/")
+        task_url: Final = f"{api_base}/v1/tasks/{task_id}"
 
         verbose_logger.debug("Polling RunwayML task (async): %s", task_url)
 
@@ -300,7 +287,7 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
             response = await client.get(url=task_url, headers=headers)
             response.raise_for_status()
 
-            response_data: _RunwayMLTask = _parse_runway_task(response)
+            response_data: _RunwayMLTask = response.json()
 
             # Check task status
             status = self._check_task_status(response_data=response_data)
@@ -346,14 +333,13 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         }
         """
         try:
-            decoded: Final = _decoded_json(raw_response)
+            response_data: _RunwayMLTask = raw_response.json()
         except Exception as e:
             raise self.get_error_class(
                 error_message=f"Error transforming image generation response: {e}",
                 status_code=raw_response.status_code,
                 headers=raw_response.headers,
             )
-        response_data: _RunwayMLTask = _runway_task(decoded)
 
         verbose_logger.debug("RunwayML starting polling...")
 
@@ -377,7 +363,7 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         )
 
         # Update response_data with polled result
-        response_data = _parse_runway_task(raw_response)
+        response_data = raw_response.json()
 
         verbose_logger.debug("RunwayML polling complete, transforming to OpenAI format")
 
@@ -407,14 +393,13 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         We need to poll the task until it completes (status SUCCEEDED) using async polling.
         """
         try:
-            decoded: Final = _decoded_json(raw_response)
+            response_data: _RunwayMLTask = raw_response.json()
         except Exception as e:
             raise self.get_error_class(
                 error_message=f"Error transforming image generation response: {e}",
                 status_code=raw_response.status_code,
                 headers=raw_response.headers,
             )
-        response_data: _RunwayMLTask = _runway_task(decoded)
 
         verbose_logger.debug("RunwayML starting polling (async)...")
 
@@ -438,7 +423,7 @@ class RunwayMLImageGenerationConfig(BaseImageGenerationConfig):
         )
 
         # Update response_data with polled result
-        response_data = _parse_runway_task(raw_response)
+        response_data = raw_response.json()
 
         verbose_logger.debug("RunwayML polling complete (async), transforming to OpenAI format")
 

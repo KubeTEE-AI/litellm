@@ -1,6 +1,5 @@
 import React from "react";
 import { ArrowRight, Info } from "lucide-react";
-import { Trans, useTranslation } from "react-i18next";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -20,7 +19,6 @@ const Endpoint = ({ label, children }: { label: string; children: React.ReactNod
 );
 
 const RoutePreview: React.FC<RoutePreviewProps> = ({ pathValue, targetValue, includeSubpath }) => {
-  const { t } = useTranslation();
   const proxyBaseUrl = getProxyBaseUrl();
 
   if (!pathValue || !targetValue) {
@@ -30,48 +28,45 @@ const RoutePreview: React.FC<RoutePreviewProps> = ({ pathValue, targetValue, inc
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">{t("routePreview.title")}</CardTitle>
-        <CardDescription>{t("routePreview.description")}</CardDescription>
+        <CardTitle className="text-lg">Route Preview</CardTitle>
+        <CardDescription>How your requests will be routed</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         <div>
-          <h4 className="mb-3 text-base font-semibold">{t("routePreview.basicRouting")}</h4>
+          <h4 className="mb-3 text-base font-semibold">Basic routing:</h4>
           <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center">
-            <Endpoint label={t("routePreview.yourEndpoint")}>{`${proxyBaseUrl}${pathValue}`}</Endpoint>
+            <Endpoint label="Your endpoint">{`${proxyBaseUrl}${pathValue}`}</Endpoint>
             <ArrowRight className="size-5 shrink-0 self-center text-muted-foreground max-sm:rotate-90" />
-            <Endpoint label={t("routePreview.forwardsTo")}>{targetValue}</Endpoint>
+            <Endpoint label="Forwards to">{targetValue}</Endpoint>
           </div>
         </div>
 
         {includeSubpath ? (
           <div>
-            <h4 className="mb-3 text-base font-semibold">{t("routePreview.withSubpaths")}</h4>
+            <h4 className="mb-3 text-base font-semibold">With subpaths:</h4>
             <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center">
-              <Endpoint label={t("routePreview.yourEndpointWithSubpath")}>
+              <Endpoint label="Your endpoint + subpath">
                 {`${proxyBaseUrl}${pathValue}`}
                 <span className="text-primary">/v1/text-to-image/base/model</span>
               </Endpoint>
               <ArrowRight className="size-5 shrink-0 self-center text-muted-foreground max-sm:rotate-90" />
-              <Endpoint label={t("routePreview.forwardsTo")}>
+              <Endpoint label="Forwards to">
                 {targetValue}
                 <span className="text-primary">/v1/text-to-image/base/model</span>
               </Endpoint>
             </div>
             <p className="mt-3 text-sm text-muted-foreground">
-              {t("routePreview.subpathAppended", { path: pathValue })}
+              Any path after {pathValue} will be appended to the target URL
             </p>
           </div>
         ) : (
           <div className="flex items-start gap-2 rounded-md border border-primary/20 bg-primary/5 p-3 text-sm">
             <Info className="mt-0.5 size-4 shrink-0 text-primary" />
             <p>
-              <Trans
-                i18nKey="routePreview.subpathHint"
-                components={{
-                  lead: <span className="font-medium" />,
-                  code: <code className="rounded-sm bg-primary/10 px-1 py-0.5 font-mono text-xs" />,
-                }}
-              />
+              <span className="font-medium">Not seeing the routing you wanted?</span> Try enabling - Include Subpaths -
+              above - this allows subroutes like{" "}
+              <code className="rounded-sm bg-primary/10 px-1 py-0.5 font-mono text-xs">/api/v1/models</code> to be
+              forwarded automatically.
             </p>
           </div>
         )}

@@ -1,4 +1,3 @@
-import i18n from "@/i18n/i18n";
 import { modelAvailableCall } from "../networking";
 
 export const fetchAvailableModelsForTeamOrKey = async (
@@ -44,11 +43,11 @@ export const hasAllModelsSentinel = (models: string[]): boolean =>
 
 export const getModelDisplayName = (model: string) => {
   if (model === "all-proxy-models") {
-    return i18n.t("keyTeamHelpers.fetchAvailableModelsTeamKey.allProxyModels");
+    return "All Proxy Models";
   }
   if (model.endsWith("/*")) {
     const provider = model.replace("/*", "");
-    return i18n.t("keyTeamHelpers.fetchAvailableModelsTeamKey.allProviderModels", { provider });
+    return `All ${provider} models`;
   }
   return model;
 };

@@ -1,15 +1,14 @@
 # What is this?
 ## Helper utils for the management endpoints (keys/users/teams)
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from collections.abc import Set as AbstractSet
 from datetime import datetime
 from functools import wraps
 from types import MappingProxyType
-from typing import Any, Final, ParamSpec, Protocol, TypeVar
+from typing import Any, Final, Protocol
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, TypeAdapter
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import litellm
 from litellm._internal_context import with_service_target
@@ -217,7 +216,7 @@ async def handle_budget_for_entity(
     )
 
     # Get all budget field names
-    budget_params: Final = LiteLLM_BudgetTable.model_fields.keys() - {"budget_id"}
+    budget_params: Final = LiteLLM_BudgetTable.model_fields.keys()
 
     # Extract budget fields from data
     _json_data: Final = _BUDGET_DATA_MAPPING.validate_python(
@@ -361,8 +360,6 @@ async def _resolve_member_budget_id(
     changes reach them; ``/team/member_update`` clones that row on first write.
     A lone ``budget_duration`` clones the default with the reset window
     overridden, or creates a window-only budget when there is no team default.
-    ``allowed_models`` with no cap creates a budget that takes the default's reset
-    window and leaves the cap to the default.
     With nothing set the member gets no budget, though ``add_new_member`` still writes its membership row.
     """
     has_explicit_limit: Final = max_budget_in_team is not None or allowed_models is not None
@@ -394,32 +391,12 @@ async def _resolve_member_budget_id(
         budget_data["max_budget"] = max_budget_in_team
     if allowed_models is not None:
         budget_data["allowed_models"] = allowed_models
-    member_budget_duration: Final = budget_duration or (
-        await _team_default_budget_duration(prisma_client, default_team_budget_id, tx)
-        if max_budget_in_team is None and default_team_budget_id is not None
-        else None
-    )
-    if member_budget_duration is not None:
-        budget_data["budget_duration"] = member_budget_duration
-        budget_data["budget_reset_at"] = get_budget_reset_time(budget_duration=member_budget_duration)
+    if budget_duration is not None:
+        budget_data["budget_duration"] = budget_duration
+        budget_data["budget_reset_at"] = get_budget_reset_time(budget_duration=budget_duration)
     budget_table: Final[_PrismaBudgetTable] = _budget_table(prisma_client, tx)
     response: Final = await budget_table.create(data=budget_data)
     return response.budget_id
-
-
-async def _team_default_budget_duration(
-    prisma_client: PrismaClient, default_team_budget_id: str, tx: MemberWriteTx | None
-) -> str | None:
-    """The reset period a member with models of their own and no cap of their own must carry.
-
-    Their cap is read from the team default at auth time, but spend is only reset for a
-    member whose own budget row has a reset date.
-    """
-    default_budget: Final = await _budget_table(prisma_client, tx).find_unique(
-        where={"budget_id": default_team_budget_id}
-    )
-    duration: Final = default_budget.model_dump().get("budget_duration") if default_budget is not None else None
-    return duration if isinstance(duration, str) and duration else None
 
 
 async def _append_team_id_if_absent(
@@ -710,7 +687,6 @@ async def _emit_management_endpoint_otel_span(
     end_time: datetime,
     result: Any = None,
     exception: Exception | None = None,
-    log_payload: bool = True,
 ) -> None:
     """Stamp + end the parent OTEL SERVER span for a management endpoint.
 
@@ -740,8 +716,8 @@ async def _emit_management_endpoint_otel_span(
         )
 
         route = get_request_route(http_request)
-        request_body: dict = (  # rebind-ok: pre-existing rebinding on a rename-only line
-            await read_request_body(request=http_request) if log_payload else {}
+        request_body: dict = await read_request_body(  # rebind-ok: pre-existing rebinding on a rename-only line
+            request=http_request
         )
     else:
         route = func.__name__
@@ -762,7 +738,7 @@ async def _emit_management_endpoint_otel_span(
     )
 
     _response: dict[str, object] | None = None
-    if log_payload and exception is None and result is not None:
+    if exception is None and result is not None:
         try:
             raw: Final[Mapping[str, object]] = dict(result)
             _response = {k: v for k, v in raw.items() if k not in _CREDENTIAL_FIELDS}
@@ -791,60 +767,37 @@ async def _emit_management_endpoint_otel_span(
         )
 
 
-_P: Final = ParamSpec("_P")
-_R: Final = TypeVar("_R")
-
-
-def management_endpoint_wrapper(func: Callable[_P, Awaitable[_R]]) -> Callable[_P, Awaitable[_R]]:
+def management_endpoint_wrapper(func):
     """
     This wrapper does the following:
 
     1. Log I/O, Exceptions to OTEL
     2. Create an Audit log for success calls
     """
-    return _wrap_management_endpoint(func, log_payload=True)
 
-
-def management_endpoint_span_wrapper(func: Callable[_P, Awaitable[_R]]) -> Callable[_P, Awaitable[_R]]:
-    return _wrap_management_endpoint(func, log_payload=False)
-
-
-def _caller_auth(endpoint_kwargs: Mapping[str, object]) -> UserAPIKeyAuth:
-    caller: Final = endpoint_kwargs.get("user_api_key_dict")
-    return caller if isinstance(caller, UserAPIKeyAuth) else UserAPIKeyAuth()
-
-
-def _proxy_exception_handler_ends_server_span(exception: Exception) -> bool:
-    return not isinstance(exception, StarletteHTTPException)
-
-
-def _wrap_management_endpoint(
-    endpoint: Callable[_P, Awaitable[_R]], *, log_payload: bool
-) -> Callable[_P, Awaitable[_R]]:
-    @wraps(endpoint)
-    async def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
         start_time: Final = datetime.now()
         try:
-            result: Final = await endpoint(*args, **kwargs)
+            result: Final = await func(*args, **kwargs)
             end_time = datetime.now()
             try:
-                user_api_key_dict: UserAPIKeyAuth = _caller_auth(kwargs)
+                user_api_key_dict: UserAPIKeyAuth = kwargs.get("user_api_key_dict") or UserAPIKeyAuth()
 
                 await send_management_endpoint_alert(
                     request_kwargs=kwargs,
                     user_api_key_dict=user_api_key_dict,
-                    function_name=endpoint.__name__,
+                    function_name=func.__name__,
                 )
                 parent_otel_span: Span | None = getattr(user_api_key_dict, "parent_otel_span", None)
                 if parent_otel_span is not None:
                     await _emit_management_endpoint_otel_span(
-                        func=endpoint,
+                        func=func,
                         kwargs=kwargs,
                         parent_otel_span=parent_otel_span,
                         start_time=start_time,
                         end_time=end_time,
                         result=result,
-                        log_payload=log_payload,
                     )
 
                 # Delete updated/deleted info from cache
@@ -860,18 +813,17 @@ def _wrap_management_endpoint(
         except Exception as e:
             end_time = datetime.now()
 
-            user_api_key_dict: UserAPIKeyAuth = _caller_auth(kwargs)
+            user_api_key_dict: UserAPIKeyAuth = kwargs.get("user_api_key_dict") or UserAPIKeyAuth()
             parent_otel_span = getattr(user_api_key_dict, "parent_otel_span", None)
-            if parent_otel_span is not None and (log_payload or not _proxy_exception_handler_ends_server_span(e)):
+            if parent_otel_span is not None:
                 try:
                     await _emit_management_endpoint_otel_span(
-                        func=endpoint,
+                        func=func,
                         kwargs=kwargs,
                         parent_otel_span=parent_otel_span,
                         start_time=start_time,
                         end_time=end_time,
                         exception=e,
-                        log_payload=log_payload,
                     )
                 except Exception as otel_exc:
                     # Non-Blocking Exception - never let OTEL failures swallow

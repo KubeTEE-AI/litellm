@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Any, Final
 import httpx
 from pydantic import ConfigDict, TypeAdapter
 
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.image_generation.transformation import (
     BaseImageGenerationConfig,
 )
@@ -78,13 +77,16 @@ class CometAPIImageGenerationConfig(BaseImageGenerationConfig):
         """
         Get the complete url for the request
         """
-        base_url: Final = (
+        complete_url: str = (
             api_base
             or get_secret_str("COMETAPI_BASE_URL")
             or get_secret_str("COMETAPI_API_BASE")
             or self.DEFAULT_BASE_URL
         )
-        return join_api_base(base_url, self.IMAGE_GENERATION_ENDPOINT)
+
+        complete_url = complete_url.rstrip("/")
+        complete_url = f"{complete_url}/{self.IMAGE_GENERATION_ENDPOINT}"
+        return complete_url
 
     def validate_environment(
         self,

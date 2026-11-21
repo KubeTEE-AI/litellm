@@ -1,9 +1,7 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import type { TFunction } from "i18next";
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import { useTranslation } from "react-i18next";
 
 import { DataTableSortHeader } from "@/components/shared/DataTable";
 import { CellTooltip, DateCell, IdentityCell } from "@/components/shared/table_cells";
@@ -24,11 +22,10 @@ export const DYNAMIC_SPEND_TAG_DESCRIPTION =
 const isDynamicSpendTag = (tag: Tag) => tag.description === DYNAMIC_SPEND_TAG_DESCRIPTION;
 
 function TagNameCell({ tag, onSelectTag }: { tag: Tag; onSelectTag: (tagName: string) => void }) {
-  const { t } = useTranslation();
   if (isDynamicSpendTag(tag)) {
     return (
       <CellTooltip
-        content={t("tagManagement.table.dynamicTagHint")}
+        content="You cannot view the information of a dynamically generated spend tag"
         trigger={<span className="block max-w-60 truncate font-mono text-xs text-muted-foreground">{tag.name}</span>}
       />
     );
@@ -44,17 +41,16 @@ function TagNameCell({ tag, onSelectTag }: { tag: Tag; onSelectTag: (tagName: st
 }
 
 function TagModelsCell({ tag }: { tag: Tag }) {
-  const { t } = useTranslation();
   const models = tag.models ?? [];
   if (models.length === 0) {
-    return <Badge variant="secondary">{t("tagManagement.table.allModels")}</Badge>;
+    return <Badge variant="secondary">All Models</Badge>;
   }
   return (
     <div className="flex flex-wrap items-center gap-1">
       {models.map((modelId) => (
         <CellTooltip
           key={modelId}
-          content={t("tagManagement.table.modelId", { id: modelId })}
+          content={`ID: ${modelId}`}
           trigger={
             <Badge variant="outline" className="cursor-default">
               {tag.model_info?.[modelId] || modelId}
@@ -73,13 +69,12 @@ interface TagRowActionsProps {
 }
 
 function TagRowActions({ tag, onEdit, onDelete }: TagRowActionsProps) {
-  const { t } = useTranslation();
   const isDynamic = isDynamicSpendTag(tag);
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={t("tagManagement.table.actions.open")}
+        aria-label="Open tag actions"
         data-testid={`tag-actions-${tag.name}`}
         className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground")}
       >
@@ -89,21 +84,21 @@ function TagRowActions({ tag, onEdit, onDelete }: TagRowActionsProps) {
         <DropdownMenuItem
           disabled={isDynamic}
           data-testid="tag-action-edit"
-          title={isDynamic ? t("tagManagement.table.actions.editDisabled") : undefined}
+          title={isDynamic ? "Dynamically generated spend tags cannot be edited" : undefined}
           onClick={() => onEdit(tag)}
         >
           <Pencil />
-          {t("tagManagement.table.actions.edit")}
+          Edit
         </DropdownMenuItem>
         <DropdownMenuItem
           variant="destructive"
           disabled={isDynamic}
           data-testid="tag-action-delete"
-          title={isDynamic ? t("tagManagement.table.actions.deleteDisabled") : undefined}
+          title={isDynamic ? "Dynamically generated spend tags cannot be deleted" : undefined}
           onClick={() => onDelete(tag.name)}
         >
           <Trash2 />
-          {t("tagManagement.table.actions.delete")}
+          Delete
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -116,15 +111,12 @@ interface TagTableColumnsDeps {
   onDelete: (tagName: string) => void;
 }
 
-export const getTagTableColumns = (
-  { onSelectTag, onEdit, onDelete }: TagTableColumnsDeps,
-  t: TFunction,
-): ColumnDef<Tag>[] => [
+export const getTagTableColumns = ({ onSelectTag, onEdit, onDelete }: TagTableColumnsDeps): ColumnDef<Tag>[] => [
   {
     id: "name",
     accessorKey: "name",
-    meta: { title: t("tagManagement.table.columns.name") },
-    header: ({ column }) => <DataTableSortHeader column={column} title={t("tagManagement.table.columns.name")} />,
+    meta: { title: "Tag Name" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Tag Name" />,
     size: 260,
     enableSorting: true,
     filterFn: "includesString",
@@ -133,15 +125,15 @@ export const getTagTableColumns = (
   {
     id: "description",
     accessorKey: "description",
-    meta: { title: t("tagManagement.table.columns.description") },
-    header: t("tagManagement.table.columns.description"),
+    meta: { title: "Description" },
+    header: "Description",
     size: 300,
     enableSorting: false,
     filterFn: "includesString",
     cell: ({ row }) => {
       const description = row.original.description;
       return (
-        <span className="block max-w-72 truncate text-sm text-muted-foreground" title={description ?? undefined}>
+        <span className="block max-w-72 truncate text-sm text-muted-foreground" title={description}>
           {description || "-"}
         </span>
       );
@@ -149,8 +141,8 @@ export const getTagTableColumns = (
   },
   {
     id: "models",
-    meta: { title: t("tagManagement.table.columns.models"), skeleton: "chips" },
-    header: t("tagManagement.table.columns.models"),
+    meta: { title: "Allowed Models", skeleton: "chips" },
+    header: "Allowed Models",
     size: 240,
     enableSorting: false,
     cell: ({ row }) => <TagModelsCell tag={row.original} />,
@@ -159,8 +151,8 @@ export const getTagTableColumns = (
     id: "created_at",
     accessorKey: "created_at",
     sortingFn: "datetime",
-    meta: { title: t("tagManagement.table.columns.created") },
-    header: ({ column }) => <DataTableSortHeader column={column} title={t("tagManagement.table.columns.created")} />,
+    meta: { title: "Created" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Created" />,
     size: 150,
     enableSorting: true,
     cell: ({ row }) => <DateCell value={row.original.created_at} precision="date" />,
@@ -168,7 +160,7 @@ export const getTagTableColumns = (
   {
     id: "actions",
     meta: { className: "text-right", headerClassName: "text-right" },
-    header: () => <span className="sr-only">{t("tagManagement.table.columns.actions")}</span>,
+    header: () => <span className="sr-only">Actions</span>,
     size: 64,
     enableSorting: false,
     enableHiding: false,

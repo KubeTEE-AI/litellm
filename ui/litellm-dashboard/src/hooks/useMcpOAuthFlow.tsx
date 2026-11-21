@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import {
   buildMcpOAuthAuthorizeUrl,
@@ -83,7 +82,6 @@ export const useMcpOAuthFlow = ({
   onBeforeRedirect,
   flowSource,
 }: UseMcpOAuthFlowOptions): UseMcpOAuthFlowResult => {
-  const { t } = useTranslation();
   const [status, setStatus] = useState<McpOAuthStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [tokenResponse, setTokenResponse] = useState<Record<string, any> | null>(null);
@@ -157,14 +155,14 @@ export const useMcpOAuthFlow = ({
     const credentials = getCredentials() || {};
 
     if (!accessToken) {
-      setError(t("mcpServers.useMcpOAuthFlow.errors.missingAdminToken"));
-      toast.error(t("mcpServers.useMcpOAuthFlow.errors.accessTokenMissing"));
+      setError("Missing admin token");
+      toast.error("Access token missing. Please re-authenticate and try again.");
       return;
     }
 
     const temporaryPayload = getTemporaryPayload();
     if (!temporaryPayload || !temporaryPayload.url || !temporaryPayload.transport) {
-      const message = t("mcpServers.useMcpOAuthFlow.errors.incompleteServer");
+      const message = "Please complete server URL and transport before starting OAuth.";
       setError(message);
       toast.error(message);
       return;
@@ -252,7 +250,7 @@ export const useMcpOAuthFlow = ({
       setError(message);
       toast.error(message);
     }
-  }, [accessToken, getCredentials, getTemporaryPayload, onBeforeRedirect, t]);
+  }, [accessToken, getCredentials, getTemporaryPayload, onBeforeRedirect]);
 
   const resumeOAuthFlow = useCallback(async () => {
     if (typeof window === "undefined") {
@@ -290,9 +288,9 @@ export const useMcpOAuthFlow = ({
     } catch (err) {
       clearStoredFlow();
       processingRef.current = false;
-      setError(t("mcpServers.useMcpOAuthFlow.errors.resumeFailed"));
+      setError("Failed to resume OAuth flow. Please retry.");
       setStatus("error");
-      toast.error(t("mcpServers.useMcpOAuthFlow.errors.resumeFailed"));
+      toast.error("Failed to resume OAuth flow. Please retry.");
       return;
     }
 
@@ -362,7 +360,7 @@ export const useMcpOAuthFlow = ({
       setTokenResponse(token);
       setStatus("success");
       setError(null);
-      toast.success(t("mcpServers.useMcpOAuthFlow.toasts.tokenRetrieved"));
+      toast.success("OAuth token retrieved successfully");
     } catch (err) {
       if (resetVersion !== resetVersionRef.current) {
         return;
@@ -380,7 +378,7 @@ export const useMcpOAuthFlow = ({
         }, 1000);
       }
     }
-  }, [onTokenReceived, t]);
+  }, [onTokenReceived]);
 
   useEffect(() => {
     resumeOAuthFlow();

@@ -1,7 +1,6 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import type { TFunction } from "i18next";
 
 import { DataTableSortHeader } from "@/components/shared/DataTable";
 import { DateCell, IdCell, IdentityCell, MoneyCell } from "@/components/shared/table_cells";
@@ -30,12 +29,12 @@ function UserLinkCell({ userId }: { userId: string | null | undefined }) {
   );
 }
 
-export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyResponse>[] => [
+export const getDeletedKeysTableColumns = (): ColumnDef<DeletedKeyResponse>[] => [
   {
     id: "token",
     accessorKey: "token",
-    meta: { title: t("logs.deletedKeys.columns.keyId") },
-    header: t("logs.deletedKeys.columns.keyId"),
+    meta: { title: "Key ID" },
+    header: "Key ID",
     size: 150,
     enableSorting: false,
     cell: ({ row }) => <IdCell value={row.original.token} variant="plain" />,
@@ -43,8 +42,8 @@ export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyRe
   {
     id: "key_alias",
     accessorKey: "key_alias",
-    meta: { title: t("logs.deletedKeys.columns.keyAlias") },
-    header: t("logs.deletedKeys.columns.keyAlias"),
+    meta: { title: "Key Alias" },
+    header: "Key Alias",
     size: 150,
     enableSorting: false,
     cell: ({ row }) => {
@@ -62,8 +61,8 @@ export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyRe
   {
     id: "team_alias",
     accessorKey: "team_alias",
-    meta: { title: t("logs.deletedKeys.columns.teamAlias") },
-    header: t("logs.deletedKeys.columns.teamAlias"),
+    meta: { title: "Team Alias" },
+    header: "Team Alias",
     size: 120,
     enableSorting: false,
     cell: ({ row }) => <TruncatedTextCell value={row.original.team_alias} />,
@@ -71,8 +70,8 @@ export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyRe
   {
     id: "spend",
     accessorKey: "spend",
-    meta: { title: t("logs.deletedKeys.columns.spendUsd"), numeric: true },
-    header: ({ column }) => <DataTableSortHeader column={column} title={t("logs.deletedKeys.columns.spendUsd")} />,
+    meta: { title: "Spend (USD)", numeric: true },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Spend (USD)" />,
     size: 100,
     enableSorting: true,
     cell: ({ row }) => <MoneyCell value={row.original.spend} decimals={4} />,
@@ -80,24 +79,17 @@ export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyRe
   {
     id: "max_budget",
     accessorKey: "max_budget",
-    meta: { title: t("logs.deletedKeys.columns.budgetUsd"), numeric: true },
-    header: t("logs.deletedKeys.columns.budgetUsd"),
+    meta: { title: "Budget (USD)", numeric: true },
+    header: "Budget (USD)",
     size: 110,
     enableSorting: false,
-    cell: ({ row }) => (
-      <MoneyCell
-        value={row.original.max_budget}
-        decimals={0}
-        emptyText={t("logs.deletedKeys.columns.unlimited")}
-        showZero
-      />
-    ),
+    cell: ({ row }) => <MoneyCell value={row.original.max_budget} decimals={0} emptyText="Unlimited" showZero />,
   },
   {
     id: "user_email",
     accessorKey: "user_email",
-    meta: { title: t("logs.deletedKeys.columns.userEmail") },
-    header: t("logs.deletedKeys.columns.userEmail"),
+    meta: { title: "User Email" },
+    header: "User Email",
     size: 160,
     enableSorting: false,
     cell: ({ row }) => <TruncatedTextCell value={row.original.user_email} />,
@@ -105,8 +97,8 @@ export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyRe
   {
     id: "user_id",
     accessorKey: "user_id",
-    meta: { title: t("logs.deletedKeys.columns.userId") },
-    header: t("logs.deletedKeys.columns.userId"),
+    meta: { title: "User ID" },
+    header: "User ID",
     size: 120,
     enableSorting: false,
     cell: ({ row }) => <UserLinkCell userId={row.original.user_id} />,
@@ -114,8 +106,8 @@ export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyRe
   {
     id: "created_at",
     accessorKey: "created_at",
-    meta: { title: t("logs.deletedKeys.columns.createdAt") },
-    header: ({ column }) => <DataTableSortHeader column={column} title={t("logs.deletedKeys.columns.createdAt")} />,
+    meta: { title: "Created At" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Created At" />,
     size: 120,
     enableSorting: true,
     cell: ({ row }) => <DateCell value={row.original.created_at} precision="date" />,
@@ -123,8 +115,8 @@ export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyRe
   {
     id: "created_by",
     accessorKey: "created_by",
-    meta: { title: t("logs.deletedKeys.columns.createdBy") },
-    header: t("logs.deletedKeys.columns.createdBy"),
+    meta: { title: "Created By" },
+    header: "Created By",
     size: 120,
     enableSorting: false,
     cell: ({ row }) => <UserLinkCell userId={row.original.created_by} />,
@@ -132,8 +124,8 @@ export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyRe
   {
     id: "deleted_at",
     accessorKey: "deleted_at",
-    meta: { title: t("logs.deletedKeys.columns.deletedAt") },
-    header: ({ column }) => <DataTableSortHeader column={column} title={t("logs.deletedKeys.columns.deletedAt")} />,
+    meta: { title: "Deleted At" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Deleted At" />,
     size: 120,
     enableSorting: true,
     cell: ({ row }) => <DateCell value={row.original.deleted_at} precision="date" />,
@@ -141,8 +133,8 @@ export const getDeletedKeysTableColumns = (t: TFunction): ColumnDef<DeletedKeyRe
   {
     id: "deleted_by",
     accessorKey: "deleted_by",
-    meta: { title: t("logs.deletedKeys.columns.deletedBy") },
-    header: t("logs.deletedKeys.columns.deletedBy"),
+    meta: { title: "Deleted By" },
+    header: "Deleted By",
     size: 120,
     enableSorting: false,
     cell: ({ row }) => <UserLinkCell userId={row.original.deleted_by} />,

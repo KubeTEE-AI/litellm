@@ -4,7 +4,7 @@ use url::Url;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiUrlError {
-    #[error("invalid URL")]
+    #[error("invalid URL: {0}")]
     Parse(#[from] url::ParseError),
     #[error("URL cannot be used as a base")]
     CannotBeBase,

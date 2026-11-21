@@ -10,6 +10,7 @@ legacy internal names with `general_settings.use_team_public_model_name: false`.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Container, Mapping, Sequence
 from dataclasses import dataclass
 from functools import reduce
@@ -20,13 +21,15 @@ from typing import TYPE_CHECKING, Final, cast
 from pydantic import TypeAdapter, ValidationError
 
 import litellm
-from litellm.constants import CLAUDE_CODE_CLIENT, CLAUDE_CODE_PICKER_PATTERN, GATEWAY_CLIENT_HEADER
-from litellm.litellm_core_utils.routing_common_utils import resolve_model_group_alias
+from litellm.router_utils.common_utils import resolve_model_group_alias
 
 if TYPE_CHECKING:
     from litellm.router import Router
     from litellm.types.proxy.model_listing import ModelInfoResponse
 
+CLAUDE_CODE_PICKER_PATTERN: Final = re.compile(r"claude|anthropic", re.IGNORECASE)
+GATEWAY_CLIENT_HEADER: Final = "x-gateway-client"
+CLAUDE_CODE_CLIENT: Final = "claude-code"
 _CLAUDE_CODE_ALIAS_PREFIX: Final = "claude-router-"
 _ONE_MILLION_SUFFIX: Final = "[1m]"
 _ONE_MILLION_TOKENS: Final = 1_000_000
@@ -48,9 +51,8 @@ def configured_display_names(
     """
     if llm_router is None:
         return MappingProxyType({})
-    registry: Final = llm_router.registry()
     resolved: Final = (
-        (response_id, registry.group(lookup_id, field="display_name")) for response_id, lookup_id in entries
+        (response_id, llm_router.get_configured_display_name(lookup_id)) for response_id, lookup_id in entries
     )
     return MappingProxyType(
         {response_id: display_name for response_id, display_name in resolved if display_name is not None}
@@ -150,18 +152,17 @@ class ClaudeCodeRoutingNames:
             return True
         if self.llm_router is None:
             return False
-        registry: Final = self.llm_router.registry()
         return (
-            name in registry.aliases()  # pyright: ignore[reportUnknownMemberType]  # registry().aliases() is the untyped model_group_alias dict
-            or registry.has_deployment(name)
-            or bool(registry.names(name, kind="route_candidates", team_id=self.team_id))
+            name in self.llm_router.model_group_alias
+            or self.llm_router.has_model_id(name)
+            or bool(self.llm_router.get_candidate_model_ids_for_route(name, self.team_id))
         )
 
 
 @dataclass(frozen=True, slots=True)
 class CallerAliases:
-    """The caller's `team` and `key` alias maps, the names `/v1/models` lists for it, `router`,
-    its key's or team's `router_settings.model_group_alias`, and `team_id`, the key's team.
+    """The caller's `team` and `key` alias maps, the names `/v1/models` lists for it, and `router`,
+    its key's or team's `router_settings.model_group_alias`.
     `rewrite` are the maps `/chat/completions` rewrites its model through after auth's `router`
     rewrite, in the order it applies them: the team's, the key's in `add_litellm_data_to_request`,
     then the global `model_alias_map` and the key's again in `common_processing_pre_call_logic`,
@@ -170,7 +171,6 @@ class CallerAliases:
     team: object
     key: object
     router: object = None
-    team_id: str | None = None
 
     @property
     def own(self) -> tuple[object, ...]:
@@ -197,11 +197,10 @@ class DeployedModelGroups:
             return False
         if self.callback_kept is not None and name not in self.callback_kept:
             return False
-        registry: Final = self.llm_router.registry()
-        group: Final = registry.resolve(name)
+        group: Final = self.llm_router.routable_model_group(name)
         return group not in self.hidden and any(
-            registry.includes(deployment, team_id=self.team_id)
-            for deployment in registry.deployments(group, source="all")
+            self.llm_router.deployment_usable_by_team(deployment, self.team_id)
+            for deployment in self.llm_router.get_all_deployments(model_name=group)
         )
 
 
@@ -215,12 +214,12 @@ def caller_alias_maps(
     """Team aliases count only when listing the team the key authenticated as."""
     if listed_team_id is not None and listed_team_id != key_team_id:
         return CallerAliases(None, key_aliases, router_aliases)
-    return CallerAliases(team_aliases, key_aliases, router_aliases, key_team_id)
+    return CallerAliases(team_aliases, key_aliases, router_aliases)
 
 
 def alias_map(aliases: object) -> Mapping[str, str]:
     try:
-        entries: Final = _ALIAS_ENTRIES.validate_python(aliases)
+        entries: Final = _ALIAS_ENTRIES.validate_python(aliases, strict=True)
     except ValidationError:
         return _NO_ALIASES
     return MappingProxyType(
@@ -286,15 +285,6 @@ def _dispatch(model_id: str, layers: Sequence[_AliasLayer]) -> tuple[str, bool]:
     """The model `/chat/completions` sends `model_id` to, and whether auth checks the caller's
     access to that model instead of `model_id`."""
     return reduce(_through_layer, layers, (model_id, False))
-
-
-def dispatched_model(model_id: str, aliases: CallerAliases) -> str:
-    target, _ = _dispatch(model_id, _alias_layers(aliases))
-    return target
-
-
-def requestable_alias_names(aliases: CallerAliases) -> frozenset[str]:
-    return frozenset(chain.from_iterable(layer.aliases for layer in _alias_layers(aliases)))
 
 
 def _lookup_id(name: str, lookup_by_response: Mapping[str, str], lookup_ids: Container[str]) -> str | None:
@@ -436,7 +426,7 @@ class TeamModelNameTranslator:
         """
         if llm_router is None or not TeamModelNameTranslator._is_enabled(general_settings):
             return {}
-        router_model_list: Final = llm_router.registry().deployments()
+        router_model_list: Final = llm_router.get_model_list()
         if not isinstance(router_model_list, list):
             return {}
         return dict(

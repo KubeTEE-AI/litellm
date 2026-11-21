@@ -1,9 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { useTranslation } from "react-i18next";
 import BaseSSOSettingsForm, {
-  buildSSOSettingsPatch,
   emptySSOSettingsFormValues,
   submitMountedSSOValues,
   useSSOSettingsForm,
@@ -76,7 +74,6 @@ export const toSSOFormValues = (values: SSOSettingsValues): SSOSettingsFormValue
 };
 
 const EditSSOSettingsModal: React.FC<EditSSOSettingsModalProps> = ({ isVisible, onCancel, onSuccess }) => {
-  const { t } = useTranslation();
   const ssoSettings = useSSOSettings();
   const { mutateAsync, isPending } = useEditSSOSettings();
 
@@ -89,21 +86,19 @@ const EditSSOSettingsModal: React.FC<EditSSOSettingsModalProps> = ({ isVisible, 
 
   const handleFormSubmit = async (formValues: SSOSettingsFormValues) => {
     try {
-      const payload = buildSSOSettingsPatch(seededValues, formValues, "sso-settings", processSSOSettingsPayload);
+      const payload = processSSOSettingsPayload(formValues);
 
       await mutateAsync(payload, {
         onSuccess: () => {
-          toast.success(t("adminPanel.ssoSettings.editModal.toasts.success"));
+          toast.success("SSO settings updated successfully");
           onSuccess();
         },
         onError: (error) => {
-          toast.fromError(
-            t("adminPanel.ssoSettings.editModal.toasts.saveFailed", { error: String(parseErrorMessage(error)) }),
-          );
+          toast.fromError("Failed to save SSO settings: " + parseErrorMessage(error));
         },
       });
     } catch (error) {
-      toast.fromError(t("adminPanel.ssoSettings.editModal.toasts.processFailed", { error: parseErrorMessage(error) }));
+      toast.fromError("Failed to process SSO settings: " + parseErrorMessage(error));
     }
   };
 
@@ -116,13 +111,13 @@ const EditSSOSettingsModal: React.FC<EditSSOSettingsModalProps> = ({ isVisible, 
     <Dialog open={isVisible} onOpenChange={(open) => !open && handleCancel()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[800px]">
         <DialogHeader>
-          <DialogTitle>{t("adminPanel.ssoSettings.editModal.title")}</DialogTitle>
+          <DialogTitle>Edit SSO Settings</DialogTitle>
         </DialogHeader>
         <BaseSSOSettingsForm form={form} onFormSubmit={handleFormSubmit} />
         <DialogFooter>
           <div className="flex items-center justify-end gap-2">
             <Button type="button" variant="outline" onClick={handleCancel} disabled={isPending}>
-              {t("adminPanel.ssoSettings.editModal.cancel")}
+              Cancel
             </Button>
             <Button
               type="button"
@@ -130,7 +125,7 @@ const EditSSOSettingsModal: React.FC<EditSSOSettingsModalProps> = ({ isVisible, 
               onClick={submitMountedSSOValues(form, "sso-settings", handleFormSubmit)}
             >
               {isPending && <UiLoadingSpinner className="size-4 mr-1" />}
-              {isPending ? t("adminPanel.ssoSettings.editModal.saving") : t("adminPanel.ssoSettings.editModal.save")}
+              {isPending ? "Saving..." : "Save"}
             </Button>
           </div>
         </DialogFooter>

@@ -1,24 +1,13 @@
-import type { ParseKeys } from "i18next";
 import { Loader2 } from "lucide-react";
 import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/lib/toast";
 import ExportFormatSelector from "./ExportFormatSelector";
 import ExportSummary from "./ExportSummary";
 import ExportTypeSelector from "./ExportTypeSelector";
-import type { EntityType, EntityUsageExportModalProps, ExportFormat, ExportType } from "./types";
+import type { EntityUsageExportModalProps, ExportFormat, ExportType } from "./types";
 import { downloadBlob, exportFilename } from "./utils";
-
-const ENTITY_LABEL_KEYS: Record<EntityType, ParseKeys> = {
-  user: "usage.export.modal.entities.user",
-  team: "usage.export.modal.entities.team",
-  tag: "usage.export.modal.entities.tag",
-  organization: "usage.export.modal.entities.organization",
-  customer: "usage.export.modal.entities.customer",
-  agent: "usage.export.modal.entities.agent",
-};
 
 const EntityUsageExportModal: React.FC<EntityUsageExportModalProps> = ({
   isOpen,
@@ -29,24 +18,23 @@ const EntityUsageExportModal: React.FC<EntityUsageExportModalProps> = ({
   selectedFilters = [],
   customTitle,
 }) => {
-  const { t } = useTranslation();
   const [exportFormat, setExportFormat] = useState<ExportFormat>("csv");
   const [exportType, setExportType] = useState<ExportType>("daily");
   const [isExporting, setIsExporting] = useState(false);
 
-  const entityLabel = t(ENTITY_LABEL_KEYS[entityType]);
-  const modalTitle = customTitle || t("usage.export.modal.title", { entity: entityLabel });
+  const entityLabel = entityType.charAt(0).toUpperCase() + entityType.slice(1);
+  const modalTitle = customTitle || `Export ${entityLabel} Usage`;
 
   const handleExport = async () => {
     setIsExporting(true);
     try {
       const blob = await onExport(exportType, exportFormat);
       downloadBlob(blob, exportFilename(entityType, exportType, exportFormat, dateRange));
-      toast.success(t("usage.export.modal.success", { entity: entityLabel, format: exportFormat.toUpperCase() }));
+      toast.success(`${entityLabel} usage data exported successfully as ${exportFormat.toUpperCase()}`);
       onClose();
     } catch (error) {
       console.error("Error exporting data:", error);
-      toast.fromError(t("usage.export.modal.failed"));
+      toast.fromError("Failed to export data");
     } finally {
       setIsExporting(false);
     }
@@ -69,13 +57,11 @@ const EntityUsageExportModal: React.FC<EntityUsageExportModalProps> = ({
           <ExportFormatSelector value={exportFormat} onChange={setExportFormat} />
           <div className="flex items-center justify-end gap-2 pt-4 border-t">
             <Button variant="outline" onClick={onClose} disabled={isExporting}>
-              {t("usage.export.modal.cancel")}
+              Cancel
             </Button>
             <Button onClick={handleExport} disabled={isExporting}>
               {isExporting && <Loader2 className="animate-spin" />}
-              {isExporting
-                ? t("usage.export.modal.exporting")
-                : t("usage.export.modal.exportFormat", { format: exportFormat.toUpperCase() })}
+              {isExporting ? "Exporting..." : `Export ${exportFormat.toUpperCase()}`}
             </Button>
           </div>
         </div>

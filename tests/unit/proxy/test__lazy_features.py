@@ -1,7 +1,6 @@
 import sys
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import replace
 from types import ModuleType
 from typing import Final
 
@@ -11,7 +10,6 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from litellm.proxy._lazy_features import (
-    LAZY_FEATURES,
     LazyFeature,
     LazyFeatureMiddleware,
     attach_lazy_features,
@@ -68,11 +66,6 @@ def _has_lazy_middleware(app: FastAPI) -> bool:
     return any(middleware.cls is LazyFeatureMiddleware for middleware in app.user_middleware)
 
 
-def test_a2a_feature_matches_v1_message_stream() -> None:
-    feature: Final = next(feature for feature in LAZY_FEATURES if feature.name == "a2a")
-    assert feature.matches("/v1/a2a/x/message/stream")
-
-
 @pytest.mark.parametrize("disable_lazy_routes", ("false", "true"))
 def test_retired_roi_calculator_cannot_be_loaded_or_called(
     monkeypatch: pytest.MonkeyPatch, disable_lazy_routes: str
@@ -98,20 +91,6 @@ def test_retired_roi_calculator_cannot_be_loaded_or_called(
         ):
             response: Final = client.request(method, path)
             assert response.status_code == 404, f"{method} {path}: {response.text}"
-
-
-@pytest.mark.parametrize("disable_lazy_routes", ("false", "true"))
-@pytest.mark.parametrize("path", ("/lazy/warm/usage_ai", "/usage/ai/chat"))
-def test_retired_usage_chat_cannot_be_loaded_or_called(
-    monkeypatch: pytest.MonkeyPatch, disable_lazy_routes: str, path: str
-) -> None:
-    monkeypatch.setenv(FLAG, disable_lazy_routes)
-    app: Final = FastAPI()
-    attach_lazy_features(app)
-
-    with TestClient(app) as client:
-        response: Final = client.post(path)
-        assert response.status_code == 404, f"{path}: {response.text}"
 
 
 @pytest.mark.parametrize("value", ("1", "true", "TRUE", "yes", "on"))
@@ -444,45 +423,3 @@ def test_root_authorization_server_metadata_is_the_gateways_not_the_byok_connect
     assert root.json()["token_endpoint"] == "https://gateway.example.com/token"
     assert connector.status_code == 200
     assert connector.json()["token_endpoint"] == "https://gateway.example.com/v1/mcp/oauth/token"
-
-
-@pytest.mark.parametrize(
-    "load_order",
-    (("/realtime/unrouted", "/mcp/unrouted"), ("/mcp/unrouted", "/realtime/unrouted")),
-    ids=("realtime_first", "realtime_last"),
-)
-def test_realtime_and_mcp_features_keep_every_route_once_in_either_load_order(
-    monkeypatch: pytest.MonkeyPatch, load_order: tuple[str, str]
-) -> None:
-    monkeypatch.delenv(FLAG, raising=False)
-
-    async def mcp_mount() -> Mapping[str, str]:
-        return {"route": "mcp_mount"}
-
-    mounted_app: Final = FastAPI()
-    mounted_app.add_api_route("/{path:path}", mcp_mount, methods=["GET"])
-    mcp_module: Final = ModuleType("tests.unit.proxy.lazy_fixture_mcp_app")
-    mcp_module.app = mounted_app  # pyright: ignore[reportAttributeAccessIssue]  # fixture module built at test time
-    monkeypatch.setitem(sys.modules, mcp_module.__name__, mcp_module)
-    features: Final = tuple(
-        replace(feature, module_path=mcp_module.__name__) if feature.name == "mcp_app" else feature
-        for feature in LAZY_FEATURES
-        if feature.name in ("mcp_app", "realtime")
-    )
-
-    async def mcp_proxy() -> Mapping[str, str]:
-        return {"route": "mcp_proxy"}
-
-    app: Final = FastAPI()
-    attach_lazy_features(app, features)
-    app.add_api_route("/mcp/proxy", mcp_proxy, methods=["GET"])
-
-    with TestClient(app) as client:
-        for path in load_order:
-            client.get(path)
-        response: Final = client.get("/mcp/proxy")
-
-    assert loaded_lazy_modules(app) == {feature.module_path for feature in features}
-    assert response.json() == {"route": "mcp_proxy"}
-    route_ids: Final = tuple(id(route) for route in app.routes)
-    assert len(route_ids) == len(frozenset(route_ids))

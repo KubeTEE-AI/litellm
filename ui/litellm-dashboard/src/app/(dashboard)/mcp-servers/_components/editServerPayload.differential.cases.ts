@@ -82,7 +82,6 @@ const AUTH_TYPES = [
   "bearer_token",
   "token",
   "basic",
-  "authorization",
   "oauth2",
   "oauth2_token_exchange",
   "oauth2_id_jag",

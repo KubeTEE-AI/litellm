@@ -1,10 +1,8 @@
 "use client";
 import React from "react";
-import { useTranslation } from "react-i18next";
 import CodeBlock from "@/components/CodeBlock";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DocLink from "./DocLink";
-import { productNames } from "@/i18n/untranslated/productNames";
 
 interface ApiRefProps {
   proxySettings: {
@@ -14,7 +12,6 @@ interface ApiRefProps {
 }
 
 const APIReferenceView: React.FC<ApiRefProps> = ({ proxySettings }) => {
-  const { t } = useTranslation();
   let base_url = "<your_proxy_base_url>";
   const customDocBaseUrl = proxySettings?.LITELLM_UI_API_DOC_BASE_URL;
   if (customDocBaseUrl && customDocBaseUrl.trim()) {
@@ -28,22 +25,25 @@ const APIReferenceView: React.FC<ApiRefProps> = ({ proxySettings }) => {
       <div className="mb-5">
         {/* Header row with Docs link on the right */}
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-foreground">{t("apiReference.view.title")}</h1>
+          <h1 className="text-2xl font-semibold text-foreground">OpenAI Compatible Proxy: API Reference</h1>
           <DocLink className="ml-3 shrink-0" href="https://docs.litellm.ai/docs/proxy/user_keys" />
         </div>
 
-        <p className="mt-2 mb-2 text-sm text-muted-foreground">{t("apiReference.view.description")} </p>
+        <p className="mt-2 mb-2 text-sm text-muted-foreground">
+          LiteLLM is OpenAI Compatible. This means your API Key works with the OpenAI SDK. Just replace the base_url to
+          point to your litellm proxy. Example Below{" "}
+        </p>
 
         <Tabs defaultValue="openai">
           <TabsList variant="line" className="border-b rounded-none w-full justify-start h-auto p-0">
             <TabsTrigger value="openai" className="rounded-none px-4 py-2 flex-none">
-              {productNames.openAIPythonSdk}
+              OpenAI Python SDK
             </TabsTrigger>
             <TabsTrigger value="llamaindex" className="rounded-none px-4 py-2 flex-none">
-              {productNames.llamaIndex}
+              LlamaIndex
             </TabsTrigger>
             <TabsTrigger value="langchain" className="rounded-none px-4 py-2 flex-none">
-              {productNames.langchainPython}
+              Langchain Py
             </TabsTrigger>
           </TabsList>
           <TabsContent value="openai" keepMounted>

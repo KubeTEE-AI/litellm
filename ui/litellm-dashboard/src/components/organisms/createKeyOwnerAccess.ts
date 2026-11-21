@@ -1,5 +1,3 @@
-import type { TFunction } from "i18next";
-import i18n from "@/i18n/i18n";
 import type { SearchSelectOption } from "@/components/shared/SearchSelect";
 import { TEAM_ADMIN_CREATE_MEMBER_KEYS_PERMISSION } from "@/components/team/teamAdminEditAccess";
 import { isProxyAdminRole, isUserTeamAdminForSingleTeam } from "@/utils/roles";
@@ -52,10 +50,9 @@ export const teamMemberOwnerOptions = (team: TeamMembers | null, viewerId: strin
 export const teamMemberOwnerPlaceholder = (
   options: readonly SearchSelectOption[],
   team: TeamMembers | null,
-  t: TFunction = i18n.t.bind(i18n),
 ): string => {
-  if (options.length > 0) return t("createKey.ownerAccess.selectMember");
-  return team ? t("createKey.ownerAccess.noOtherMembers") : t("createKey.ownerAccess.selectTeamFirst");
+  if (options.length > 0) return "Select a member of the team";
+  return team ? "This team has no other members" : "Select a team first";
 };
 
 export const isTeamMemberOwner = (ownerId: unknown, team: TeamMembers | null, viewerId: string | null): boolean =>

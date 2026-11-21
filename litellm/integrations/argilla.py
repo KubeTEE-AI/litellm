@@ -7,12 +7,11 @@ import json
 import os
 import random
 import types
-from collections.abc import Mapping, Sequence
-from typing import Final, Protocol
+from collections.abc import Mapping
+from typing import Final
 
 import httpx
 from pydantic import BaseModel
-from typing_extensions import ReadOnly, TypedDict
 
 import litellm
 from litellm._logging import verbose_logger
@@ -28,22 +27,6 @@ from litellm.types.integrations.argilla import (
     ArgillaItem,
 )
 from litellm.types.utils import StandardLoggingPayload
-
-
-class _ArgillaDataset(TypedDict):
-    id: ReadOnly[str]
-
-
-class _ArgillaDatasetsBody(TypedDict, total=False):
-    items: ReadOnly[Sequence[_ArgillaDataset]]
-
-
-class _ArgillaDatasetsResponse(Protocol):
-    def json(self) -> _ArgillaDatasetsBody: ...
-
-
-def _datasets_body(response: _ArgillaDatasetsResponse) -> _ArgillaDatasetsBody:
-    return response.json()
 
 
 def is_serializable(value):
@@ -119,7 +102,7 @@ class ArgillaLogger(CustomBatchLogger):
                 url=f"{_credentials_base_url}/api/v1/me/datasets?name={_credentials_dataset_name}",
                 headers={"X-Argilla-Api-Key": _credentials_api_key},
             )
-            json_response: Final = _datasets_body(dataset_response)
+            json_response: Final = dataset_response.json()
             if (
                 "items" in json_response
                 and isinstance(json_response["items"], list)

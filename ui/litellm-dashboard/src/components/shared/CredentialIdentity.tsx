@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { useTranslation } from "react-i18next";
 
 import type { CredentialItem } from "@/components/networking";
 import { credentialLabelsByName } from "@/components/shared/credentialOptions";
@@ -33,9 +32,8 @@ interface AttachedCredentialProps {
 }
 
 export function AttachedCredential({ credentialName, credentials }: AttachedCredentialProps) {
-  const { t } = useTranslation();
   if (!credentialName) {
-    return <>{t("credentialIdentity.manual")}</>;
+    return <>Manual</>;
   }
   return (
     <CredentialIdentity

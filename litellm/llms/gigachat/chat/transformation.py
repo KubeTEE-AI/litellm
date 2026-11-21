@@ -18,7 +18,6 @@ from pydantic import TypeAdapter
 
 from litellm._logging import verbose_logger
 from litellm.litellm_core_utils.tool_fields import tool_params_without_hosted_mcp
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.chat.transformation import BaseConfig, BaseLLMException
 from litellm.llms.gigachat.utils import convert_usage, get_api_base
 from litellm.secret_managers.main import get_secret_str
@@ -39,15 +38,6 @@ else:
 
 _EMPTY_FUNCTION: Final[Mapping[str, object]] = MappingProxyType({})
 _JSON_VALUE: Final = TypeAdapter(object)
-_CONTENT_PART: Final = TypeAdapter(Mapping[str, object])
-
-
-def _file_part_data(part: Mapping[str, object]) -> str | None:
-    match part:
-        case {"type": "file", "file": {"file_data": str() as file_data}} if file_data:
-            return file_data
-        case _:
-            return None
 
 
 def is_valid_json(value: str) -> bool:
@@ -119,7 +109,8 @@ class GigaChatConfig(BaseConfig):
         stream: bool | None = None,
     ) -> str:
         """Get complete API URL for chat completions."""
-        return join_api_base(get_api_base(api_base), "chat/completions")
+        base: Final = get_api_base(api_base)
+        return f"{base}/chat/completions"
 
     def validate_environment(
         self,
@@ -286,7 +277,7 @@ class GigaChatConfig(BaseConfig):
         # Default to None (don't set function_call)
         return None
 
-    def _upload_image(self, image_url: str) -> object:
+    def _upload_image(self, image_url: str) -> str | None:
         """
         Upload image to GigaChat and return file_id.
 
@@ -306,9 +297,9 @@ class GigaChatConfig(BaseConfig):
             verbose_logger.error("Failed to upload image: %s", e)
             return None
 
-    def _transform_list_content(self, content: Sequence) -> tuple[str, Sequence[object]]:
+    def _transform_list_content(self, content: Sequence) -> tuple[str, Sequence[str]]:
         """
-        Extract text, image and file attachments from a multimodal message content list.
+        Extract text and image attachments from a multimodal message content list.
 
         Args:
             content: List of content parts (OpenAI multimodal format)
@@ -317,7 +308,7 @@ class GigaChatConfig(BaseConfig):
             Tuple of (combined text, list of attachment file ids)
         """
         texts: Final[list[str]] = []  # mutable-ok: accumulator
-        attachments: Final[list[object]] = []  # mutable-ok: accumulator
+        attachments: Final[list[str]] = []  # mutable-ok: accumulator
         for part in content:
             if isinstance(part, dict):
                 if part.get("type") == "text":
@@ -333,10 +324,6 @@ class GigaChatConfig(BaseConfig):
                         file_id = self._upload_image(upload_url)
                         if file_id:
                             attachments.append(file_id)
-                elif (file_data := _file_part_data(_CONTENT_PART.validate_python(part))) and (
-                    uploaded_file_id := self._upload_image(file_data)
-                ):
-                    attachments.append(uploaded_file_id)
         text: Final = "\n".join(texts) if texts else ""
         return text, attachments
 

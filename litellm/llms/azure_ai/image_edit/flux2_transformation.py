@@ -2,12 +2,11 @@ import base64
 from collections.abc import Mapping, Sequence
 from io import BufferedReader
 from types import MappingProxyType
-from typing import Final, Protocol
+from typing import Any, Final
 
 from httpx._types import RequestFiles
 
 import litellm
-from litellm.litellm_core_utils.core_helpers import has_attributes
 from litellm.llms.azure_ai.common_utils import (
     AzureFoundryModelInfo,
     get_azure_ai_auth_headers,
@@ -20,10 +19,6 @@ from litellm.secret_managers.main import get_secret_str
 from litellm.types.images.main import ImageEditOptionalRequestParams
 from litellm.types.llms.openai import FileTypes
 from litellm.types.router import GenericLiteLLMParams
-
-
-class _BinaryReadable(Protocol):
-    def read(self) -> bytes: ...
 
 
 class AzureFoundryFlux2ImageEditConfig(OpenAIImageEditConfig):
@@ -105,7 +100,7 @@ class AzureFoundryFlux2ImageEditConfig(OpenAIImageEditConfig):
         if image is None:
             raise ValueError("FLUX 2 image edit requires an image.")
 
-        images: Final[Sequence[object]] = [*image] if isinstance(image, list) else [image]
+        images: Final = tuple(image) if isinstance(image, list) else (image,)
         if not images:
             raise ValueError("FLUX 2 image edit requires at least one image.")
         max_reference_images: Final = 10 if "flex" in model.lower() else 8
@@ -126,14 +121,14 @@ class AzureFoundryFlux2ImageEditConfig(OpenAIImageEditConfig):
         }
         return request_body, []
 
-    def _convert_image_to_base64(self, image: object) -> str:
+    def _convert_image_to_base64(self, image: Any) -> str:
         """Convert image file to base64 string"""
         if isinstance(image, BufferedReader):
             image_bytes = image.read()
             image.seek(0)  # Reset file pointer for potential reuse
         elif isinstance(image, bytes):
             image_bytes = image
-        elif has_attributes(image, _BinaryReadable, "read"):
+        elif hasattr(image, "read"):
             image_bytes = image.read()
         else:
             raise ValueError(f"Unsupported image type: {type(image)}")

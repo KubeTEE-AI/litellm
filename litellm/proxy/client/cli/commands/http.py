@@ -4,12 +4,9 @@ from typing import Final, Protocol
 import click
 import requests
 import rich
-from pydantic import TypeAdapter
 from typing_extensions import ReadOnly, TypedDict
 
 from ...http_client import HTTPClient
-
-_DECODED_JSON: Final = TypeAdapter(object)
 
 
 class _CliContext(TypedDict):
@@ -88,7 +85,7 @@ def request(
     json_data = None
     if json:
         try:
-            json_data = _DECODED_JSON.validate_python(json_lib.loads(json))
+            json_data = json_lib.loads(json)
         except ValueError as e:
             raise click.BadParameter(f"Invalid JSON format: {e}")
 

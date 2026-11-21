@@ -1,8 +1,8 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
+import { pluralize } from "./memberBudgetReset";
 import type { MemberBudgetResetState } from "./useMemberBudgetReset";
 
 interface ResetMemberBudgetsDialogProps {
@@ -20,13 +20,11 @@ export default function ResetMemberBudgetsDialog({
   onKeep,
   onDismiss,
 }: ResetMemberBudgetsDialogProps) {
-  const { t } = useTranslation();
   const open = state.phase !== "idle";
   const busy = state.phase === "resetting";
   const failed = state.phase === "resetFailed";
   const memberCount = state.phase === "idle" ? 0 : state.pending.userIds.length;
   const newBudget = state.phase === "idle" ? 0 : state.pending.newBudget;
-  const budget = formatNumberWithCommas(newBudget, 2);
 
   return (
     <Dialog
@@ -37,29 +35,32 @@ export default function ResetMemberBudgetsDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("teams.resetMemberBudgets.title")}</DialogTitle>
+          <DialogTitle>Reset member budgets?</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          {t("teams.resetMemberBudgets.description", { count: memberCount, budget })}
+          {memberCount} {pluralize(memberCount, "member has", "members have")} a custom budget, so the new team default
+          of ${formatNumberWithCommas(newBudget, 2)} will not apply to {pluralize(memberCount, "that member", "them")}.
+          Reset {pluralize(memberCount, "it", "them")} to the default, or keep the custom{" "}
+          {pluralize(memberCount, "budget", "budgets")}?
         </p>
         <DialogFooter>
           {failed ? (
             <>
               <Button variant="outline" onClick={onDismiss}>
-                {t("teams.resetMemberBudgets.cancel")}
+                Cancel
               </Button>
-              <Button onClick={onRetry}>{t("teams.resetMemberBudgets.retry")}</Button>
+              <Button onClick={onRetry}>Retry reset</Button>
             </>
           ) : (
             <>
               <Button variant="ghost" onClick={onDismiss} disabled={busy}>
-                {t("teams.resetMemberBudgets.cancel")}
+                Cancel
               </Button>
               <Button variant="outline" onClick={onKeep} disabled={busy}>
-                {t("teams.resetMemberBudgets.keepCustom", { count: memberCount })}
+                Keep custom {pluralize(memberCount, "budget", "budgets")}
               </Button>
               <Button onClick={onReset} disabled={busy}>
-                {t("teams.resetMemberBudgets.resetTo", { count: memberCount, budget })}
+                {pluralize(memberCount, "Reset", "Reset all")} to ${formatNumberWithCommas(newBudget, 2)}
               </Button>
             </>
           )}

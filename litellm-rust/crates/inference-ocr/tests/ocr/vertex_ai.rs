@@ -71,8 +71,7 @@ async fn invalid_credentials_fail_before_sending() {
     .await
     .unwrap_err();
 
-    let report = litellm_error::Report::new(&error).to_string();
-    assert!(report.contains("vertex_credentials"), "{report}");
+    assert!(error.to_string().contains("vertex_credentials"), "{error}");
 }
 
 #[rstest]
@@ -92,10 +91,11 @@ async fn a_request_controlled_api_base_is_rejected_before_vertex_auth(
 
     let error = perform(request).await.unwrap_err();
 
-    let report = litellm_error::Report::new(&error).to_string();
     assert!(
-        report.contains("request-controlled Vertex AI endpoint"),
-        "{report}"
+        error
+            .to_string()
+            .contains("request-controlled Vertex AI endpoint"),
+        "{error}"
     );
 }
 

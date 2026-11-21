@@ -39,7 +39,6 @@ from pydantic import ConfigDict
 import litellm
 from litellm._logging import verbose_logger
 from litellm.integrations.langfuse.langfuse import PROMPT_CACHE_TTL_ENV, parse_langfuse_debug, whole_number
-from litellm.integrations.langfuse.langfuse_otel_attributes import serialize_langfuse_datetime
 from litellm.litellm_core_utils.safe_json_dumps import safe_dumps
 from litellm.llms.custom_httpx.http_handler import HTTPHandler, get_httpx_client
 from litellm.types.llms.base import LiteLLMBaseModel
@@ -169,7 +168,7 @@ def _string_or_none(value: object) -> str | None:
 def _serialize_datetime(value: object) -> str | None:
     """A datetime the way the SDK's ``EventSerializer`` sends one: a JSON string, naive values read as local time."""
     if isinstance(value, datetime):
-        return serialize_langfuse_datetime(value)
+        return safe_dumps(value.astimezone().isoformat())
     return _serialize(value)
 
 

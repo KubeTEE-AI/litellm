@@ -23,8 +23,6 @@ from litellm.types.mcp import (
 def _validate_mcp_protocol_metadata(value: dict[str, object]) -> dict[str, object]:
     if "protocol_version" in value:
         TypeAdapter[MCPUpstreamProtocol](MCPUpstreamProtocol).validate_python(value["protocol_version"])
-    if "skip_tool_output_validation" in value:
-        TypeAdapter[bool](bool).validate_python(value["skip_tool_output_validation"], strict=True)
     return value
 
 
@@ -119,7 +117,7 @@ class MCPServer(LiteLLMBaseModel):
     # Admin-configured env vars. Each entry is {name, value, scope, description}.
     # scope=="global" values are interpolated into static_headers using ${NAME}.
     # scope=="user" values must be supplied per-user.
-    env_vars: list[dict[str, object]] | None = None
+    env_vars: list[dict[str, Any]] | None = None
     # OAuth-specific fields
     authorization_server_metadata: Mapping[str, object] | None = Field(default=None, exclude=True)
     client_id: str | None = None
@@ -244,7 +242,7 @@ class MCPServer(LiteLLMBaseModel):
     # token_validation: key-value pairs that must match fields in the OAuth token
     # response (supports dot-notation for nested fields, e.g. "team.enterprise_id").
     # Tokens that fail validation are rejected before storage.
-    token_validation: dict[str, object] | None = None
+    token_validation: dict[str, Any] | None = None
     oauth_identity_binding: MCPOAuthIdentityBinding | None = None
     # Optional TTL override (seconds) for the Redis per-user token cache, capped
     # at the token's expires_in minus the expiry buffer so a cached entry never
@@ -298,10 +296,6 @@ class MCPServer(LiteLLMBaseModel):
         breaking regression introduced with the M2M feature.
         """
         return self.oauth2_flow == "client_credentials"
-
-    @property
-    def skip_tool_output_validation(self) -> bool:
-        return (self.mcp_info or {}).get("skip_tool_output_validation") is True
 
     @model_validator(mode="after")
     def resolve_protocol_version(self) -> Self:

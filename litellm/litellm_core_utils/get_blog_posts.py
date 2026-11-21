@@ -19,7 +19,6 @@ import httpx
 from pydantic import ConfigDict
 
 from litellm import verbose_logger
-from litellm.litellm_core_utils.offline_mode import is_offline_mode
 from litellm.types.llms.base import LiteLLMBaseModel
 
 BLOG_POSTS_TTL_SECONDS: Final[int] = 3600  # 1 hour
@@ -130,7 +129,7 @@ class GetBlogPosts:
         Uses the in-process cache if within BLOG_POSTS_TTL_SECONDS.
         Fetches from ``url`` otherwise, falling back to local backup on failure.
         """
-        if is_offline_mode() or os.getenv("LITELLM_LOCAL_BLOG_POSTS", "").lower() == "true":
+        if os.getenv("LITELLM_LOCAL_BLOG_POSTS", "").lower() == "true":
             return cls.load_local_blog_posts()
 
         now: Final = time.time()

@@ -5,9 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { ParseKeys } from "i18next";
 import { useId, useMemo } from "react";
-import { useTranslation } from "react-i18next";
 import { AddButton, FormFrame, QuestionCardHeader, RemoveButton } from "./DecisionFormControls";
 import { freeName, removeAt, replaceAt } from "./lib/formPayload";
 import {
@@ -21,11 +19,7 @@ import type { OpenAIDecisionsRequest } from "./lib/openAIDecisions";
 import type { PayloadValidation } from "./lib/validatePayload";
 
 const QUESTION_TYPES: readonly DecisionsQuestionType[] = ["predicate", "choice", "score"];
-const TYPE_LABELS: Record<DecisionsQuestionType, ParseKeys> = {
-  predicate: "playground.systemOne.openAIDecisionsForm.types.predicate",
-  choice: "playground.systemOne.openAIDecisionsForm.types.choice",
-  score: "playground.systemOne.openAIDecisionsForm.types.score",
-};
+const TYPE_LABELS = { predicate: "Predicate", choice: "Choice", score: "Score" };
 
 interface QuestionEditorProps<Q extends DecisionsFormQuestion = DecisionsFormQuestion> {
   question: Q;
@@ -33,13 +27,12 @@ interface QuestionEditorProps<Q extends DecisionsFormQuestion = DecisionsFormQue
 }
 
 function Choices({ question, onChange }: QuestionEditorProps<Extract<DecisionsFormQuestion, { type: "choice" }>>) {
-  const { t } = useTranslation();
   const choices = question.choices ?? [];
   const write = (next: typeof choices) => onChange({ ...question, choices: next });
 
   return (
     <div className="grid gap-2">
-      <span className="text-sm font-medium">{t("playground.systemOne.openAIDecisionsForm.choices")}</span>
+      <span className="text-sm font-medium">Choices</span>
       {choices.map((choice, index) => (
         <div key={index} className="grid gap-2 rounded-md border p-2">
           <div className="flex items-center gap-2">
@@ -52,34 +45,28 @@ function Choices({ question, onChange }: QuestionEditorProps<Extract<DecisionsFo
                 }
               }}
             >
-              <SelectTrigger
-                className="w-40"
-                aria-label={t("playground.systemOne.openAIDecisionsForm.choiceValueType", { number: index + 1 })}
-              >
+              <SelectTrigger className="w-40" aria-label={`Choice ${index + 1} value type`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="text">{t("playground.systemOne.openAIDecisionsForm.valueTypes.text")}</SelectItem>
-                <SelectItem value="true">{t("playground.systemOne.openAIDecisionsForm.valueTypes.true")}</SelectItem>
-                <SelectItem value="false">{t("playground.systemOne.openAIDecisionsForm.valueTypes.false")}</SelectItem>
+                <SelectItem value="text">Text</SelectItem>
+                <SelectItem value="true">true (boolean)</SelectItem>
+                <SelectItem value="false">false (boolean)</SelectItem>
               </SelectContent>
             </Select>
             {typeof choice.value === "string" && (
               <Input
-                aria-label={t("playground.systemOne.openAIDecisionsForm.choiceValue", { number: index + 1 })}
+                aria-label={`Choice ${index + 1} value`}
                 value={choice.value}
                 onChange={(event) => write(replaceAt(choices, index, { ...choice, value: event.target.value }))}
               />
             )}
-            <RemoveButton
-              label={t("playground.systemOne.openAIDecisionsForm.removeChoice", { number: index + 1 })}
-              onClick={() => write(removeAt(choices, index))}
-            />
+            <RemoveButton label={`Remove choice ${index + 1}`} onClick={() => write(removeAt(choices, index))} />
           </div>
           <Input
-            aria-label={t("playground.systemOne.openAIDecisionsForm.choiceDescription", { number: index + 1 })}
+            aria-label={`Choice ${index + 1} description`}
             value={choice.description ?? ""}
-            placeholder={t("playground.systemOne.openAIDecisionsForm.optionalDescription")}
+            placeholder="Optional description"
             onChange={(event) => write(replaceAt(choices, index, { ...choice, description: event.target.value }))}
           />
         </div>
@@ -97,43 +84,37 @@ function Choices({ question, onChange }: QuestionEditorProps<Extract<DecisionsFo
           ])
         }
       >
-        {t("playground.systemOne.openAIDecisionsForm.addChoice")}
+        Add choice
       </AddButton>
     </div>
   );
 }
 
 function Levels({ question, onChange }: QuestionEditorProps<Extract<DecisionsFormQuestion, { type: "score" }>>) {
-  const { t } = useTranslation();
   const levels = question.levels ?? [];
   const write = (next: typeof levels) => onChange({ ...question, levels: next });
 
   return (
     <div className="grid gap-2">
-      <span className="text-sm font-medium">{t("playground.systemOne.openAIDecisionsForm.levels")}</span>
+      <span className="text-sm font-medium">Levels, lowest first</span>
       {levels.map((level, index) => (
         <div key={index} className="flex items-center gap-2">
           <Input
-            aria-label={t("playground.systemOne.openAIDecisionsForm.levelLabel", { number: index + 1 })}
+            aria-label={`Level ${index + 1} label`}
             value={level.label}
-            placeholder={t("playground.systemOne.openAIDecisionsForm.labelPlaceholder")}
+            placeholder="Label"
             onChange={(event) => write(replaceAt(levels, index, { ...level, label: event.target.value }))}
           />
           <Input
-            aria-label={t("playground.systemOne.openAIDecisionsForm.levelDescription", { number: index + 1 })}
+            aria-label={`Level ${index + 1} description`}
             value={level.description ?? ""}
-            placeholder={t("playground.systemOne.openAIDecisionsForm.optionalDescription")}
+            placeholder="Optional description"
             onChange={(event) => write(replaceAt(levels, index, { ...level, description: event.target.value }))}
           />
-          <RemoveButton
-            label={t("playground.systemOne.openAIDecisionsForm.removeLevel", { number: index + 1 })}
-            onClick={() => write(removeAt(levels, index))}
-          />
+          <RemoveButton label={`Remove level ${index + 1}`} onClick={() => write(removeAt(levels, index))} />
         </div>
       ))}
-      <AddButton onClick={() => write([...levels, { label: String(levels.length) }])}>
-        {t("playground.systemOne.openAIDecisionsForm.addLevel")}
-      </AddButton>
+      <AddButton onClick={() => write([...levels, { label: String(levels.length) }])}>Add level</AddButton>
     </div>
   );
 }
@@ -153,31 +134,23 @@ const blankDecisionsQuestion = (existing: DecisionsFormQuestion[]): DecisionsFor
 });
 
 function QuestionCard({ question, index, onChange, onRemove }: QuestionCardProps) {
-  const { t } = useTranslation();
   const instructionsId = useId();
 
   return (
-    <fieldset
-      aria-label={t("playground.systemOne.openAIDecisionsForm.question", { number: index + 1 })}
-      className="grid gap-3 rounded-lg border bg-muted/30 p-3"
-    >
-      <QuestionCardHeader
-        index={index}
-        onRemove={onRemove}
-        removeLabel={t("playground.systemOne.openAIDecisionsForm.removeQuestion", { number: index + 1 })}
-      />
+    <fieldset aria-label={`Question ${index + 1}`} className="grid gap-3 rounded-lg border bg-muted/30 p-3">
+      <QuestionCardHeader index={index} onRemove={onRemove} removeLabel={`Remove question ${index + 1}`} />
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
         <div className="grid gap-1.5">
-          <span className="text-sm font-medium">{t("playground.systemOne.openAIDecisionsForm.name")}</span>
+          <span className="text-sm font-medium">Name</span>
           <Input
-            aria-label={t("playground.systemOne.openAIDecisionsForm.questionName")}
+            aria-label="Question name"
             value={question.name ?? ""}
-            placeholder={t("playground.systemOne.openAIDecisionsForm.questionNamePlaceholder")}
+            placeholder="Optional question name"
             onChange={(event) => onChange({ ...question, name: event.target.value })}
           />
         </div>
         <div className="grid gap-1.5">
-          <span className="text-sm font-medium">{t("playground.systemOne.openAIDecisionsForm.answerType")}</span>
+          <span className="text-sm font-medium">Answer type</span>
           <Select
             value={question.type}
             onValueChange={(type) => {
@@ -185,13 +158,13 @@ function QuestionCard({ question, index, onChange, onRemove }: QuestionCardProps
               if (next) onChange(retypeDecisionQuestion(question, next));
             }}
           >
-            <SelectTrigger className="w-full" aria-label={t("playground.systemOne.openAIDecisionsForm.answerType")}>
-              <SelectValue>{t(TYPE_LABELS[question.type])}</SelectValue>
+            <SelectTrigger className="w-full" aria-label="Answer type">
+              <SelectValue>{TYPE_LABELS[question.type]}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {QUESTION_TYPES.map((type) => (
                 <SelectItem key={type} value={type}>
-                  {t(TYPE_LABELS[type])}
+                  {TYPE_LABELS[type]}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -199,12 +172,12 @@ function QuestionCard({ question, index, onChange, onRemove }: QuestionCardProps
         </div>
       </div>
       <div className="grid gap-1.5">
-        <Label htmlFor={instructionsId}>{t("playground.systemOne.openAIDecisionsForm.instructions")}</Label>
+        <Label htmlFor={instructionsId}>Instructions</Label>
         <Textarea
           id={instructionsId}
           rows={2}
           value={question.instructions ?? ""}
-          placeholder={t("playground.systemOne.openAIDecisionsForm.instructionsPlaceholder")}
+          placeholder="What should the model decide?"
           onChange={(event) => onChange({ ...question, instructions: event.target.value })}
         />
       </div>
@@ -222,7 +195,6 @@ interface OpenAIDecisionsFormProps {
 }
 
 export default function OpenAIDecisionsForm({ value, onChange, validation, onReset }: OpenAIDecisionsFormProps) {
-  const { t } = useTranslation();
   const inputId = useId();
   const safetyId = useId();
   const form = useMemo(() => readDecisionsForm(value), [value]);
@@ -230,9 +202,9 @@ export default function OpenAIDecisionsForm({ value, onChange, validation, onRes
   if (form === undefined) {
     return (
       <FormFrame validation={validation}>
-        <p className="text-sm text-muted-foreground">{t("playground.systemOne.openAIDecisionsForm.unreadable")}</p>
+        <p className="text-sm text-muted-foreground">This request has a shape the form can&apos;t show.</p>
         <Button variant="outline" className="w-fit" onClick={onReset}>
-          {t("playground.systemOne.openAIDecisionsForm.resetToExample")}
+          Reset to example
         </Button>
       </FormFrame>
     );
@@ -247,18 +219,16 @@ export default function OpenAIDecisionsForm({ value, onChange, validation, onRes
       <div className="grid gap-1.5">
         {Array.isArray(form.input) ? (
           <>
-            <p className="text-sm text-muted-foreground">
-              {t("playground.systemOne.openAIDecisionsForm.inputMessages")}
-            </p>
+            <p className="text-sm text-muted-foreground">Input contains messages. Form edits keep them unchanged.</p>
           </>
         ) : (
           <>
-            <Label htmlFor={inputId}>{t("playground.systemOne.openAIDecisionsForm.input")}</Label>
+            <Label htmlFor={inputId}>Input</Label>
             <Textarea
               id={inputId}
               rows={4}
               value={form.input ?? ""}
-              placeholder={t("playground.systemOne.openAIDecisionsForm.inputPlaceholder")}
+              placeholder="Paste the text the model should decide about"
               onChange={(event) => write({ ...form, input: event.target.value })}
             />
           </>
@@ -274,14 +244,14 @@ export default function OpenAIDecisionsForm({ value, onChange, validation, onRes
         />
       ))}
       <AddButton onClick={() => writeQuestions([...questions, blankDecisionsQuestion(questions)])}>
-        {t("playground.systemOne.openAIDecisionsForm.addQuestion")}
+        Add question
       </AddButton>
       <div className="grid gap-1.5">
-        <Label htmlFor={safetyId}>{t("playground.systemOne.openAIDecisionsForm.safetyIdentifier")}</Label>
+        <Label htmlFor={safetyId}>Safety identifier</Label>
         <Input
           id={safetyId}
           value={form.safety_identifier ?? ""}
-          placeholder={t("playground.systemOne.openAIDecisionsForm.safetyIdentifierPlaceholder")}
+          placeholder="Optional"
           onChange={(event) => write({ ...form, safety_identifier: event.target.value || undefined })}
         />
       </div>

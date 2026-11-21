@@ -3,7 +3,6 @@
 import type { ExpandedState, SortingState } from "@tanstack/react-table";
 import { Inbox } from "lucide-react";
 import React, { useCallback, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import { DataTable } from "@/components/shared/DataTable";
 
@@ -26,14 +25,15 @@ const resolveBaseUrl = (proxyBaseUrl?: string): string => {
 };
 
 function EmptyState() {
-  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-1 py-6">
       <div className="mb-1 flex size-10 items-center justify-center rounded-lg bg-muted">
         <Inbox className="size-5 text-muted-foreground" />
       </div>
-      <div className="text-sm font-medium text-foreground">{t("routingGroups.table.emptyTitle")}</div>
-      <div className="text-sm text-muted-foreground">{t("routingGroups.table.emptyDescription")}</div>
+      <div className="text-sm font-medium text-foreground">No routing groups yet</div>
+      <div className="text-sm text-muted-foreground">
+        Create a group to load-balance a set of models behind one name.
+      </div>
     </div>
   );
 }
@@ -45,7 +45,6 @@ const RoutingGroupsTable: React.FC<RoutingGroupsTableProps> = ({
   onDelete,
   proxyBaseUrl,
 }) => {
-  const { t } = useTranslation();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [expanded, setExpanded] = useState<ExpandedState>({});
   const baseUrl = resolveBaseUrl(proxyBaseUrl);
@@ -59,8 +58,8 @@ const RoutingGroupsTable: React.FC<RoutingGroupsTableProps> = ({
 
   const columns = useMemo(() => {
     const deps = { onEdit, onDelete, onToggleUsage: toggleUsage };
-    return getRoutingGroupsTableColumns(deps, t);
-  }, [onEdit, onDelete, toggleUsage, t]);
+    return getRoutingGroupsTableColumns(deps);
+  }, [onEdit, onDelete, toggleUsage]);
 
   return (
     <DataTable
@@ -76,7 +75,7 @@ const RoutingGroupsTable: React.FC<RoutingGroupsTableProps> = ({
       getRowCanExpand={() => true}
       renderSubComponent={({ row }) => <RoutingGroupUsagePanel group={row.original} baseUrl={baseUrl} />}
       isLoading={isLoading}
-      loadingMessage={t("routingGroups.table.loading")}
+      loadingMessage="Loading routing groups…"
       noDataMessage={<EmptyState />}
       size="compact"
     />

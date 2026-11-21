@@ -3,13 +3,10 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 import requests
-from pydantic import TypeAdapter
 
 from litellm.litellm_core_utils.secret_redaction import redact_string
 
 from .exceptions import UnauthorizedError
-
-_DECODED_JSON: Final = TypeAdapter(object)
 
 
 class KeysManagementClient:
@@ -125,7 +122,7 @@ class KeysManagementClient:
         budget_id: str | None = None,
         config: Mapping[str, object] | None = None,
         return_request: bool = False,
-    ) -> object | requests.Request:
+    ) -> dict[str, object] | requests.Request:
         """
         Generate an API key based on the provided data.
 
@@ -182,7 +179,7 @@ class KeysManagementClient:
         try:
             response: Final = session.send(request.prepare(), timeout=self._timeout)
             response.raise_for_status()
-            return _DECODED_JSON.validate_python(response.json())
+            return response.json()
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 raise UnauthorizedError(e)
@@ -193,7 +190,7 @@ class KeysManagementClient:
         keys: builtins.list[str] | None = None,
         key_aliases: builtins.list[str] | None = None,
         return_request: bool = False,
-    ) -> object | requests.Request:
+    ) -> dict[str, object] | requests.Request:
         """
         Delete existing keys
 
@@ -226,7 +223,7 @@ class KeysManagementClient:
         try:
             response: Final = session.send(request.prepare(), timeout=self._timeout)
             response.raise_for_status()
-            return _DECODED_JSON.validate_python(response.json())
+            return response.json()
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 raise UnauthorizedError(e)
@@ -242,7 +239,7 @@ class KeysManagementClient:
         key_alias: str | None = None,
         team_id: str | None = None,
         user_id: str | None = None,
-    ) -> object | requests.Request:
+    ) -> dict[str, object] | requests.Request:
         """
         Update an existing API key's parameters.
 
@@ -288,11 +285,11 @@ class KeysManagementClient:
             response: Final = session.send(request.prepare(), timeout=self._timeout)
             response_text = response.text
             response.raise_for_status()
-            return _DECODED_JSON.validate_python(response.json())
+            return response.json()
         except Exception:
             raise Exception(f"Error updating key: {response_text}")
 
-    def info(self, key: str, return_request: bool = False) -> object | requests.Request:
+    def info(self, key: str, return_request: bool = False) -> dict[str, object] | requests.Request:
         """
         Get information about API keys.
 
@@ -317,7 +314,7 @@ class KeysManagementClient:
         try:
             response: Final = session.send(request.prepare(), timeout=self._timeout)
             response.raise_for_status()
-            return _DECODED_JSON.validate_python(response.json())
+            return response.json()
         except requests.exceptions.HTTPError as e:
             redacted_message: Final = redact_string(str(e))
             if e.response.status_code == 401:

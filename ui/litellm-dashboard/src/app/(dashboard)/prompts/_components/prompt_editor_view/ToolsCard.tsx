@@ -1,6 +1,5 @@
 import React from "react";
 import { PlusIcon, TrashIcon } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { Tool } from "./types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -13,18 +12,17 @@ interface ToolsCardProps {
 }
 
 const ToolsCard: React.FC<ToolsCardProps> = ({ tools, onAddTool, onEditTool, onRemoveTool }) => {
-  const { t } = useTranslation();
   return (
     <Card className="p-3">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-sm font-medium">{t("prompts.toolsCard.title")}</p>
+        <p className="text-sm font-medium">Tools</p>
         <Button variant="ghost" size="sm" onClick={onAddTool}>
           <PlusIcon size={14} className="mr-1" />
-          {t("prompts.toolsCard.add")}
+          Add
         </Button>
       </div>
       {tools.length === 0 ? (
-        <p className="text-muted-foreground text-xs">{t("prompts.toolsCard.empty")}</p>
+        <p className="text-muted-foreground text-xs">No tools added</p>
       ) : (
         <div className="space-y-2">
           {tools.map((tool, index) => (
@@ -35,12 +33,12 @@ const ToolsCard: React.FC<ToolsCardProps> = ({ tools, onAddTool, onEditTool, onR
               </div>
               <div className="flex items-center space-x-1 ml-2">
                 <Button variant="ghost" size="sm" onClick={() => onEditTool(index)}>
-                  {t("prompts.toolsCard.edit")}
+                  Edit
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={t("prompts.toolsCard.remove", { name: tool.name })}
+                  aria-label={`Remove ${tool.name}`}
                   onClick={() => onRemoveTool(index)}
                 >
                   <TrashIcon size={14} aria-hidden="true" />

@@ -1,8 +1,6 @@
 ---
 name: test-delete-skill
 description: A test skill created specifically for deletion testing
-metadata:
-  internal: true
 ---
 
 # Test Delete Skill

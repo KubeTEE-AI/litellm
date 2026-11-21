@@ -56,8 +56,8 @@ If `db.useStackgresOperator` is used (not yet implemented):
 
 | `billingMetrics.enabled`    | Enable enterprise billable-request metering. Requires an enterprise license.                                                                                                                                                                  | `false`                   |
 | `billingMetrics.endpoint`   | Collector that the billable-request counter is pushed to.                                                                                                                                                                                    | `https://telemetry.litellm.ai` |
-| `billingMetrics.tokenUrl`   | Cognito OAuth2 client-credentials token endpoint.                                                                                                                                                                                               | `https://litellm-prod.auth.us-west-1.amazoncognito.com/oauth2/token` |
-| `billingMetrics.secretName` | Name of an existing Secret with `client-id` and `client-secret` keys.                                                                                                                                                                           | `litellm-billing-metrics` |
+| `billingMetrics.secretName` | Name of an existing Secret holding the mTLS client certificate, under the keys `tls.crt` and `tls.key`.                                                                                                                                       | `litellm-billing-metrics-mtls` |
+| `billingMetrics.caSecretName` | Name of an existing Secret holding a CA bundle under the key `ca.crt`. Only needed for a private or test collector whose server certificate is not on the public web PKI.                                                                    | `""`                      |
 | `billingMetrics.exportIntervalMs` | How often the counter is pushed, in milliseconds. The proxy defaults to `60000` when unset.                                                                                                                                             | `""`                      |
 
 #### Example `proxy_config` ConfigMap from values (default):
@@ -70,18 +70,11 @@ proxyConfigMap:
 proxy_config:
   general_settings:
     master_key: os.environ/PROXY_MASTER_KEY
-  model_list: []
-```
-
-The chart ships no models, so add them under `proxy_config.model_list` or from the Admin UI with `store_model_in_db: true`
-
-```
-proxy_config:
   model_list:
-    - model_name: gpt-5.6
+    - model_name: gpt-3.5-turbo
       litellm_params:
-        model: openai/gpt-5.6
-        api_key: os.environ/OPENAI_API_KEY
+        model: gpt-3.5-turbo
+        api_key: eXaMpLeOnLy
 ```
 
 #### Example using existing `proxyConfigMap` instead of creating it:
@@ -109,10 +102,10 @@ type: Opaque
 
 #### Enterprise billable-request metering
 
-Enterprise licenses meter billable requests by pushing a counter to LiteLLM's collector with Cognito bearer authentication. Create a Secret with `client-id` and `client-secret` keys, then enable the chart values:
+Enterprise licenses meter billable requests by pushing a counter to LiteLLM's collector over mutual TLS. The chart does not create the client certificate; it mounts one you already hold, read-only, so the private key is never exposed through the environment. Create the Secret under the name the chart expects, then turn the block on:
 
 ```
-kubectl create secret generic litellm-billing-metrics --from-literal=client-id=... --from-literal=client-secret=...
+kubectl create secret tls litellm-billing-metrics-mtls --cert=client.crt --key=client.key
 ```
 
 ```
@@ -120,8 +113,7 @@ billingMetrics:
   enabled: true
 ```
 
-The endpoint and token URL must use HTTPS. The chart requires both URLs and
-the Secret name when billing metrics are enabled
+Set `billingMetrics.caSecretName` only when the collector is a private or test one whose server certificate is not on the public web PKI; the production collector needs no CA override. The chart fails the render rather than deploying a proxy that silently never exports, so a missing `secretName` or an emptied `endpoint` surfaces at `helm install` time.
 
 ### Database Settings
 
@@ -258,9 +250,3 @@ itself.
 ## Connect Lens
 
 This chart does not deploy Lens. Deploy Lens from [its own chart](https://github.com/BerriAI/lens/tree/main/helm/lens), then set `lens.enabled: true`, `lens.url`, `lens.publicUrl`, `lens.gatewaySecret.name` and `lens.serviceTokenSecret.name`. The secret keys default to `gateway-secret` and `service-token`. Set `lens.service.name` when that Lens runs in this release's namespace and the chart ingress should route `/lens-ingest` to it. The old `lensWorker` values are no longer read, and enabling them fails the render
-
-## Shutdown accounting
-
-`GRACEFUL_SHUTDOWN_TIMEOUT` defaults to 30 seconds. Pending success callbacks share the time remaining since SIGTERM or the first `/health/drain` call. Callback flushing reserves the existing 10-second teardown headroom for cancellation, tracked accounting tasks and persistence. Exhausting this budget can discard callbacks, which is logged
-
-Set `terminationGracePeriodSeconds` to at least `GRACEFUL_SHUTDOWN_TIMEOUT + 10`, allowing additional time for preStop hooks and database writes. This is not a hard shutdown bound or a guarantee of persistence. Database retries retain their own limits, and cancellation-resistant callbacks can remain alive. The existing preStop hook can also be followed by Uvicorn's separate connection drain, as described in `values.yaml`

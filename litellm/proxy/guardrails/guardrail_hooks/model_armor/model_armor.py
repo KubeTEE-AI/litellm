@@ -1,8 +1,7 @@
-import contextlib
 import time
-from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable, Generator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Mapping, Sequence
 from enum import Enum, auto
-from typing import TYPE_CHECKING, ClassVar, Final, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, Protocol, runtime_checkable
 
 import httpx
 from fastapi import HTTPException
@@ -303,7 +302,7 @@ class ModelArmorGuardrail(CustomGuardrail, VertexBase):
     def _log_request_debug(
         self,
         url: str,
-        body: Mapping[str, object],
+        body: dict,
         file_bytes: "bytes | None",
         file_type: "str | None",
     ) -> None:
@@ -1163,17 +1162,11 @@ class ModelArmorGuardrail(CustomGuardrail, VertexBase):
     async def async_post_call_streaming_iterator_hook(
         self,
         user_api_key_dict: UserAPIKeyAuth,
-        response: AsyncIterable[object],
-        request_data: dict[str, object],
+        response: Any,
+        request_data: dict,
     ) -> AsyncGenerator[ModelResponseStream, None]:
         """Process streaming response chunks."""
-        async with contextlib.aclosing(self._moderated_stream(response, request_data)) as moderated:
-            async for moderated_item in moderated:
-                yield moderated_item
 
-    async def _moderated_stream(
-        self, response: AsyncIterable[object], request_data: dict[str, object]
-    ) -> AsyncGenerator[object, None]:
         from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
         from litellm.proxy.common_utils.callback_utils import (
             add_guardrail_to_applied_guardrails_header,
@@ -1270,7 +1263,7 @@ class ModelArmorGuardrail(CustomGuardrail, VertexBase):
 
                 # Return sanitized stream
                 if surface is _StreamSurface.ANTHROPIC_MESSAGES:
-                    for sse_chunk in anthropic_sse_chunks_from_response(assembled_response, all_chunks):
+                    for sse_chunk in anthropic_sse_chunks_from_response(assembled_response):
                         yield sse_chunk
                     return
                 mock_response: Final = MockResponseIterator(model_response=assembled_response)

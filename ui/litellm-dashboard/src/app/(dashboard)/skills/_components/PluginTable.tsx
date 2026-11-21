@@ -1,54 +1,38 @@
 "use client";
 
-import { type OnChangeFn, type SortingState } from "@tanstack/react-table";
+import { SortingState } from "@tanstack/react-table";
 import { Inbox } from "lucide-react";
-import React, { useMemo } from "react";
-import { useTranslation } from "react-i18next";
+import React, { useMemo, useState } from "react";
 
 import { DataTable } from "@/components/shared/DataTable";
-import { SkillHubSkill } from "@/components/claude_code_plugins/types";
+import { Plugin } from "@/components/claude_code_plugins/types";
 
 import { getPluginTableColumns } from "./PluginTableColumns";
 
 interface PluginTableProps {
-  pluginsList: SkillHubSkill[];
-  sorting: SortingState;
-  onSortingChange: OnChangeFn<SortingState>;
+  pluginsList: Plugin[];
   isLoading: boolean;
-  filtered?: boolean;
   onDeleteClick: (pluginName: string, displayName: string) => void;
   isAdmin: boolean;
   onPluginClick: (pluginId: string) => void;
 }
 
-function EmptyState({ filtered }: { filtered: boolean }) {
-  const { t } = useTranslation();
+const DEFAULT_SORTING: SortingState = [{ id: "created_at", desc: true }];
+
+function EmptyState() {
   return (
     <div className="flex flex-col items-center gap-1 py-6">
       <div className="mb-1 flex size-10 items-center justify-center rounded-lg bg-muted">
         <Inbox className="size-5 text-muted-foreground" />
       </div>
-      <div className="text-sm font-medium text-foreground">
-        {t(filtered ? "aiHub.skillHubDashboard.emptyState.noMatchTitle" : "skills.table.empty.title")}
-      </div>
-      <div className="text-sm text-muted-foreground">
-        {t(filtered ? "aiHub.skillHubDashboard.emptyState.noMatchBody" : "skills.table.empty.description")}
-      </div>
+      <div className="text-sm font-medium text-foreground">No skills found</div>
+      <div className="text-sm text-muted-foreground">Add one to get started.</div>
     </div>
   );
 }
 
-const PluginTable: React.FC<PluginTableProps> = ({
-  pluginsList,
-  sorting,
-  onSortingChange,
-  isLoading,
-  filtered = false,
-  onDeleteClick,
-  isAdmin,
-  onPluginClick,
-}) => {
-  const { t } = useTranslation();
+const PluginTable: React.FC<PluginTableProps> = ({ pluginsList, isLoading, onDeleteClick, isAdmin, onPluginClick }) => {
+  const [sorting, setSorting] = useState<SortingState>(DEFAULT_SORTING);
 
   const columns = useMemo(
     () => getPluginTableColumns({ isAdmin, onPluginClick, onDeleteClick }),
@@ -58,15 +42,15 @@ const PluginTable: React.FC<PluginTableProps> = ({
   return (
     <DataTable
       data={pluginsList}
-      paginationMode="none"
+      paginationMode="client"
       columns={columns}
       getRowId={(plugin, index) => plugin.id || String(index)}
-      sortingMode="server"
+      sortingMode="client"
       sorting={sorting}
-      onSortingChange={onSortingChange}
+      onSortingChange={setSorting}
       isLoading={isLoading}
-      loadingMessage={t("skills.table.loading")}
-      noDataMessage={<EmptyState filtered={filtered} />}
+      loadingMessage="Loading skills…"
+      noDataMessage={<EmptyState />}
       size="compact"
     />
   );

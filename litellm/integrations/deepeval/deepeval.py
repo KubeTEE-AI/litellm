@@ -15,7 +15,6 @@ from litellm.integrations.deepeval.utils import (
     to_zod_compatible_iso,
     validate_environment,
 )
-from litellm.litellm_core_utils.internal_call_metadata import logged_event_key
 
 
 # This file includes the custom callbacks for LiteLLM Proxy
@@ -110,10 +109,8 @@ class DeepEvalLogger(CustomLogger):
             )
         else:
             output = str(standard_logging_object.get("error_string", ""))
-        logged_id: Final = standard_logging_object.get("id", uuid.uuid4())
-        span_id: Final = logged_event_key(kwargs, logged_id) if isinstance(logged_id, str) else logged_id
         return BaseApiSpan(
-            uuid=span_id,
+            uuid=standard_logging_object.get("id", uuid.uuid4()),
             name=("litellm_success_callback" if is_success else "litellm_failure_callback"),
             status=(TraceSpanApiStatus.SUCCESS if is_success else TraceSpanApiStatus.ERRORED),
             type=SpanApiType.LLM,

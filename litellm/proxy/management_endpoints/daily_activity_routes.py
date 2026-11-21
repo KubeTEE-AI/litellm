@@ -23,7 +23,6 @@ from litellm.proxy.management_endpoints.common_daily_activity import (
     parse_canonical_date_range,
     raise_public,
     spend_logs_window,
-    sum_spend_metrics,
     unless_database_fails,
 )
 from litellm.proxy.management_endpoints.daily_activity_scopes import (
@@ -41,7 +40,6 @@ from litellm.proxy.management_endpoints.ptu_consumption import single_team_id, w
 from litellm.proxy.management_endpoints.team_endpoints import aggregated_date_range_error
 from litellm.proxy.management_helpers.utils import management_endpoint_wrapper
 from litellm.proxy.utils import PrismaClient, get_prisma_client_or_throw
-from litellm.repositories.daily_activity_buckets import api_key_bucket
 from litellm.repositories.daily_activity_repository import DailyActivityRepository
 from litellm.router import Router
 from litellm.types.proxy.management_endpoints.common_daily_activity import (
@@ -110,9 +108,29 @@ async def _resolved_scope(
     return result
 
 
+def _sum_metrics(metrics: Sequence[SpendMetrics]) -> SpendMetrics:
+    return SpendMetrics(
+        spend=sum(metric.spend for metric in metrics),
+        flat_cost=sum(metric.flat_cost for metric in metrics),
+        prompt_tokens=sum(metric.prompt_tokens for metric in metrics),
+        completion_tokens=sum(metric.completion_tokens for metric in metrics),
+        cache_read_input_tokens=sum(metric.cache_read_input_tokens for metric in metrics),
+        cache_creation_input_tokens=sum(metric.cache_creation_input_tokens for metric in metrics),
+        compression_saved_tokens=sum(metric.compression_saved_tokens for metric in metrics),
+        compression_savings_spend=sum(metric.compression_savings_spend for metric in metrics),
+        prompt_caching_savings_spend=sum(metric.prompt_caching_savings_spend for metric in metrics),
+        gateway_injected_caching_savings_spend=sum(metric.gateway_injected_caching_savings_spend for metric in metrics),
+        autorouter_savings_spend=sum(metric.autorouter_savings_spend for metric in metrics),
+        total_tokens=sum(metric.total_tokens for metric in metrics),
+        successful_requests=sum(metric.successful_requests for metric in metrics),
+        failed_requests=sum(metric.failed_requests for metric in metrics),
+        api_requests=sum(metric.api_requests for metric in metrics),
+        total_response_time_ms=sum(metric.total_response_time_ms for metric in metrics),
+        timed_requests=sum(metric.timed_requests for metric in metrics),
+    )
+
+
 def _key_metadata(api_key: str, metadata: Mapping[str, KeyMetadataRow]) -> KeyMetadata:
-    if not api_key:
-        return KeyMetadata(key_alias="Unattributed", key_exists=False)
     row: Final[KeyMetadataRow | None] = metadata.get(api_key)
     if row is None:
         return KeyMetadata()
@@ -127,7 +145,7 @@ def _key_metadata(api_key: str, metadata: Mapping[str, KeyMetadataRow]) -> KeyMe
 
 def _key_activity_row(row: KeySpendRow, metadata: Mapping[str, KeyMetadataRow]) -> KeySpendActivityRow:
     return KeySpendActivityRow(
-        api_key=api_key_bucket(row.api_key),
+        api_key=row.api_key,
         metrics=KeySpendMetrics(
             spend=row.spend,
             prompt_tokens=row.prompt_tokens,
@@ -152,7 +170,7 @@ async def _key_activity_rows(
         frozenset((resolved_scope.scope.start_date, resolved_scope.scope.end_date))
     )
     metadata: Final[Mapping[str, KeyMetadataRow]] = await unless_database_fails(
-        repository.key_metadata(frozenset(row.api_key for row in rows if row.api_key), spend_window),
+        repository.key_metadata(frozenset(row.api_key for row in rows), spend_window),
         MappingProxyType({}),
         "its key metadata",
     )
@@ -218,11 +236,11 @@ def _fold_key_metrics(api_key: str, response: SpendAnalyticsPaginatedResponse) -
     metadata: Final[KeyMetadata] = next(
         day.breakdown.api_keys[api_key].metadata for day in response.results if api_key in day.breakdown.api_keys
     )
-    return KeyActivityRow(api_key=api_key, metrics=sum_spend_metrics(metrics), metadata=metadata)
+    return KeyActivityRow(api_key=api_key, metrics=_sum_metrics(metrics), metadata=metadata)
 
 
 def _search_rows(keys: Sequence[str], response: SpendAnalyticsPaginatedResponse) -> list[KeyActivityRow]:
-    return [row for key in keys if (row := _fold_key_metrics(api_key_bucket(key), response)) is not None]
+    return [row for key in keys if (row := _fold_key_metrics(key, response)) is not None]
 
 
 def _csv_cell(value: object) -> object:
@@ -287,7 +305,6 @@ def _register_aggregated_route(router: APIRouter, resolver: EntityScopeResolver,
                 resolved.scope,
                 entity_metadata_field=resolved.entity_metadata,
                 include_entity_breakdown=resolver.include_entity_breakdown,
-                include_guardrail_breakdown=resolver.include_guardrail_breakdown,
                 api_key_limit=api_key_limit,
             )
             if resolver.entity != "team":

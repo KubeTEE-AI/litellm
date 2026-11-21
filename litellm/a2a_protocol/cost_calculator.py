@@ -5,10 +5,7 @@ Supports dynamic cost parameters that allow platform owners
 to define custom costs per agent query or per token.
 """
 
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Final, SupportsFloat, SupportsIndex
-
-from typing_extensions import Buffer
+from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from litellm.litellm_core_utils.litellm_logging import (
@@ -16,15 +13,6 @@ if TYPE_CHECKING:
     )
 else:
     LitellmLoggingObject = Any
-
-
-def _custom_response_cost(model_call_details: Mapping[str, object]) -> float | None:
-    response_cost: Final = model_call_details.get("response_cost", None)
-    if response_cost is None:
-        return None
-    if isinstance(response_cost, (str, Buffer, SupportsFloat, SupportsIndex)):
-        return float(response_cost)
-    raise TypeError(f"float() argument must be a string or a real number, not {type(response_cost).__name__!r}")
 
 
 class A2ACostCalculator:
@@ -57,9 +45,9 @@ class A2ACostCalculator:
         model_call_details: Final = litellm_logging_obj.model_call_details
 
         # Check if user set a custom response cost (backward compatibility)
-        custom_response_cost: Final = _custom_response_cost(model_call_details)
-        if custom_response_cost is not None:
-            return custom_response_cost
+        response_cost: Final = model_call_details.get("response_cost", None)
+        if response_cost is not None:
+            return float(response_cost)
 
         # Get litellm_params for cost parameters
         litellm_params: Final = model_call_details.get("litellm_params", {}) or {}

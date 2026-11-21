@@ -1,9 +1,7 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import type { TFunction } from "i18next";
 import { MoreHorizontal, UserPlus } from "lucide-react";
-import { useTranslation } from "react-i18next";
 
 import { DataTableSortHeader } from "@/components/shared/DataTable";
 import { IdentityCell, ModelsCell } from "@/components/shared/table_cells";
@@ -25,11 +23,10 @@ export interface AvailableTeam {
 }
 
 function AvailableTeamRowActions({ team, onJoinTeam }: { team: AvailableTeam; onJoinTeam: (teamId: string) => void }) {
-  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={t("teams.availableTeams.columns.openActions")}
+        aria-label="Open team actions"
         data-testid={`available-team-actions-${team.team_id}`}
         className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground")}
       >
@@ -38,7 +35,7 @@ function AvailableTeamRowActions({ team, onJoinTeam }: { team: AvailableTeam; on
       <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuItem data-testid="available-team-action-join" onClick={() => onJoinTeam(team.team_id)}>
           <UserPlus />
-          {t("teams.availableTeams.columns.join")}
+          Join team
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -47,18 +44,16 @@ function AvailableTeamRowActions({ team, onJoinTeam }: { team: AvailableTeam; on
 
 interface AvailableTeamsTableColumnsDeps {
   onJoinTeam: (teamId: string) => void;
-  t: TFunction;
 }
 
 export const getAvailableTeamsTableColumns = ({
   onJoinTeam,
-  t,
 }: AvailableTeamsTableColumnsDeps): ColumnDef<AvailableTeam>[] => [
   {
     id: "team_alias",
     accessorKey: "team_alias",
-    meta: { title: t("teams.availableTeams.columns.teamName") },
-    header: ({ column }) => <DataTableSortHeader column={column} title={t("teams.availableTeams.columns.teamName")} />,
+    meta: { title: "Team Name" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Team Name" />,
     size: 220,
     enableSorting: true,
     cell: ({ row }) => (
@@ -68,15 +63,15 @@ export const getAvailableTeamsTableColumns = ({
   {
     id: "description",
     accessorKey: "description",
-    meta: { title: t("teams.availableTeams.columns.description") },
-    header: t("teams.availableTeams.columns.description"),
+    meta: { title: "Description" },
+    header: "Description",
     size: 280,
     enableSorting: false,
     cell: ({ row }) => {
       const description = row.original.description;
       return (
         <span className="block max-w-72 truncate text-sm text-muted-foreground" title={description || undefined}>
-          {description || t("teams.availableTeams.columns.noDescription")}
+          {description || "No description available"}
         </span>
       );
     },
@@ -84,20 +79,18 @@ export const getAvailableTeamsTableColumns = ({
   {
     id: "members",
     accessorFn: (team) => team.members_with_roles.length,
-    meta: { title: t("teams.availableTeams.columns.members") },
-    header: ({ column }) => <DataTableSortHeader column={column} title={t("teams.availableTeams.columns.members")} />,
+    meta: { title: "Members" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Members" />,
     size: 120,
     enableSorting: true,
     cell: ({ row }) => (
-      <span className="text-sm text-muted-foreground">
-        {t("teams.availableTeams.columns.membersCount", { count: row.original.members_with_roles.length })}
-      </span>
+      <span className="text-sm text-muted-foreground">{row.original.members_with_roles.length} members</span>
     ),
   },
   {
     id: "models",
-    meta: { title: t("teams.availableTeams.columns.models") },
-    header: t("teams.availableTeams.columns.models"),
+    meta: { title: "Models" },
+    header: "Models",
     size: 260,
     enableSorting: false,
     cell: ({ row }) => <ModelsCell models={row.original.models} />,
@@ -105,7 +98,7 @@ export const getAvailableTeamsTableColumns = ({
   {
     id: "actions",
     meta: { className: "text-right", headerClassName: "text-right" },
-    header: () => <span className="sr-only">{t("teams.availableTeams.columns.actions")}</span>,
+    header: () => <span className="sr-only">Actions</span>,
     size: 64,
     enableSorting: false,
     enableHiding: false,

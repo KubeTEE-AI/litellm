@@ -67,13 +67,12 @@ class TestCustomStreamWrapperMaxDuration:
 
     @pytest.mark.asyncio
     async def test_should_raise_on_async_anext_when_exceeded(self):
-        """__anext__ checks the limit before iterating and schedules failure logging."""
+        """__anext__ should check the limit before iterating, dispatching the
+        same failure-callback/logging path every other stream failure goes
+        through (dispatch_failure_handlers is async on the real Logging class,
+        so the mock needs to be awaitable too)."""
         wrapper = _make_custom_stream_wrapper()
-
-        async def _noop() -> None:
-            return None
-
-        wrapper.logging_obj.dispatch_attempt_failure_handlers = MagicMock(side_effect=lambda *_: _noop())
+        wrapper.logging_obj.dispatch_failure_handlers = AsyncMock()
         wrapper._stream_created_time = time.time() - 20
         with patch("litellm.constants.LITELLM_MAX_STREAMING_DURATION_SECONDS", 10.0):
             with pytest.raises(litellm.Timeout):

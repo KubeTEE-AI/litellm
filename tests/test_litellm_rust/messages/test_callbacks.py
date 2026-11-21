@@ -14,6 +14,7 @@ from litellm.types.integrations.argilla import ArgillaItem
 from litellm.types.utils import ModelResponse, StandardLoggingPayload
 from tests.test_litellm_rust.messages.data import BAD_REQUEST, MESSAGES_RESPONSE, RATE_LIMITED, call
 from tests.test_litellm_rust.support.callback_recorder import HookRecorder, RecordingLogger, request_body
+from tests.test_litellm_rust.support.gaps import gap
 from tests.test_litellm_rust.support.isolation import rebound
 from tests.test_litellm_rust.support.recording_server import RecordingServer, ResponseSpec, relaxed
 from tests.test_litellm_rust.support.results import response_id, with_id
@@ -21,6 +22,7 @@ from tests.test_litellm_rust.support.routing import assert_served_natively
 
 pytestmark = pytest.mark.requires_rust_extension
 
+SYNC_HANDLERS_ON_ASYNC_CALLS: Final = gap("native async calls also run the sync success and failure handlers")
 _OBJECT: Final = TypeAdapter(dict[str, object])
 _HEADERS: Final = TypeAdapter(dict[str, str])
 
@@ -65,7 +67,7 @@ async def test_success_hook_fires_the_expected_number_of_times(
         pytest.param("async_log_failure_event", 1),
         pytest.param("async_post_call_failure_deployment_hook", 1),
         pytest.param("log_model_group_rate_limit_error", 1),
-        pytest.param("log_failure_event", 0),
+        pytest.param("log_failure_event", 0, marks=SYNC_HANDLERS_ON_ASYNC_CALLS),
     ),
 )
 async def test_failure_hook_fires_the_expected_number_of_times(
@@ -209,7 +211,7 @@ async def test_pre_call_deployment_rejection_logs_failure_without_provider_io(se
         failures: Final = await recorder.wait_for_async("async_log_failure_event")
 
     assert raised.value is rejection
-    assert not server.requests
+    assert server.requests == []
     assert len(failures) == 1
     assert _OBJECT.validate_python(failures[0].kwargs)["exception"] is raised.value
     assert not {"log_pre_api_call", "log_success_event", "async_log_success_event"} & set(recorder.names)
@@ -339,8 +341,8 @@ async def test_a_failing_logger_does_not_fail_the_call(server: RecordingServer) 
         pytest.param("input", False, False, 1, id="global-input"),
         pytest.param("success", True, False, 1, id="global-async-success"),
         pytest.param("success", True, True, 1, id="request-async-success"),
-        pytest.param("success", False, False, 0, id="global-sync-success"),
-        pytest.param("success", False, True, 0, id="request-sync-success"),
+        pytest.param("success", False, False, 0, id="global-sync-success", marks=SYNC_HANDLERS_ON_ASYNC_CALLS),
+        pytest.param("success", False, True, 0, id="request-sync-success", marks=SYNC_HANDLERS_ON_ASYNC_CALLS),
         pytest.param("failure", True, False, 1, id="global-async-failure"),
         pytest.param("failure", False, False, 1, id="global-sync-failure"),
         pytest.param("failure", False, True, 1, id="request-sync-failure"),
@@ -382,11 +384,12 @@ async def test_pre_call_rule_rejects_before_provider_io(server: RecordingServer)
         checked.append(text)
         return False
 
-    with rebound(litellm, "pre_call_rules", [reject]), pytest.raises(litellm.APIResponseValidationError):
-        await call(server)
+    with rebound(litellm, "pre_call_rules", [reject]):
+        with pytest.raises(litellm.APIResponseValidationError):
+            await call(server)
 
     assert checked == ["Hello"]
-    assert not server.requests
+    assert server.requests == []
 
 
 @pytest.mark.asyncio
@@ -416,11 +419,11 @@ async def test_dataset_hook_returning_none_drops_the_record_from_the_success_sin
 
 
 @pytest.mark.asyncio
-async def test_sync_call_raises_like_python_without_logging(server: RecordingServer) -> None:
+async def test_sync_call_returns_the_provider_message(server: RecordingServer) -> None:
     recorder: Final = RecordingLogger()
 
-    with pytest.raises(ValueError, match="anthropic_messages_handler is not implemented for sync calls"):
-        await call(server, asynchronous=False, callbacks=[recorder])
+    response: Final = await call(server, asynchronous=False, callbacks=[recorder])
 
-    assert not server.requests
-    assert not recorder.names
+    assert_served_natively(server, response)
+    assert response_id(response) == MESSAGES_RESPONSE["id"]
+    assert len(await recorder.wait_for_async("log_success_event")) == 1

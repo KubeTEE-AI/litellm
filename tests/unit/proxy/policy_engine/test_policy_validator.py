@@ -6,7 +6,6 @@ Tests validation of:
 - Guardrail names exist in registry
 """
 
-from types import SimpleNamespace
 from typing import Optional, Set
 from unittest.mock import MagicMock, patch
 
@@ -18,7 +17,6 @@ from litellm.types.proxy.policy_engine import (
     PolicyGuardrails,
     PolicyValidationErrorType,
 )
-from tests.unit.proxy.router_entry_point_stubs import route_entry_points_to_stubs
 
 
 class _FakeTable:
@@ -50,9 +48,6 @@ class _FakeRouter:
 
     def __init__(self, model_names: Set[str]):
         self.model_names = list(model_names)
-        # A router with no wildcard deployments: its pattern router matches nothing.
-        self.pattern_router = SimpleNamespace(get_deployments_by_pattern=lambda model: [])
-        route_entry_points_to_stubs(self)
 
 
 class TestPolicyValidator:

@@ -19,11 +19,8 @@ if TYPE_CHECKING:
 
 
 class _SkillRecord(Protocol):
-    @property
-    def name(self) -> str: ...
-
-    @property
-    def enabled(self) -> bool: ...
+    name: str
+    enabled: bool
 
 
 def _skills_of(permission: LiteLLM_ObjectPermissionTable | None) -> frozenset[str]:

@@ -1,6 +1,6 @@
 "use client";
 
-import BudgetPanel from "./_components/BudgetPanel";
+import BudgetPanel from "./_components/budget_panel";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 
 export default function Budgets() {

@@ -1,7 +1,6 @@
 import React from "react";
 import { ChevronRight } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import i18n from "@/i18n/i18n";
 
 interface RoutingOptionsProps {
   label?: string;
@@ -11,7 +10,7 @@ interface RoutingOptionsProps {
 }
 
 const RoutingOptions = ({
-  label = i18n.t("addModel.routingOptions.advancedSettings"),
+  label = "Advanced settings",
   showValidationErrors = false,
   summary,
   children,

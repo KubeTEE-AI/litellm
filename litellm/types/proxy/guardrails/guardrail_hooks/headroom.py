@@ -1,18 +1,8 @@
-from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from .base import GuardrailConfigModel
-
-HEADROOM_REQUEST_CONTEXT_KEY: Final = "_headroom_request_context"
-
-
-@dataclass(frozen=True, slots=True)
-class HeadroomRequestContext:
-    issued_hashes: frozenset[str]
-    affinity: str | None
-    expires_at: float
 
 
 class HeadroomGuardrailConfigModel(GuardrailConfigModel[BaseModel]):

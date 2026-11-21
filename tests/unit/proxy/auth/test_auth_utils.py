@@ -12,13 +12,12 @@ import pytest
 from fastapi import HTTPException, Request
 
 import litellm
-from litellm.proxy._types import ProxyException, UserAPIKeyAuth
+from litellm.proxy._types import UserAPIKeyAuth
 from litellm.proxy.auth.auth_utils import (
     _allow_model_level_clientside_configurable_parameters,
     _get_customer_id_from_standard_headers,
     abbreviate_api_key,
     check_complete_credentials,
-    check_if_request_size_is_safe,
     custom_auth_common_checks_warning,
     get_customer_user_header_from_mapping,
     log_once_if_budget_reservation_disabled,
@@ -176,8 +175,11 @@ def _azure_entra_router(configurable_clientside_auth_params: tuple[str, ...] = (
 
 
 @pytest.mark.parametrize("param", _AZURE_ENTRA_CREDENTIAL_PARAMS)
+@pytest.mark.parametrize("route", ("/v1/chat/completions", "/v1/images/generations", "/v1/audio/speech"))
 @pytest.mark.parametrize("container", (None, "extra_body", "litellm_embedding_config"))
-def test_azure_entra_credential_params_in_request_body_are_rejected(param: str, container: str | None) -> None:
+def test_azure_entra_credential_params_in_request_body_are_rejected(
+    param: str, container: str | None, route: str
+) -> None:
     override: Final = {param: "caller-chosen"}
     with pytest.raises(ValueError, match=f"{param} is not allowed in request body"):
         is_request_body_safe(
@@ -185,7 +187,7 @@ def test_azure_entra_credential_params_in_request_body_are_rejected(param: str, 
             general_settings={},
             llm_router=_azure_entra_router(),
             model="azure-group",
-            route="/v1/chat/completions",
+            route=route,
         )
 
 
@@ -410,11 +412,13 @@ _USER_CONFIG_SECRET_REFERENCE_PARAMS: Final = (
 def _user_config(slot: str, litellm_params: Mapping[str, object]) -> Mapping[str, object]:
     if slot == "default_litellm_params":
         return {"default_litellm_params": dict(litellm_params)}
+    if slot == "search_tools":
+        return {"search_tools": [{"search_tool_name": "caller-search", "litellm_params": dict(litellm_params)}]}
     return {"model_list": [{"model_name": "caller-model", "litellm_params": dict(litellm_params)}]}
 
 
 @pytest.mark.parametrize("litellm_params", _USER_CONFIG_SECRET_REFERENCE_PARAMS)
-@pytest.mark.parametrize("slot", ("model_list", "default_litellm_params"))
+@pytest.mark.parametrize("slot", ("model_list", "default_litellm_params", "search_tools"))
 def test_user_config_secret_references_are_rejected_despite_client_side_opt_in(
     litellm_params: Mapping[str, object], slot: str
 ) -> None:
@@ -658,227 +662,6 @@ def test_configuring_a_deployment_still_cannot_carry_federation_fields_inline(ro
             model="claude-sonnet-5",
             route=route,
         )
-
-
-_SERVICE_ACCOUNT_TOKEN_REFERENCE: Final = "oidc/file//var/run/secrets/kubernetes.io/serviceaccount/token"
-
-
-def _user_config_with(litellm_params: dict[str, str]) -> dict[str, object]:
-    return {"model_list": [{"model_name": "devstral", "litellm_params": {"model": "mistral/devstral-latest", **litellm_params}}]}
-
-
-def _user_config_defaulting_to(litellm_params: dict[str, str]) -> dict[str, object]:
-    return {
-        "model_list": [
-            {
-                "model_name": "devstral",
-                "litellm_params": {"model": "mistral/devstral-latest", "api_base": "https://attacker.example"},
-            }
-        ],
-        "default_litellm_params": litellm_params,
-    }
-
-
-def _user_config_search_tool_with(litellm_params: dict[str, str]) -> dict[str, object]:
-    return {
-        "search_tools": [
-            {
-                "search_tool_name": "web",
-                "litellm_params": {"search_provider": "tavily", "api_base": "https://attacker.example", **litellm_params},
-            }
-        ]
-    }
-
-
-@pytest.fixture
-def oidc_api_key_credential(monkeypatch):
-    from litellm.types.utils import CredentialItem
-
-    monkeypatch.setattr(
-        litellm,
-        "credential_list",
-        [
-            CredentialItem(
-                credential_name="admin-oidc",
-                credential_values={"api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE},
-                credential_info={"custom_llm_provider": "mistral"},
-            )
-        ],
-    )
-
-
-def _vector_store_embedding_config_with(embedding_config: dict[str, str]) -> dict[str, object]:
-    return {
-        "vector_store_id": "docs",
-        "custom_llm_provider": "milvus",
-        "litellm_params": {
-            "api_base": "https://milvus.example",
-            "litellm_embedding_config": {"api_base": "https://attacker.example", **embedding_config},
-        },
-    }
-
-
-def test_a_vector_store_embedding_config_may_carry_a_plain_api_key():
-    assert is_request_body_safe(
-        request_body=_vector_store_embedding_config_with({"api_key": "sk-embedding"}),
-        general_settings={},
-        llm_router=None,
-        model="",
-        route="/vector_store/new",
-    )
-
-
-@pytest.mark.parametrize("route", [None, "/model/new", "/health/test_connection"])
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"model": "devstral", "api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE},
-        {"model": "devstral", "extra_body": {"api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE}},
-        {"model": "devstral", "fallbacks": [{"model": "other", "api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE}]},
-        {
-            "model": "devstral",
-            "user_config": _user_config_with(
-                {"api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE, "api_base": "https://attacker.example"}
-            ),
-        },
-        {"model": "devstral", "user_config": _user_config_defaulting_to({"api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE})},
-        {"model": "web", "user_config": _user_config_search_tool_with({"api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE})},
-        _vector_store_embedding_config_with({"api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE}),
-    ],
-    ids=[
-        "top_level",
-        "extra_body",
-        "fallback_target",
-        "user_config",
-        "user_config_defaults",
-        "user_config_search_tool",
-        "vector_store_embedding_config",
-    ],
-)
-def test_a_request_body_cannot_carry_an_oidc_api_key_reference(route: str | None, body: dict):
-    """The call path reads an oidc/ api_key from the proxy's own filesystem or environment, so a body that set one
-    could send the proxy's service account token to a host the caller picks. No opt-in or route relaxes it."""
-    with pytest.raises(ValueError, match="api_key holds an oidc/ secret reference"):
-        is_request_body_safe(
-            request_body=body,
-            general_settings={"allow_client_side_credentials": True},
-            llm_router=None,
-            model="devstral",
-            route=route,
-        )
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"model": "devstral", "litellm_credential_name": "admin-oidc"},
-        {
-            "model": "devstral",
-            "user_config": _user_config_with(
-                {"litellm_credential_name": "admin-oidc", "api_base": "https://attacker.example"}
-            ),
-        },
-        {"model": "devstral", "user_config": _user_config_defaulting_to({"litellm_credential_name": "admin-oidc"})},
-        _vector_store_embedding_config_with({"litellm_credential_name": "admin-oidc"}),
-    ],
-    ids=["top_level", "user_config", "user_config_defaults", "vector_store_embedding_config"],
-)
-def test_a_request_body_cannot_name_a_credential_holding_an_oidc_api_key(oidc_api_key_credential, body: dict):
-    with pytest.raises(ValueError, match=r"names a credential .* oidc/ api_key secret reference"):
-        is_request_body_safe(
-            request_body=body,
-            general_settings={"allow_client_side_credentials": True},
-            llm_router=None,
-            model="devstral",
-        )
-
-
-@pytest.mark.parametrize("route", [None, "/chat/completions"])
-def test_a_call_cannot_carry_an_oidc_api_key_in_litellm_params(route: str | None):
-    with pytest.raises(ValueError, match="api_key holds an oidc/ secret reference"):
-        is_request_body_safe(
-            request_body={"model": "devstral", "litellm_params": {"api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE}},
-            general_settings={"allow_client_side_credentials": True},
-            llm_router=None,
-            model="devstral",
-            route=route,
-        )
-
-
-@pytest.mark.parametrize("route", ["/model/new", "/model/update", "/model/deployment-1/update", "/health/test_connection"])
-def test_a_deployment_write_may_carry_an_oidc_api_key_in_litellm_params(route: str):
-    """A proxy admin configures an oidc/ api_key on a deployment through these routes, and the model management role
-    gate refuses anyone else with a 403."""
-    assert (
-        is_request_body_safe(
-            request_body={
-                "model": "devstral",
-                "litellm_params": {"model": "mistral/devstral-latest", "api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE},
-            },
-            general_settings={},
-            llm_router=None,
-            model="devstral",
-            route=route,
-        )
-        is True
-    )
-
-
-_OIDC_DEPLOYMENT_PARAMS: Final = (
-    pytest.param({"model": "mistral/devstral-latest", "api_key": _SERVICE_ACCOUNT_TOKEN_REFERENCE}, id="inline"),
-    pytest.param({"model": "mistral/devstral-latest", "litellm_credential_name": "admin-oidc"}, id="named_credential"),
-)
-
-
-@pytest.mark.parametrize("override", ["api_base", "base_url"])
-@pytest.mark.parametrize("deployment_params", _OIDC_DEPLOYMENT_PARAMS)
-def test_a_base_override_cannot_send_the_deployments_oidc_api_key(
-    oidc_api_key_credential, deployment_params: dict, override: str
-):
-    from litellm.exceptions import BadRequestError
-    from litellm.litellm_core_utils.clientside_credential_handler import get_dynamic_litellm_params
-
-    with pytest.raises(BadRequestError, match="api_key is an oidc/ secret reference"):
-        get_dynamic_litellm_params(
-            litellm_params=dict(deployment_params), request_kwargs={override: "https://caller.example/v1"}
-        )
-
-
-@pytest.mark.parametrize("deployment_params", _OIDC_DEPLOYMENT_PARAMS)
-def test_a_base_override_with_the_callers_own_api_key_is_allowed(oidc_api_key_credential, deployment_params: dict):
-    from litellm.litellm_core_utils.clientside_credential_handler import get_dynamic_litellm_params
-
-    out: Final = get_dynamic_litellm_params(
-        litellm_params=dict(deployment_params),
-        request_kwargs={"api_base": "https://caller.example/v1", "api_key": "sk-caller"},
-    )
-    assert (out["api_base"], out["api_key"]) == ("https://caller.example/v1", "sk-caller")
-
-
-def test_test_connection_may_name_a_credential_holding_an_oidc_api_key(oidc_api_key_credential):
-    """The admin UI tests a stored credential by name, which is how a proxy admin checks an oidc/ api_key works."""
-    assert (
-        is_request_body_safe(
-            request_body={"model": "devstral", "litellm_params": {"litellm_credential_name": "admin-oidc"}},
-            general_settings={},
-            llm_router=None,
-            model="devstral",
-            route="/health/test_connection",
-        )
-        is True
-    )
-
-
-def test_a_user_config_with_its_own_api_key_is_still_allowed():
-    assert (
-        is_request_body_safe(
-            request_body={"model": "devstral", "user_config": _user_config_with({"api_key": "sk-client-owned"})},
-            general_settings={"allow_client_side_credentials": True},
-            llm_router=None,
-            model="devstral",
-        )
-        is True
-    )
 
 
 class TestCustomAuthCommonChecksWarning:
@@ -1171,7 +954,7 @@ class TestGetKeyModelTpmLimit:
         """Deployments with non-integer-parseable limit values are skipped without raising."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [
+        mock_router.get_model_list.return_value = [
             {
                 "model_name": "model1",
                 "litellm_params": {"default_api_key_tpm_limit": "not-a-number"},
@@ -1324,40 +1107,6 @@ def test_oss_native_model_cannot_implicitly_select_an_unauthorized_checkpoint(pr
     assert denied.value.status_code == 400
 
 
-# eu-jev.com/docs (read 2026-10-21): an omitted model means eu-jeff-latest, and the legacy names
-# jeff-latest and jeff-1.0.0 answer with the current release.
-@pytest.mark.parametrize(
-    ("request_data", "permission_model"),
-    [
-        ({}, "eu_jev/eu-jeff-latest"),
-        ({"model": None}, "eu_jev/eu-jeff-latest"),
-        ({"model": "eu-jeff-latest"}, "eu_jev/eu-jeff-latest"),
-        ({"model": "jeff-latest"}, "eu_jev/eu-jeff-latest"),
-        ({"model": "jeff-1.0.0"}, "eu_jev/eu-jeff-latest"),
-        ({"model": "eu-jeff-1.0.0"}, "eu_jev/eu-jeff-1.0.0"),
-        ({"model": "eu_jev/eu-jeff-1.0.0"}, "eu_jev/eu-jeff-1.0.0"),
-        ({"model": "eu_jev/jeff-latest"}, "eu_jev/eu-jeff-latest"),
-    ],
-)
-@pytest.mark.parametrize("suffix", ["", "/"])
-def test_eu_jev_decision_is_checked_against_the_model_eu_jev_runs(
-    request_data: dict[str, object], permission_model: str, suffix: str
-) -> None:
-    assert get_model_from_request(request_data=request_data, route=f"/eu_jev/v1/systemone{suffix}") == permission_model
-
-
-@pytest.mark.parametrize("model", [["eu-jeff-latest"], 7, {"name": "eu-jeff-latest"}])
-def test_eu_jev_decision_rejects_a_model_that_is_not_a_string(model: object) -> None:
-    with pytest.raises(HTTPException) as denied:
-        get_model_from_request(request_data={"model": model}, route="/eu_jev/v1/systemone")
-    assert denied.value.status_code == 400
-
-
-@pytest.mark.usefixtures("configured_eu_jev_route")
-def test_a_pass_through_configured_at_the_eu_jev_decision_path_keeps_the_requested_model() -> None:
-    assert get_model_from_request(request_data={"model": "jeff-latest"}, route="/eu_jev/v1/systemone") == "jeff-latest"
-
-
 def test_laya_model_normalization_does_not_change_other_provider_routes() -> None:
     assert get_model_from_request(request_data={"model": "jev-latest"}, route="/typesafe/v1/systemone") == "jev-latest"
     assert get_model_from_request(request_data={}, route="/laya/health") is None
@@ -1452,7 +1201,7 @@ def _cache_prediction_auth_app(
             request_data=request_data,
             route=request.url.path,
             request=request,
-            llm_model_list=router.registry().deployments(),
+            llm_model_list=router.get_model_list(),
             llm_router=router,
         )
         return token
@@ -1468,7 +1217,7 @@ def _cache_prediction_auth_app(
     monkeypatch.setattr(proxy_server, "user_custom_auth", None)
     monkeypatch.setattr(proxy_server, "general_settings", {})
     monkeypatch.setattr(proxy_server, "llm_router", router)
-    monkeypatch.setattr(proxy_server, "llm_model_list", router.registry().deployments())
+    monkeypatch.setattr(proxy_server, "llm_model_list", router.get_model_list())
     monkeypatch.setattr(proxy_server, "prisma_client", None)
     monkeypatch.setattr(proxy_server, "user_api_key_cache", DualCache())
     logging = ProxyLogging(user_api_key_cache=DualCache())
@@ -2392,7 +2141,7 @@ def test_get_model_from_request_resolves_character_id_model_with_router():
         model_id="veo-3.1-generate-001",
     )
     llm_router = MagicMock()
-    llm_router.registry.return_value.resolve.return_value = "gcp/google/veo-3.1-generate-001"
+    llm_router.resolve_model_name_from_model_id.return_value = "gcp/google/veo-3.1-generate-001"
 
     assert (
         get_model_from_request(
@@ -2402,7 +2151,7 @@ def test_get_model_from_request_resolves_character_id_model_with_router():
         )
         == "gcp/google/veo-3.1-generate-001"
     )
-    llm_router.registry.return_value.resolve.assert_called_once_with("veo-3.1-generate-001", kind="from_id")
+    llm_router.resolve_model_name_from_model_id.assert_called_once_with("veo-3.1-generate-001")
 
 
 def test_get_model_from_request_only_runs_media_decoders_for_matching_fields():
@@ -2954,7 +2703,7 @@ class TestGetEndUserIdDropsMalformedBodyValues:
 
 
 def _make_deployment_dict(model_name: str, tpm: Optional[int] = None, rpm: Optional[int] = None) -> dict:
-    """Helper to build a minimal deployment dict as returned by router.registry().deployments()."""
+    """Helper to build a minimal deployment dict as returned by router.get_model_list."""
     litellm_params: dict = {"model": model_name}
     if tpm is not None:
         litellm_params["default_api_key_tpm_limit"] = tpm
@@ -2973,7 +2722,7 @@ class TestDeploymentDefaultRpmLimit:
         """Case 2 from spec: key has no model-specific limits, falls back to deployment default."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [_make_deployment_dict("model1", rpm=200)]
+        mock_router.get_model_list.return_value = [_make_deployment_dict("model1", rpm=200)]
         with patch(_ROUTER_PATCH, mock_router):
             result = get_key_model_rpm_limit(user_api_key_dict, model_name="model1")
         assert result == {"model1": 200}
@@ -2985,7 +2734,7 @@ class TestDeploymentDefaultRpmLimit:
             metadata={"model_rpm_limit": {"model1": 10}},
         )
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [_make_deployment_dict("model1", rpm=200)]
+        mock_router.get_model_list.return_value = [_make_deployment_dict("model1", rpm=200)]
         with patch(_ROUTER_PATCH, mock_router):
             result = get_key_model_rpm_limit(user_api_key_dict, model_name="model1")
         assert result == {"model1": 10}
@@ -2994,7 +2743,7 @@ class TestDeploymentDefaultRpmLimit:
         """Returns None when neither the key nor the deployment has any rpm limit."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [
+        mock_router.get_model_list.return_value = [
             _make_deployment_dict("model1")  # no rpm default
         ]
         with patch(_ROUTER_PATCH, mock_router):
@@ -3005,7 +2754,7 @@ class TestDeploymentDefaultRpmLimit:
         """No model_name means deployment fallback is skipped."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [_make_deployment_dict("model1", rpm=200)]
+        mock_router.get_model_list.return_value = [_make_deployment_dict("model1", rpm=200)]
         with patch(_ROUTER_PATCH, mock_router):
             result = get_key_model_rpm_limit(user_api_key_dict)
         assert result is None
@@ -3021,7 +2770,7 @@ class TestDeploymentDefaultRpmLimit:
         """When multiple deployments share a model name, the minimum rpm limit is used."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [
+        mock_router.get_model_list.return_value = [
             _make_deployment_dict("model1", rpm=200),
             _make_deployment_dict("model1", rpm=50),
             _make_deployment_dict("model1", rpm=150),
@@ -3034,7 +2783,7 @@ class TestDeploymentDefaultRpmLimit:
         """Deployments missing the field are skipped; min is taken over those that have it."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [
+        mock_router.get_model_list.return_value = [
             _make_deployment_dict("model1"),  # no rpm default
             _make_deployment_dict("model1", rpm=75),
         ]
@@ -3046,7 +2795,7 @@ class TestDeploymentDefaultRpmLimit:
         """Deployments with non-integer-parseable limit values are skipped without raising."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [
+        mock_router.get_model_list.return_value = [
             {
                 "model_name": "model1",
                 "litellm_params": {"default_api_key_rpm_limit": "not-a-number"},
@@ -3066,7 +2815,7 @@ class TestDeploymentDefaultTpmLimit:
         """Case 2 from spec: key has no model-specific limits, falls back to deployment default."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [_make_deployment_dict("model1", tpm=100)]
+        mock_router.get_model_list.return_value = [_make_deployment_dict("model1", tpm=100)]
         with patch(_ROUTER_PATCH, mock_router):
             result = get_key_model_tpm_limit(user_api_key_dict, model_name="model1")
         assert result == {"model1": 100}
@@ -3078,7 +2827,7 @@ class TestDeploymentDefaultTpmLimit:
             metadata={"model_tpm_limit": {"model1": 20}},
         )
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [_make_deployment_dict("model1", tpm=100)]
+        mock_router.get_model_list.return_value = [_make_deployment_dict("model1", tpm=100)]
         with patch(_ROUTER_PATCH, mock_router):
             result = get_key_model_tpm_limit(user_api_key_dict, model_name="model1")
         assert result == {"model1": 20}
@@ -3087,7 +2836,7 @@ class TestDeploymentDefaultTpmLimit:
         """Returns None when neither the key nor the deployment has any tpm limit."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [
+        mock_router.get_model_list.return_value = [
             _make_deployment_dict("model1")  # no tpm default
         ]
         with patch(_ROUTER_PATCH, mock_router):
@@ -3098,7 +2847,7 @@ class TestDeploymentDefaultTpmLimit:
         """No model_name means deployment fallback is skipped."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [_make_deployment_dict("model1", tpm=100)]
+        mock_router.get_model_list.return_value = [_make_deployment_dict("model1", tpm=100)]
         with patch(_ROUTER_PATCH, mock_router):
             result = get_key_model_tpm_limit(user_api_key_dict)
         assert result is None
@@ -3114,7 +2863,7 @@ class TestDeploymentDefaultTpmLimit:
         """When multiple deployments share a model name, the minimum tpm limit is used."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [
+        mock_router.get_model_list.return_value = [
             _make_deployment_dict("model1", tpm=1000),
             _make_deployment_dict("model1", tpm=300),
             _make_deployment_dict("model1", tpm=700),
@@ -3127,7 +2876,7 @@ class TestDeploymentDefaultTpmLimit:
         """Deployments missing the field are skipped; min is taken over those that have it."""
         user_api_key_dict = UserAPIKeyAuth(api_key="sk-123")
         mock_router = MagicMock()
-        mock_router.registry.return_value.deployments.return_value = [
+        mock_router.get_model_list.return_value = [
             _make_deployment_dict("model1"),  # no tpm default
             _make_deployment_dict("model1", tpm=400),
         ]
@@ -3305,7 +3054,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
     """
 
     def test_clears_admin_organization_and_extra_body_on_base_override(self):
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
 
@@ -3331,7 +3080,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         assert "api_version" not in out
 
     def test_clears_aws_and_vertex_secrets_on_base_override(self):
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
 
@@ -3354,7 +3103,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         assert "vertex_project" not in out
 
     def test_clears_nvcf_function_id_on_base_override(self):
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
 
@@ -3372,7 +3121,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         assert "nvcf_function_id" not in out
 
     def test_clears_use_ssl_on_base_override(self):
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
 
@@ -3390,7 +3139,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         assert "use_ssl" not in out
 
     def test_clears_oauth_token_exchange_fields_for_other_provider_base_overrides(self):
-        from litellm.litellm_core_utils.clientside_credential_handler import get_dynamic_litellm_params
+        from litellm.router_utils.clientside_credential_handler import get_dynamic_litellm_params
 
         oauth_values: Final = {
             "token_exchange_audience": "https://graph.microsoft.com",
@@ -3412,7 +3161,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         assert all(field not in out for field in oauth_values)
 
     def test_clears_oauth_token_exchange_fields_for_microsoft_365_copilot_base_overrides(self):
-        from litellm.litellm_core_utils.clientside_credential_handler import get_dynamic_litellm_params
+        from litellm.router_utils.clientside_credential_handler import get_dynamic_litellm_params
 
         oauth_values: Final = {
             "token_exchange_audience": "https://graph.microsoft.com",
@@ -3442,7 +3191,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         # the field name with any value (or empty string) to keep the
         # admin's value forwarded, which is the exfiltration vector this
         # test guards against.
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
 
@@ -3468,7 +3217,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         # deployment, which would flip the call to shared mode and send the
         # admin's Copilot token to the attacker's host. Keeping them is safe
         # because per-user mode ignores the caller api_base anyway.
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
         from litellm.types.utils import CredentialItem
@@ -3497,7 +3246,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         assert out["api_base"] == "https://attacker.example"
 
     def test_shared_oauth_credential_name_is_cleared_on_base_override(self):
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
         from litellm.types.utils import CredentialItem
@@ -3527,7 +3276,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         # Regression: a caller that echoes an admin-config field name with
         # an *empty* value (or any value) must not be able to keep the
         # admin's value in ``litellm_params``.
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
 
@@ -3549,7 +3298,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         assert "org-admin-secret" not in str(out)
 
     def test_no_clearing_when_only_api_key_overridden(self):
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
 
@@ -3568,7 +3317,7 @@ class TestGetDynamicLitellmParamsClearsAdminConfigOnBaseOverride:
         assert out["api_base"] == "https://admin.upstream/v1"
 
     def test_client_api_key_used_when_supplied_with_base_override(self):
-        from litellm.litellm_core_utils.clientside_credential_handler import (
+        from litellm.router_utils.clientside_credential_handler import (
             get_dynamic_litellm_params,
         )
 
@@ -3896,7 +3645,6 @@ class TestIsRequestBodySafeBlocksEndpointTargetingFields:
         "field",
         [
             "aws_bedrock_runtime_endpoint",
-            "aws_bedrock_control_plane_endpoint",
             "langsmith_base_url",
             "langfuse_host",
             "posthog_host",
@@ -3955,18 +3703,6 @@ class TestIsRequestBodySafeBlocksEndpointTargetingFields:
             is True
         )
 
-
-@pytest.mark.parametrize("allow_client_side_credentials", [False, True])
-@pytest.mark.parametrize("nested", [False, True])
-def test_request_cannot_select_chatgpt_auth_file(allow_client_side_credentials: bool, nested: bool) -> None:
-    selector: Final = {"chatgpt_auth_file": "/tokens/account-b/auth.json"}
-    with pytest.raises(ValueError, match="chatgpt_auth_file"):
-        is_request_body_safe(
-            request_body={"model": "chatgpt-account-a", **({"extra_body": selector} if nested else selector)},
-            general_settings={"allow_client_side_credentials": allow_client_side_credentials},
-            llm_router=None,
-            model="chatgpt-account-a",
-        )
 
 class TestIsRequestBodySafeBlocksBedrockProjectOverride:
     """``aws_bedrock_project_id`` pins a deployment to a Bedrock project so
@@ -4242,38 +3978,6 @@ class TestIsRequestBodySafeBlocksNVCFFunctionOverride:
             )
             is True
         )
-
-
-def test_riva_offline_in_request_body_is_rejected() -> None:
-    with pytest.raises(ValueError, match="riva_offline"):
-        is_request_body_safe(
-            request_body={"model": "nvidia_riva/parakeet", "riva_offline": True},
-            general_settings={},
-            llm_router=None,
-            model="nvidia_riva/parakeet",
-        )
-
-
-def test_admin_opt_in_proxy_wide_allows_riva_offline() -> None:
-    assert (
-        is_request_body_safe(
-            request_body={"model": "nvidia_riva/parakeet", "riva_offline": True},
-            general_settings={"allow_client_side_credentials": True},
-            llm_router=None,
-            model="nvidia_riva/parakeet",
-        )
-        is True
-    )
-
-
-def test_api_base_override_keeps_the_deployments_riva_offline_mode() -> None:
-    from litellm.litellm_core_utils.clientside_credential_handler import get_dynamic_litellm_params
-
-    out: Final = get_dynamic_litellm_params(
-        litellm_params={"model": "nvidia_riva/nvidia/parakeet-0.6b-tdt", "riva_offline": True},
-        request_kwargs={"api_base": "caller-riva:50051"},
-    )
-    assert (out["api_base"], out["riva_offline"]) == ("caller-riva:50051", True)
 
 
 class TestIsRequestBodySafeBlocksRivaUseSsl:
@@ -5462,7 +5166,7 @@ def test_get_model_from_request_vertex_ai_passthrough(request_data, route, expec
 
 @pytest.mark.parametrize(
     "field",
-    ["github_copilot_auth_type", "github_copilot_host", "user_provider_credentials", "github_copilot_user_session"],
+    ["github_copilot_auth_type", "user_provider_credentials", "github_copilot_user_session"],
 )
 def test_per_user_credential_slots_in_request_body_are_rejected(field: str) -> None:
     """The per-user Copilot mode is decided by the stored credential's values and the caller's
@@ -5605,186 +5309,3 @@ def test_get_end_user_id_from_request_body_backwards_compatibility():
     )
     for request_body, expected_end_user_id in cases:
         assert get_end_user_id_from_request_body(request_body) == expected_end_user_id
-
-
-_BUCKET_ALLOWLIST: Final = {"allowed_client_side_s3_buckets": ["team-batch-bucket"]}
-_ENDPOINT_ALLOWLIST: Final = {"allowed_client_side_s3_endpoint_urls": ["https://s3.us-west-2.amazonaws.com"]}
-
-
-def _batches_body_is_safe(body: dict[str, object], general_settings: dict[str, object]) -> bool:
-    return is_request_body_safe(
-        request_body=body,
-        general_settings=general_settings,
-        llm_router=None,
-        model="",
-        route="/v1/batches",
-    )
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("s3_bucket_name", "team-batch-bucket"),
-        ("s3_output_bucket_name", "team-batch-bucket"),
-        ("allow_legacy_cloud_file_ids", True),
-        ("s3_endpoint_url", "https://s3.us-west-2.amazonaws.com"),
-    ],
-)
-def test_storage_setting_in_request_body_is_rejected_without_an_allowlist(field: str, value: object) -> None:
-    with pytest.raises(ValueError, match="Rejected Request") as error:
-        _batches_body_is_safe({field: value}, {})
-
-    assert field in str(error.value)
-
-
-@pytest.mark.parametrize("field", ["s3_bucket_name", "s3_output_bucket_name"])
-def test_bucket_on_the_proxy_allowlist_is_accepted(field: str) -> None:
-    assert _batches_body_is_safe({field: "team-batch-bucket"}, _BUCKET_ALLOWLIST) is True
-
-
-@pytest.mark.parametrize("field", ["s3_bucket_name", "s3_output_bucket_name"])
-def test_bucket_off_the_proxy_allowlist_is_rejected_and_names_the_setting(field: str) -> None:
-    with pytest.raises(ValueError, match=field) as error:
-        _batches_body_is_safe({field: "someone-elses-bucket"}, _BUCKET_ALLOWLIST)
-
-    assert "general_settings.allowed_client_side_s3_buckets" in str(error.value)
-
-
-@pytest.mark.parametrize(
-    "general_settings,accepted_body,rejected_field",
-    [
-        (
-            {**_BUCKET_ALLOWLIST, "allowed_client_side_s3_endpoint_urls": None},
-            {"s3_bucket_name": "team-batch-bucket"},
-            "s3_endpoint_url",
-        ),
-        (
-            {**_ENDPOINT_ALLOWLIST, "allowed_client_side_s3_buckets": None},
-            {"s3_endpoint_url": "https://s3.us-west-2.amazonaws.com"},
-            "s3_bucket_name",
-        ),
-    ],
-)
-def test_allowlist_left_null_in_config_is_treated_as_empty(
-    general_settings: dict[str, object], accepted_body: dict[str, object], rejected_field: str
-) -> None:
-    assert _batches_body_is_safe(accepted_body, general_settings) is True
-    with pytest.raises(ValueError, match=f"{rejected_field} is not allowed"):
-        _batches_body_is_safe({rejected_field: "team-batch-bucket"}, general_settings)
-
-
-def test_endpoint_on_the_proxy_allowlist_is_accepted() -> None:
-    assert _batches_body_is_safe({"s3_endpoint_url": "https://s3.us-west-2.amazonaws.com"}, _ENDPOINT_ALLOWLIST) is True
-
-
-def test_endpoint_off_the_proxy_allowlist_is_rejected_and_names_the_setting() -> None:
-    with pytest.raises(ValueError, match="s3_endpoint_url") as error:
-        _batches_body_is_safe({"s3_endpoint_url": "https://attacker.example"}, _ENDPOINT_ALLOWLIST)
-
-    assert "general_settings.allowed_client_side_s3_endpoint_urls" in str(error.value)
-
-
-def test_bucket_allowlist_admits_neither_an_endpoint_nor_the_legacy_file_flag() -> None:
-    with pytest.raises(ValueError, match="s3_endpoint_url"):
-        _batches_body_is_safe(
-            {"s3_bucket_name": "team-batch-bucket", "s3_endpoint_url": "team-batch-bucket"},
-            _BUCKET_ALLOWLIST,
-        )
-    with pytest.raises(ValueError, match="allow_legacy_cloud_file_ids"):
-        _batches_body_is_safe(
-            {"s3_bucket_name": "team-batch-bucket", "allow_legacy_cloud_file_ids": True},
-            _BUCKET_ALLOWLIST,
-        )
-
-
-def test_endpoint_allowlist_does_not_admit_a_bucket() -> None:
-    with pytest.raises(ValueError, match="s3_bucket_name"):
-        _batches_body_is_safe({"s3_bucket_name": "https://s3.us-west-2.amazonaws.com"}, _ENDPOINT_ALLOWLIST)
-
-
-def test_bucket_nested_in_extra_body_is_checked_against_the_allowlist() -> None:
-    assert _batches_body_is_safe({"extra_body": {"s3_bucket_name": "team-batch-bucket"}}, _BUCKET_ALLOWLIST) is True
-    with pytest.raises(ValueError, match="s3_bucket_name"):
-        _batches_body_is_safe({"extra_body": {"s3_bucket_name": "someone-elses-bucket"}}, _BUCKET_ALLOWLIST)
-
-
-def test_proxy_wide_client_side_credentials_still_admit_any_bucket() -> None:
-    assert (
-        _batches_body_is_safe(
-            {"s3_bucket_name": "any-bucket", "allow_legacy_cloud_file_ids": True},
-            {"allow_client_side_credentials": True},
-        )
-        is True
-    )
-
-
-def test_other_blocked_fields_do_not_point_at_the_storage_allowlist() -> None:
-    with pytest.raises(ValueError, match="api_base") as error:
-        _batches_body_is_safe({"api_base": "https://attacker.example"}, _BUCKET_ALLOWLIST)
-
-    assert "allowed_client_side" not in str(error.value)
-
-
-def _request_with_content_length(content_length: int) -> Request:
-    return Request(
-        {
-            "type": "http",
-            "method": "POST",
-            "path": "/v1/chat/completions",
-            "headers": [(b"content-length", str(content_length).encode("latin-1"))],
-        }
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_quoted_max_request_size_mb_lets_a_smaller_keyed_request_through():
-    with (
-        patch("litellm.proxy.proxy_server.general_settings", {"max_request_size_mb": "10"}),
-        patch("litellm.proxy.proxy_server.premium_user", True),
-    ):
-        assert await check_if_request_size_is_safe(request=_request_with_content_length(1024)) is True
-
-
-@pytest.mark.asyncio
-async def test_a_quoted_max_request_size_mb_rejects_a_larger_keyed_request_with_400():
-    with (
-        patch("litellm.proxy.proxy_server.general_settings", {"max_request_size_mb": "10"}),
-        patch("litellm.proxy.proxy_server.premium_user", True),
-        pytest.raises(ProxyException) as raised,
-    ):
-        await check_if_request_size_is_safe(request=_request_with_content_length(11 * 1024 * 1024))
-    assert raised.value.code == "400"
-    assert "Max size is 10 MB" in raised.value.message
-
-
-@pytest.mark.asyncio
-async def test_a_non_numeric_max_request_size_mb_is_ignored_without_premium():
-    with (
-        patch("litellm.proxy.proxy_server.general_settings", {"max_request_size_mb": "10MB"}),
-        patch("litellm.proxy.proxy_server.premium_user", False),
-    ):
-        assert await check_if_request_size_is_safe(request=_request_with_content_length(1024)) is True
-
-
-@pytest.mark.parametrize("allow_client_side_credentials", [False, True])
-@pytest.mark.parametrize("route", ["/model/new", "/model/update", "/model/account-a/update", "/health/test_connection"])
-def test_chatgpt_model_configuration_reaches_role_authorization(
-    allow_client_side_credentials: bool, route: str
-) -> None:
-    body: Final = {"litellm_params": {"model": "chatgpt/gpt-6-luna", "chatgpt_auth_file": "/tokens/account-a/auth.json"}}
-    assert is_request_body_safe(
-        request_body=body,
-        general_settings={"allow_client_side_credentials": allow_client_side_credentials},
-        llm_router=None,
-        model="",
-        route=route,
-    )
-    for inference_route in ("/v1/chat/completions", "/v1/responses"):
-        with pytest.raises(ValueError, match="chatgpt_auth_file"):
-            is_request_body_safe(
-                request_body=body,
-                general_settings={"allow_client_side_credentials": allow_client_side_credentials},
-                llm_router=None,
-                model="",
-                route=inference_route,
-            )

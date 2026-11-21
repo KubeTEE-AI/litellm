@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getGatewayBaseUrl, getGlobalLitellmHeaderName, getProxyBaseUrl } from "@/components/networking";
 import { withRequiredHeaders } from "@/components/llm_calls/request_headers";
 import { createApiClient } from "@/lib/http/client";
-import { isDecisionEntry } from "@/lib/decisionModels";
+import { isDecisionMode } from "@/lib/decisionModels";
 import {
   systemOneResponseSchema,
   type PlaygroundRequest,
@@ -26,13 +26,7 @@ export type PlaygroundDecisionRequest =
   | { endpoint: "/v1/decisions"; payload: OpenAIDecisionsRequest };
 
 const modelGroupInfoSchema = z.object({
-  data: z.array(
-    z.object({
-      model_group: z.string(),
-      mode: z.string().nullish(),
-      supported_endpoints: z.array(z.string()).nullish(),
-    }),
-  ),
+  data: z.array(z.object({ model_group: z.string(), mode: z.string().nullish() })),
 });
 
 function proxyClient(customBaseUrl?: string, getDefaultBaseUrl: () => string = getProxyBaseUrl) {
@@ -62,7 +56,7 @@ export async function fetchDecisionModels(
   });
   return modelGroupInfoSchema
     .parse(body)
-    .data.filter(isDecisionEntry)
+    .data.filter((group) => isDecisionMode(group.mode))
     .map((group) => group.model_group)
     .sort((a, b) => a.localeCompare(b));
 }

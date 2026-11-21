@@ -22,7 +22,6 @@ from litellm.integrations.websearch_interception.tools import (
 )
 from litellm.llms.base_llm.search.transformation import BaseSearchConfig, SearchResponse
 from litellm.llms.parallel_ai.search.transformation import ParallelAISearchConfig
-from litellm.router_api import RouterSettings
 
 RICH_INPUT = {
     "query": "stripe node sdk v14 authentication",
@@ -38,17 +37,15 @@ def _search_response() -> SearchResponse:
 def _mock_router(search_provider: str) -> MagicMock:
     """Router stub exposing one configured search tool."""
     router = MagicMock()
-    router.settings.return_value = RouterSettings(
-        search_tools=[
-            {
-                "search_tool_name": "test-search",
-                "litellm_params": {
-                    "search_provider": search_provider,
-                    "api_key": "sk-test",
-                },
-            }
-        ]
-    )
+    router.search_tools = [
+        {
+            "search_tool_name": "test-search",
+            "litellm_params": {
+                "search_provider": search_provider,
+                "api_key": "sk-test",
+            },
+        }
+    ]
     return router
 
 
@@ -169,7 +166,7 @@ class TestExecuteSearchShape:
 
         logger = WebSearchInterceptionLogger()
         router = _mock_router("parallel_ai")
-        router.settings().search_tools[0]["litellm_params"]["objective"] = "configured objective"
+        router.search_tools[0]["litellm_params"]["objective"] = "configured objective"
         mock_asearch = AsyncMock(return_value=_search_response())
         monkeypatch.setattr(proxy_server, "llm_router", router)
         monkeypatch.setattr(litellm, "asearch", mock_asearch)
@@ -242,7 +239,6 @@ class TestCallSiteWiring:
             tool_calls=tool_calls,
             optional_params={},
             kwargs={},
-            logging_obj=None,
         )
 
         call_kwargs = mock_asearch.await_args.kwargs

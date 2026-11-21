@@ -1,8 +1,6 @@
 import pytest
 from unittest.mock import Mock, patch
 
-from litellm.router_api import RouterSettings
-
 
 def create_mock_user_api_key_auth():
     """Create mock user API key authentication."""
@@ -18,17 +16,15 @@ def create_mock_user_api_key_auth():
 def create_mock_router_with_fallbacks():
     """Create a mock router with fallback configurations."""
     router = Mock()
-    router.settings.return_value = RouterSettings(
-        fallbacks=[
-            {"claude-4-sonnet": ["bedrock-claude-sonnet-4", "google-claude-sonnet-4"]},
-            {"gpt-4": ["gpt-4-turbo", "gpt-3.5-turbo"]},
-        ],
-        context_window_fallbacks=[
-            {"claude-4-sonnet": ["claude-3-sonnet"]},
-            {"gpt-4": ["gpt-3.5-turbo"]},
-        ],
-        content_policy_fallbacks=[{"claude-4-sonnet": ["claude-3-haiku"]}],
-    )
+    router.fallbacks = [
+        {"claude-4-sonnet": ["bedrock-claude-sonnet-4", "google-claude-sonnet-4"]},
+        {"gpt-4": ["gpt-4-turbo", "gpt-3.5-turbo"]},
+    ]
+    router.context_window_fallbacks = [
+        {"claude-4-sonnet": ["claude-3-sonnet"]},
+        {"gpt-4": ["gpt-3.5-turbo"]},
+    ]
+    router.content_policy_fallbacks = [{"claude-4-sonnet": ["claude-3-haiku"]}]
     router.get_model_names.return_value = [
         "claude-4-sonnet",
         "bedrock-claude-sonnet-4",

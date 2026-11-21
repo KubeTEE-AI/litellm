@@ -4,12 +4,9 @@ GigaChat Streaming Response Handler
 
 import json
 import uuid
-from collections.abc import Awaitable, Mapping, Sequence
-from typing import Final, Protocol
+from collections.abc import Mapping, Sequence
+from typing import Any, Final
 
-from pydantic import TypeAdapter
-
-from litellm.litellm_core_utils.core_helpers import require_attributes
 from litellm.llms.gigachat.utils import convert_usage
 from litellm.types.llms.openai import (
     ChatCompletionToolCallChunk,
@@ -17,27 +14,13 @@ from litellm.types.llms.openai import (
 )
 from litellm.types.utils import ChatCompletionUsageBlock, GenericStreamingChunk
 
-_DECODED_JSON: Final = TypeAdapter(object)
-
-
-class _SyncChunkSource(Protocol):
-    def __next__(self) -> object: ...
-
-
-class _AsyncChunkSource(Protocol):
-    def __anext__(self) -> Awaitable[object]: ...
-
-
-class _SupportsGet(Protocol):
-    def get(self, key: str, /) -> object: ...
-
 
 class GigaChatModelResponseIterator:
     """Iterator for GigaChat streaming responses."""
 
     def __init__(
         self,
-        streaming_response: object,
+        streaming_response: Any,
         sync_stream: bool,
         json_mode: bool | None = False,
     ):
@@ -45,7 +28,7 @@ class GigaChatModelResponseIterator:
         self.response_iterator = self.streaming_response
         self.json_mode = json_mode
 
-    def chunk_parser(self, chunk: _SupportsGet) -> GenericStreamingChunk:
+    def chunk_parser(self, chunk: Mapping[str, object]) -> GenericStreamingChunk:
         """Parse a single streaming chunk from GigaChat."""
         choices: Sequence = chunk.get("choices") or ()
         if not choices:
@@ -123,14 +106,14 @@ class GigaChatModelResponseIterator:
 
     def __next__(self) -> GenericStreamingChunk:
         try:
-            chunk: Final = require_attributes(self.response_iterator, _SyncChunkSource, "__next__").__next__()
+            chunk = self.response_iterator.__next__()
             if isinstance(chunk, str):
                 # Parse SSE format: data: {...}
-                payload: Final = chunk.removeprefix("data: ")
-                if payload.strip() == "[DONE]":
+                chunk = chunk.removeprefix("data: ")
+                if chunk.strip() == "[DONE]":
                     raise StopIteration
                 try:
-                    decoded: Final = _DECODED_JSON.validate_python(json.loads(payload))
+                    chunk = json.loads(chunk)
                 except json.JSONDecodeError:
                     return GenericStreamingChunk(
                         text="",
@@ -140,8 +123,7 @@ class GigaChatModelResponseIterator:
                         usage=None,
                         index=0,
                     )
-                return self.chunk_parser(require_attributes(decoded, _SupportsGet, "get"))
-            return self.chunk_parser(require_attributes(chunk, _SupportsGet, "get"))
+            return self.chunk_parser(chunk)
         except StopIteration:
             raise
 
@@ -150,14 +132,14 @@ class GigaChatModelResponseIterator:
 
     async def __anext__(self) -> GenericStreamingChunk:
         try:
-            chunk: Final = await require_attributes(self.response_iterator, _AsyncChunkSource, "__anext__").__anext__()
+            chunk = await self.response_iterator.__anext__()
             if isinstance(chunk, str):
                 # Parse SSE format
-                payload: Final = chunk.removeprefix("data: ")
-                if payload.strip() == "[DONE]":
+                chunk = chunk.removeprefix("data: ")
+                if chunk.strip() == "[DONE]":
                     raise StopAsyncIteration
                 try:
-                    decoded: Final = _DECODED_JSON.validate_python(json.loads(payload))
+                    chunk = json.loads(chunk)
                 except json.JSONDecodeError:
                     return GenericStreamingChunk(
                         text="",
@@ -167,7 +149,6 @@ class GigaChatModelResponseIterator:
                         usage=None,
                         index=0,
                     )
-                return self.chunk_parser(require_attributes(decoded, _SupportsGet, "get"))
-            return self.chunk_parser(require_attributes(chunk, _SupportsGet, "get"))
+            return self.chunk_parser(chunk)
         except StopAsyncIteration:
             raise

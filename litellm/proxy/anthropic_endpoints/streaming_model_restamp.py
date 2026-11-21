@@ -14,8 +14,6 @@ from typing import Final
 
 from pydantic import TypeAdapter, ValidationError
 
-from litellm.llms.custom_httpx.sse_lines import split_sse_lines_keepends
-
 _MESSAGE_START_EVENT: Final = "message_start"
 _MESSAGE_START_MARKER: Final = b"message_start"
 _SSE_DATA_FIELD: Final = "data:"
@@ -54,7 +52,7 @@ def _restamped_data_line(line: str, requested_model: str) -> str | None:
 
 
 def _restamped_frame(frame: str, requested_model: str) -> str | None:
-    lines: Final = split_sse_lines_keepends(frame)
+    lines: Final = frame.splitlines(keepends=True)
     restamped: Final = tuple(_restamped_data_line(line, requested_model) for line in lines)
     if all(line is None for line in restamped):
         return None

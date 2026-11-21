@@ -1,8 +1,6 @@
-import { observeResponseHeaders, type ResponseHeadersListener } from "@/lib/http/observeResponseHeaders";
 import openai from "openai";
 import { getGatewayBaseUrl } from "@/components/networking";
 import { buildPlaygroundHeaders, type CustomHeaders } from "@/components/llm_calls/request_headers";
-import i18n from "@/i18n/i18n";
 import { toast } from "@/lib/toast";
 
 export async function makeOpenAIImageEditsRequest(
@@ -15,7 +13,6 @@ export async function makeOpenAIImageEditsRequest(
   signal?: AbortSignal,
   customBaseUrl?: string,
   customHeaders?: CustomHeaders,
-  onResponseHeaders?: ResponseHeadersListener,
 ) {
   // base url should be the current base_url
   const isLocal = process.env.NODE_ENV === "development";
@@ -29,7 +26,6 @@ export async function makeOpenAIImageEditsRequest(
     baseURL: proxyBaseUrl,
     dangerouslyAllowBrowser: true,
     defaultHeaders: buildPlaygroundHeaders(tags, customHeaders),
-    ...(onResponseHeaders ? { fetch: observeResponseHeaders(onResponseHeaders) } : {}),
   });
 
   try {
@@ -69,14 +65,14 @@ export async function makeOpenAIImageEditsRequest(
     }
 
     if (results.length > 1) {
-      toast.success(i18n.t("playground.llmCalls.imageEdits.success", { total: results.length }));
+      toast.success(`Successfully processed ${results.length} images`);
     }
   } catch (error: any) {
     console.error("Error making image edit request:", error);
 
     if (signal?.aborted) {
     } else {
-      let errorMessage = i18n.t("playground.llmCalls.imageEdits.defaultError");
+      let errorMessage = "Failed to edit image(s)";
 
       if (error?.error?.message) {
         errorMessage = error.error.message;
@@ -84,7 +80,7 @@ export async function makeOpenAIImageEditsRequest(
         errorMessage = error.message;
       }
 
-      toast.fromError(i18n.t("playground.llmCalls.imageEdits.failed", { message: String(errorMessage) }));
+      toast.fromError(`Image edit failed: ${errorMessage}`);
     }
     throw error; // Re-throw to allow the caller to handle the error
   }

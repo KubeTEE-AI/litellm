@@ -52,13 +52,7 @@ impl<F: Fetch> Installer<F> {
             version: version.clone(),
             binary: binary.clone(),
         };
-        let install_error = |source| Error::Install {
-            dir: dir.clone(),
-            source,
-        };
-        if fs::try_exists(&binary).await.map_err(install_error)?
-            && probe_version(&binary, version).await.is_ok()
-        {
+        if fs::try_exists(&binary).await? && probe_version(&binary, version).await.is_ok() {
             return Ok(installed);
         }
 
@@ -67,23 +61,21 @@ impl<F: Fetch> Installer<F> {
         verify_sha256(&release.asset, &release.sha256, &archive)?;
         let contents = extract_binary(&release.packaging, &archive)?;
 
-        fs::create_dir_all(&dir).await.map_err(install_error)?;
+        fs::create_dir_all(&dir).await?;
         let staging = dir.join(format!(
             ".{}.{}.{}.partial",
             agent.binary(),
             std::process::id(),
             STAGING_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
-        fs::write(&staging, contents).await.map_err(install_error)?;
-        fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755))
-            .await
-            .map_err(install_error)?;
-        fs::rename(&staging, &binary).await.map_err(install_error)?;
+        fs::write(&staging, contents).await?;
+        fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755)).await?;
+        fs::rename(&staging, &binary).await?;
 
         match probe_version(&binary, version).await {
             Ok(()) => Ok(installed),
             Err(error) => {
-                fs::remove_file(&binary).await.map_err(install_error)?;
+                fs::remove_file(&binary).await?;
                 Err(error)
             }
         }
@@ -106,11 +98,7 @@ async fn probe_version(binary: &Path, expected: &Version) -> Result<(), Error> {
         .env("DISABLE_AUTOUPDATER", "1")
         .stdin(Stdio::null())
         .output()
-        .await
-        .map_err(|source| Error::Spawn {
-            binary: binary.to_owned(),
-            source,
-        })?;
+        .await?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     if stdout
         .split_whitespace()

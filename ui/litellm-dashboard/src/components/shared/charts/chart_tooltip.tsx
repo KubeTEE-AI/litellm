@@ -3,8 +3,6 @@
 import * as React from "react";
 import type { TooltipContentProps, TooltipValueType } from "recharts";
 
-import i18n from "@/i18n/i18n";
-
 export type ChartTooltipProps = Pick<
   TooltipContentProps<TooltipValueType, string | number>,
   "active" | "payload" | "label"
@@ -64,7 +62,7 @@ const rawMetricValue = (row: unknown, dataKey: string): number | undefined => {
 };
 
 const formatMetricValue = (rawValue: number | undefined, isSpend: boolean): string => {
-  if (rawValue === undefined) return i18n.t("shared.charts.chartTooltip.notAvailable");
+  if (rawValue === undefined) return "N/A";
   if (isSpend) return `$${rawValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   return rawValue.toLocaleString();
 };

@@ -3,7 +3,7 @@ Type definitions for RAG (Retrieval Augmented Generation) Ingest API.
 """
 
 from collections.abc import Mapping
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ConfigDict
 from typing_extensions import ReadOnly, TypedDict
@@ -219,12 +219,11 @@ class RAGIngestOptions(TypedDict, total=False):
 class RAGIngestResponse(TypedDict, total=False):
     """Response from RAG ingest API."""
 
-    id: ReadOnly[str]  # Unique ingest job ID
-    status: ReadOnly[Literal["completed", "in_progress", "failed"]]
-    vector_store_id: ReadOnly[str]  # The vector store ID (created or existing)
-    file_id: ReadOnly[str | None]  # The file ID in the vector store
-    error: ReadOnly[str | None]  # Error message if status is "failed"
-    error_status_code: ReadOnly[int | None]
+    id: str  # Unique ingest job ID
+    status: Literal["completed", "in_progress", "failed"]
+    vector_store_id: str  # The vector store ID (created or existing)
+    file_id: str | None  # The file ID in the vector store
+    error: str | None  # Error message if status is "failed"
 
 
 class RAGIngestRequest(LiteLLMBaseModel):
@@ -232,7 +231,7 @@ class RAGIngestRequest(LiteLLMBaseModel):
 
     file_url: str | None = None  # URL to fetch file from
     file_id: str | None = None  # Existing file ID
-    ingest_options: dict[str, object]  # RAGIngestOptions as dict for flexibility
+    ingest_options: dict[str, Any]  # RAGIngestOptions as dict for flexibility
 
     model_config = ConfigDict(extra="allow")  # Allow additional fields
 
@@ -260,7 +259,7 @@ class RAGQueryRequest(LiteLLMBaseModel):
     """Request body for RAG query API."""
 
     model: str
-    messages: list[object]
+    messages: list[Any]
     retrieval_config: RAGRetrievalConfig
     rerank: RAGRerankConfig | None = None
     stream: bool | None = False

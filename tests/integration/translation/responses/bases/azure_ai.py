@@ -31,7 +31,7 @@ CLAUDE_HAIKU_4_5_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-haiku-4-5-20251001",
-        "id": "msg_011Cg7vB393hLWW1Xxq6d6vm",
+        "id": "msg_011Cfjax6mBrNVhFGQopmVCp",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello."}],
@@ -47,7 +47,6 @@ CLAUDE_HAIKU_4_5_TEST_CASE: Final = TranslationTestCase(
             "output_tokens": 5,
             "service_tier": "standard",
             "inference_geo": "not_available",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -128,7 +127,7 @@ CLAUDE_SONNET_4_6_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-sonnet-4-6",
-        "id": "msg_011Cg7vCAx8gxwjwBr2R1kxz",
+        "id": "msg_011CfjaxGKedCbjtb7HuAUBC",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello!"}],
@@ -144,7 +143,6 @@ CLAUDE_SONNET_4_6_TEST_CASE: Final = TranslationTestCase(
             "output_tokens": 5,
             "service_tier": "standard",
             "inference_geo": "not_available",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -322,7 +320,7 @@ CLAUDE_OPUS_4_8_TEST_CASE: Final = TranslationTestCase(
     },
     mock_provider_response={
         "model": "claude-opus-4-8",
-        "id": "msg_011Cg7vBUGeH2HFZFTDxVdBh",
+        "id": "msg_011CfjaxUiYCUsqMC4iqfc2U",
         "type": "message",
         "role": "assistant",
         "content": [{"type": "text", "text": "Hello."}],
@@ -339,7 +337,6 @@ CLAUDE_OPUS_4_8_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 0},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
         "diagnostics": None,
     },
@@ -623,7 +620,7 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
                 "suggesting a fix. Explain which file you need next, then call a read-only tool. "
                 "Never change files. Use the responses client for this project review. Consider zero, "
                 "negative and non-integer quantities before choosing the next file to inspect.",
-            }
+            },
         ],
     },
     mock_provider_response={
@@ -659,7 +656,6 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 73},
             "service_tier": "standard",
             "inference_geo": "global",
-            "speed": "standard",
         },
     },
     expected_litellm_response={
@@ -677,7 +673,7 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
                         "text": "I need to look at shop/validation.py to understand its contents, so I'll read "
                         "through the first chunk of the file.\n\n",
                         "annotations": [],
-                    }
+                    },
                 ],
                 "phase": None,
                 "encrypted_content": json.dumps(
@@ -687,7 +683,7 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
                             "thinking": "I need to look at shop/validation.py to understand its contents, so I'll read "
                             "through the first chunk of the file.\n\n",
                             "signature": CLAUDE_HAIKU_5_5_THINKING_SIGNATURE_0,
-                        }
+                        },
                     ],
                     separators=(",", ":"),
                 ),
@@ -703,7 +699,7 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
                         "text": "I'll read `shop/validation.py`, starting with the `validate_quantity` function found "
                         "in the search.",
                         "annotations": [],
-                    }
+                    },
                 ],
                 "phase": None,
             },
@@ -741,7 +737,7 @@ CLAUDE_HAIKU_5_5_TEST_CASE: Final = TranslationTestCase(
                     "thinking": "I need to look at shop/validation.py to understand its contents, so I'll read "
                     "through the first chunk of the file.\n\n",
                     "signature": CLAUDE_HAIKU_5_5_THINKING_SIGNATURE_0,
-                }
+                },
             ],
         },
     },
@@ -768,7 +764,7 @@ CLAUDE_FABLE_5_1_TEST_CASE: Final = TranslationTestCase(
                 "suggesting a fix. Explain which file you need next, then call a read-only tool. "
                 "Never change files. Use the responses client for this project review. Consider zero, "
                 "negative and non-integer quantities before choosing the next file to inspect.",
-            }
+            },
         ],
     },
     mock_provider_response={
@@ -805,7 +801,6 @@ CLAUDE_FABLE_5_1_TEST_CASE: Final = TranslationTestCase(
             "output_tokens_details": {"thinking_tokens": 0},
             "service_tier": "standard",
             "inference_geo": "not_available",
-            "speed": "standard",
         },
     },
     expected_litellm_response={
@@ -823,7 +818,7 @@ CLAUDE_FABLE_5_1_TEST_CASE: Final = TranslationTestCase(
                         "text": "I'll read the validation function; reading the test file at the same time is "
                         "independent of it, so I'll fetch both now.",
                         "annotations": [],
-                    }
+                    },
                 ],
                 "phase": None,
             },

@@ -1,9 +1,10 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// One regex rule generalizing unknown model ids to known families.
-#[macro_rules_attribute::apply(crate::wire_type)]
-#[derive(Eq, Hash)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FallbackRule {
     pub name: String,
     pub pattern: String,
@@ -14,8 +15,8 @@ pub struct FallbackRule {
 }
 
 /// Regex rules that generalize unknown model ids to known families; not a model entry.
-#[macro_rules_attribute::apply(crate::wire_type)]
-#[derive(Eq, Hash)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct FallbackGeneralizations {
     pub rules: Vec<FallbackRule>,

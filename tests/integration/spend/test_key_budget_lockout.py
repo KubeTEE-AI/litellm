@@ -15,8 +15,6 @@ from openai.types.chat import ChatCompletionChunk
 from pydantic import BaseModel, JsonValue, TypeAdapter
 from redis import Redis
 
-pytestmark: Final = pytest.mark.shares_worker_state
-
 _CHAT_BODY: Final = TypeAdapter(dict[str, JsonValue])
 _CHANNEL: Final = "litellm_proxy.auth_cache_invalidation"
 _EXPECTED_MODEL_DISCOVERY: Final = ("GET", "/v1/models")
@@ -182,7 +180,7 @@ def test_an_exhausted_key_is_refused_inference_but_can_still_read_its_own_info(g
             lambda rows: len(rows) == 1 and float(str(rows[0]["spend"])) >= 0.06,
             seconds=70,
         )
-        upstream.delete("/__observations").raise_for_status()
+        upstream.get("/__observations").raise_for_status()
         denied: Final = gateway.request(
             "POST",
             "/v1/chat/completions",
@@ -234,7 +232,7 @@ def _upstream_chat(content: str) -> dict[str, JsonValue]:
 
 def _served_chat(gateway: Gateway, upstream: httpx.Client, model: str, key: str) -> None:
     content: Final = f"tier served {uuid.uuid4().hex}"
-    upstream.delete("/__observations").raise_for_status()
+    _observed(upstream)
     served: Final = _bounded_chat(gateway, model, key, content)
     assert served.status_code == 200, served.text
     assert float(served.headers["x-litellm-response-cost"]) == 0.06, dict(served.headers)
@@ -258,7 +256,7 @@ def test_raising_a_spent_keys_budget_restores_serving(gateway: Gateway) -> None:
             seconds=70,
         )
         eventually(lambda: _bounded_chat(gateway, model, key), lambda response: response.status_code != 200, seconds=30)
-        upstream.delete("/__observations").raise_for_status()
+        upstream.get("/__observations").raise_for_status()
         denied: Final = _bounded_chat(gateway, model, key)
         assert denied.status_code == 422, denied.text
         assert object_value(denied.json()["error"])["type"] == "budget_exceeded"
@@ -427,7 +425,7 @@ def test_raising_a_spent_tier_budget_restores_serving(gateway: Gateway) -> None:
             lambda rows: len(rows) == 1 and float(str(rows[0]["spend"])) >= 0.06,
             seconds=70,
         )
-        upstream.delete("/__observations").raise_for_status()
+        upstream.get("/__observations").raise_for_status()
         _denied_with_budget_exceeded(gateway, model, key)
         assert upstream.get("/__observations").json()["requests"] == []
         gateway.post("/budget/update", {"budget_id": budget_id, "max_budget": 1.0})
@@ -464,7 +462,7 @@ def test_lowering_a_tier_budget_below_spend_blocks_the_key(gateway: Gateway) -> 
             lambda rows: len(rows) == 1 and float(str(rows[0]["spend"])) >= 0.06,
             seconds=30,
         )
-        upstream.delete("/__observations").raise_for_status()
+        upstream.get("/__observations").raise_for_status()
         probe: Final = gateway.request("POST", "/v1/chat/completions", {"model": model}, key=key)
         assert probe.status_code == 400, probe.text
         assert object_value(probe.json()["error"]) == {
@@ -480,7 +478,7 @@ def test_lowering_a_tier_budget_below_spend_blocks_the_key(gateway: Gateway) -> 
         )
         assert len(updated_rows) == 1
         assert float(str(updated_rows[0]["max_budget"])) == 0.01, updated_rows
-        upstream.delete("/__observations").raise_for_status()
+        upstream.get("/__observations").raise_for_status()
         lowered_probe: Final = eventually(
             lambda: gateway.request("POST", "/v1/chat/completions", {"model": model}, key=key),
             lambda response: (
@@ -516,7 +514,7 @@ def test_key_linked_to_a_tier_by_update_is_refused_once_streamed_spend_exhausts_
             "messages": [{"role": "user", "content": content}],
             "stream": True,
         }
-        upstream.delete("/__observations").raise_for_status()
+        _observed(upstream)
         served: Final = gateway.request("POST", "/v1/chat/completions", body, key=key)
         assert served.status_code == 200, served.text
         events: Final = tuple(
@@ -541,7 +539,7 @@ def test_key_linked_to_a_tier_by_update_is_refused_once_streamed_spend_exhausts_
         assert denied.status_code == 422, denied.text
         assert object_value(denied.json()["error"])["type"] == "budget_exceeded", denied.text
         assert "Max budget: 0.06" in denied.text, denied.text
-        upstream.delete("/__observations").raise_for_status()
+        _observed(upstream)
         fresh_denied: Final = gateway.request("POST", "/v1/chat/completions", body, key=key)
         assert fresh_denied.status_code == 422, fresh_denied.text
         assert object_value(fresh_denied.json()["error"])["type"] == "budget_exceeded", fresh_denied.text

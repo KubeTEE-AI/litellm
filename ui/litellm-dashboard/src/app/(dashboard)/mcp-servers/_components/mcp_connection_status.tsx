@@ -1,5 +1,4 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { CircleCheck, CircleAlert, RefreshCw, Wrench, Info } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/shared/Alert";
 import { Button } from "@/components/ui/button";
@@ -28,7 +27,6 @@ const MCPConnectionStatus: React.FC<MCPConnectionStatusProps> = ({
   canFetchTools,
   fetchTools,
 }) => {
-  const { t } = useTranslation();
   const isPreviewForbidden = toolsErrorStatus === 403;
   // Don't show anything if required fields aren't filled
   if (!canFetchTools && !formValues.url && !formValues.spec_path) {
@@ -40,14 +38,14 @@ const MCPConnectionStatus: React.FC<MCPConnectionStatusProps> = ({
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <CircleCheck className="size-4 text-muted-foreground" />
-          <h3 className="text-lg font-medium">{t("mcpServers.connectionStatus.title")}</h3>
+          <h3 className="text-lg font-medium">Connection Status</h3>
         </div>
 
         {!canFetchTools && (formValues.url || formValues.spec_path) && (
           <div className="rounded-lg border border-dashed py-6 text-center text-muted-foreground">
             <Wrench className="mx-auto mb-2 size-6" />
-            <p className="text-sm">{t("mcpServers.connectionStatus.incomplete.title")}</p>
-            <p className="text-sm">{t("mcpServers.connectionStatus.incomplete.description")}</p>
+            <p className="text-sm">Complete required fields to test connection</p>
+            <p className="text-sm">Fill in URL, Transport, and Authentication to test MCP server connection</p>
           </div>
         )}
 
@@ -57,38 +55,36 @@ const MCPConnectionStatus: React.FC<MCPConnectionStatusProps> = ({
               <div>
                 <p className="text-sm font-medium">
                   {isLoadingTools
-                    ? t("mcpServers.connectionStatus.state.testing")
+                    ? "Testing connection to MCP server..."
                     : tools.length > 0
-                      ? t("mcpServers.connectionStatus.state.successful")
+                      ? "Connection successful"
                       : toolsError
                         ? isPreviewForbidden
-                          ? t("mcpServers.connectionStatus.state.readyToSubmit")
-                          : t("mcpServers.connectionStatus.state.failed")
-                        : t("mcpServers.connectionStatus.state.readyToTest")}
+                          ? "Ready to submit"
+                          : "Connection failed"
+                        : "Ready to test connection"}
                 </p>
-                <p className="text-sm text-muted-foreground">
-                  {t("mcpServers.connectionStatus.server", { server: formValues.url || formValues.spec_path })}
-                </p>
+                <p className="text-sm text-muted-foreground">Server: {formValues.url || formValues.spec_path}</p>
               </div>
 
               {isLoadingTools && (
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <UiLoadingSpinner className="size-4" />
-                  <p className="text-sm">{t("mcpServers.connectionStatus.badge.connecting")}</p>
+                  <p className="text-sm">Connecting...</p>
                 </div>
               )}
 
               {!isLoadingTools && !toolsError && tools.length > 0 && (
                 <div className="flex items-center gap-1">
                   <CircleCheck className="size-4" />
-                  <p className="text-sm font-medium">{t("mcpServers.connectionStatus.badge.connected")}</p>
+                  <p className="text-sm font-medium">Connected</p>
                 </div>
               )}
 
               {toolsError && !isPreviewForbidden && (
                 <div className="flex items-center gap-1 text-destructive">
                   <CircleAlert className="size-4" />
-                  <p className="text-sm font-medium">{t("mcpServers.connectionStatus.badge.failed")}</p>
+                  <p className="text-sm font-medium">Failed</p>
                 </div>
               )}
             </div>
@@ -96,14 +92,14 @@ const MCPConnectionStatus: React.FC<MCPConnectionStatusProps> = ({
             {isLoadingTools && (
               <div className="flex items-center justify-center gap-3 py-6">
                 <UiLoadingSpinner className="size-6 text-muted-foreground" />
-                <p className="text-sm">{t("mcpServers.connectionStatus.loadingTools")}</p>
+                <p className="text-sm">Testing connection and loading tools...</p>
               </div>
             )}
 
             {toolsError && isPreviewForbidden && (
               <Alert>
                 <Info />
-                <AlertTitle>{t("mcpServers.connectionStatus.previewUnavailable")}</AlertTitle>
+                <AlertTitle>Tool preview unavailable</AlertTitle>
                 <AlertDescription>{toolsError}</AlertDescription>
               </Alert>
             )}
@@ -111,7 +107,7 @@ const MCPConnectionStatus: React.FC<MCPConnectionStatusProps> = ({
             {toolsError && !isPreviewForbidden && (
               <Alert variant="destructive">
                 <CircleAlert />
-                <AlertTitle>{t("mcpServers.connectionStatus.error.title")}</AlertTitle>
+                <AlertTitle>Connection Failed</AlertTitle>
                 <AlertDescription>
                   <div>{toolsError}</div>
                   {toolsErrorStackTrace && (
@@ -119,7 +115,7 @@ const MCPConnectionStatus: React.FC<MCPConnectionStatusProps> = ({
                       <CollapsibleTrigger
                         render={
                           <Button variant="link" size="sm" className="h-auto p-0">
-                            {t("mcpServers.connectionStatus.error.stackTrace")}
+                            Stack Trace
                           </Button>
                         }
                       />
@@ -134,7 +130,7 @@ const MCPConnectionStatus: React.FC<MCPConnectionStatusProps> = ({
                 <div className="mt-3">
                   <Button variant="outline" size="sm" onClick={fetchTools}>
                     <RefreshCw />
-                    {t("mcpServers.connectionStatus.error.retry")}
+                    Retry
                   </Button>
                 </div>
               </Alert>
@@ -143,8 +139,8 @@ const MCPConnectionStatus: React.FC<MCPConnectionStatusProps> = ({
             {!isLoadingTools && tools.length === 0 && !toolsError && (
               <div className="rounded-lg border border-dashed py-6 text-center">
                 <CircleCheck className="mx-auto mb-2 size-6" />
-                <p className="text-sm font-medium">{t("mcpServers.connectionStatus.noTools.title")}</p>
-                <p className="text-sm text-muted-foreground">{t("mcpServers.connectionStatus.noTools.description")}</p>
+                <p className="text-sm font-medium">Connection successful!</p>
+                <p className="text-sm text-muted-foreground">No tools found for this MCP server</p>
               </div>
             )}
           </div>

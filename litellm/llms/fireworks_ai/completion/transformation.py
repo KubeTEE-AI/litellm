@@ -2,7 +2,6 @@ from collections.abc import Mapping
 from typing import Final
 
 from litellm._logging import verbose_logger
-from litellm.litellm_core_utils.reasoning_effort_utils import OPAQUE_VALUE
 from litellm.types.llms.openai import AllMessageValues, OpenAITextCompletionUserMessage
 from litellm.utils import supports_reasoning
 
@@ -13,7 +12,6 @@ from ..chat.transformation import (
     NIM_VLLM_STRIP_PARAMS,
     FireworksAIConfig,
     effort_from_chat_template_kwargs,
-    warn_dropped_effort_kwargs,
 )
 from ..common_utils import FireworksAIMixin, resolve_fireworks_resource_name
 
@@ -131,7 +129,10 @@ class FireworksAITextCompletionConfig(FireworksAIMixin, BaseTextCompletionConfig
             )
             return result
         if not supports_reasoning(model=model, custom_llm_provider="fireworks_ai"):
-            warn_dropped_effort_kwargs(OPAQUE_VALUE.validate_python(chat_template_kwargs), effort, model)
+            verbose_logger.debug(
+                "fireworks_ai model %r does not support reasoning; dropping chat_template_kwargs effort keys.",
+                model,
+            )
             return result
         return {**result, "reasoning_effort": effort}
 

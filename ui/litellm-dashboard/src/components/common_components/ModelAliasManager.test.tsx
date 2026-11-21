@@ -56,7 +56,7 @@ describe("ModelAliasManager dark-mode tokens", () => {
 
   it("reads the component source it is asserting about", () => {
     expect(source.length).toBeGreaterThan(0);
-    expect(source).toContain("modelAliasManager.manageExistingTitle");
+    expect(source).toContain("Manage Existing Aliases");
   });
 
   it("uses semantic colour tokens and no hardcoded palette classes", () => {

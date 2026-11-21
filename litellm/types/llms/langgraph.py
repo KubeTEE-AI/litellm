@@ -4,8 +4,7 @@ Type definitions for LangGraph API.
 LangGraph provides a streaming and non-streaming API for running agents.
 """
 
-from collections.abc import Mapping
-from typing import Literal
+from typing import Any, Literal
 
 from typing_extensions import TypedDict
 
@@ -30,8 +29,8 @@ class LangGraphRequest(TypedDict, total=False):
     assistant_id: str
     input: LangGraphInput
     stream_mode: str | None
-    config: Mapping[str, object] | None
-    metadata: Mapping[str, object] | None
+    config: dict[str, Any] | None
+    metadata: dict[str, Any] | None
 
 
 # Response Types - Streaming
@@ -39,7 +38,7 @@ class LangGraphStreamEvent(TypedDict, total=False):
     """Single event in a LangGraph stream response."""
 
     event: str
-    data: object
+    data: Any
 
 
 # Response Types - Non-streaming
@@ -56,7 +55,7 @@ class LangGraphResponse(TypedDict, total=False):
     """Non-streaming response structure from LangGraph."""
 
     messages: list[LangGraphResponseMessage]
-    values: dict[str, object]
+    values: dict[str, Any]
 
 
 # Parsed response for internal use

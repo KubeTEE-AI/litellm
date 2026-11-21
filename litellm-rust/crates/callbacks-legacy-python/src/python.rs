@@ -44,10 +44,6 @@ pub(crate) enum Logging {
     PreCall,
     #[strum(serialize = "post_call")]
     PostCall,
-    #[strum(serialize = "record_response")]
-    RecordResponse,
-    #[strum(serialize = "record_api_window")]
-    RecordApiWindow,
     #[strum(serialize = "defers_async_logging")]
     DefersAsync,
     #[strum(serialize = "defer_success")]
@@ -81,8 +77,6 @@ pub(crate) enum DeploymentHooks {
 pub(crate) enum Streaming {
     #[strum(serialize = "stream_opened")]
     Opened,
-    #[strum(serialize = "stamp_stream_head")]
-    StampHead,
     #[strum(serialize = "stream_success")]
     Success,
     #[strum(serialize = "stream_failure")]

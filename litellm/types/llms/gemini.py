@@ -1,6 +1,5 @@
-from collections.abc import Mapping
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from typing_extensions import Required, TypedDict
 
@@ -81,14 +80,6 @@ class BidiGenerateContentServerMessage(TypedDict, total=False):
     """Output only. The setup complete message."""
 
 
-class BidiGenerateContentActivityStart(TypedDict):
-    pass
-
-
-class BidiGenerateContentActivityEnd(TypedDict):
-    pass
-
-
 class BidiGenerateContentRealtimeInput(TypedDict, total=False):
     text: str
     """The text to be sent to the model."""
@@ -102,11 +93,11 @@ class BidiGenerateContentRealtimeInput(TypedDict, total=False):
     audioStreamEnd: bool
     """Output only. If true, indicates that the audio stream has ended."""
 
-    activityStart: BidiGenerateContentActivityStart
-    """Marks the start of user activity when automatic activity detection is disabled."""
+    activityStart: bool
+    """Output only. If true, indicates that the activity has started."""
 
-    activityEnd: BidiGenerateContentActivityEnd
-    """Marks the end of user activity when automatic activity detection is disabled."""
+    activityEnd: bool
+    """Output only. If true, indicates that the activity has ended."""
 
 
 StartOfSpeechSensitivityEnum = Literal[
@@ -244,7 +235,7 @@ class GeminiVideoGenerationInstance(TypedDict, total=False):
     """Instance data for Gemini video generation request"""
 
     prompt: Required[str]
-    image: Mapping[str, object]
+    image: dict[str, Any]
 
 
 class GeminiVideoGenerationParameters(LiteLLMBaseModel):
@@ -272,7 +263,7 @@ class GeminiVideoGenerationParameters(LiteLLMBaseModel):
     negativePrompt: str | None = None
     """Text describing what not to include in the video."""
 
-    lastFrame: object | None = None
+    lastFrame: Any | None = None
     """
     The final image for interpolation video to transition.
     Should be used with the 'image' parameter.
@@ -284,7 +275,7 @@ class GeminiVideoGenerationParameters(LiteLLMBaseModel):
     Only supported in Veo 3.1 (list of VideoGenerationReferenceImage objects).
     """
 
-    video: object | None = None
+    video: Any | None = None
     """
     Video to be used for video extension (Video object).
     Only supported in Veo 3.1 & Veo 3 Fast.
@@ -363,5 +354,5 @@ class GeminiLongRunningOperationResponse(LiteLLMBaseModel):
     response: GeminiOperationResponse | None = None
     """Response object when operation is complete"""
 
-    error: dict[str, object] | None = None
+    error: dict[str, Any] | None = None
     """Error details if operation failed"""

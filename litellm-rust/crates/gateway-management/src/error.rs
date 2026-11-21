@@ -5,7 +5,7 @@ pub enum Error {
     #[error("key already exists")]
     AlreadyExists,
     #[error("key storage unavailable")]
-    Storage(#[source] litellm_error::Source),
+    Storage(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("key generation unavailable")]
     Entropy(#[source] rand::Error),
 }

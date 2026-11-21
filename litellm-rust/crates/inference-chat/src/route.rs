@@ -1,3 +1,4 @@
+use litellm_host::observation::ObservationSender;
 use std::convert::Infallible;
 
 use litellm_host::{
@@ -6,7 +7,10 @@ use litellm_host::{
 };
 use litellm_llms_types::formats::chat_completions::ChatCompletionsResponse;
 
-use super::{ChatCompletionsRoute, Error, types::ChatCompletionsCall};
+use super::{
+    ChatCompletionsRoute, Error,
+    types::{ChatCompletionsCall, ChatCompletionsRequest},
+};
 
 pub struct ChatCompletions;
 
@@ -33,11 +37,43 @@ impl ChatCompletionsRoute {
             call,
             observers,
             move |call, _, interceptors, observers| async move {
-                self.run(call, cache_options, &interceptors, observers.as_ref())
+                self.run_call(call, cache_options, &interceptors, observers.as_ref())
                     .await
                     .map(CallOutput::Complete)
             },
         )
+    }
+
+    #[tracing::instrument(name = "litellm.route", skip_all, fields(
+        route = "chat_completions",
+        model = %call.model,
+        provider,
+        resolved_model,
+        stream = false,
+        outcome
+    ))]
+    pub(super) async fn run_call(
+        &self,
+        call: ChatCompletionsCall,
+        cache_options: Option<litellm_cache_response::CachePolicy>,
+        interceptors: &impl litellm_host::interceptors::Interceptors<Error>,
+        observers: Option<&ObservationSender>,
+    ) -> Result<ChatCompletionsResponse, Error> {
+        litellm_inference::diagnostic::unary(async {
+            let request = ChatCompletionsRequest {
+                model: &call.model,
+                messages: call.messages,
+                optional_params: call.optional_params,
+                api_key: call.api_key.as_deref(),
+                api_base: call.api_base.as_deref(),
+                custom_llm_provider: call.custom_llm_provider.as_deref(),
+                extra_headers: call.extra_headers,
+                timeout: call.timeout,
+            };
+            self.run(request, cache_options, interceptors, observers)
+                .await
+        })
+        .await
     }
 }
 

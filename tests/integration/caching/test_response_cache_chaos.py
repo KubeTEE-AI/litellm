@@ -61,8 +61,6 @@ from tests.integration.caching.response_cache_case import (
     slowed,
 )
 
-pytestmark: Final = pytest.mark.shares_worker_state
-
 RecordProperty = Callable[[str, object], None]
 
 WORKERS: Final = 2

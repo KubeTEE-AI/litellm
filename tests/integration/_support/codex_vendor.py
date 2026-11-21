@@ -46,9 +46,6 @@ FORWARDED_KEYS: Final = frozenset(
         "reasoning",
         "previous_response_id",
         "truncation",
-        "text",
-        "service_tier",
-        "max_output_tokens",
     }
 )
 

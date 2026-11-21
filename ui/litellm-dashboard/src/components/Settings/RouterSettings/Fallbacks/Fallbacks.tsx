@@ -2,10 +2,8 @@ import { useModelCostMap } from "@/app/(dashboard)/hooks/models/useModelCostMap"
 import { ArrowRight, Pencil, Play, Trash2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { ParseKeys, TFunction } from "i18next";
 import openai from "openai";
 import React, { useEffect, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
 import DeleteResourceModal from "../../../common_components/DeleteResourceModal";
 import { ProviderLogo } from "../../../molecules/models/ProviderLogo";
 import { toast } from "@/lib/toast";
@@ -83,7 +81,7 @@ interface FallbacksProps {
   userID: string | null;
 }
 
-async function testFallbackModelResponse(selectedModel: string, accessToken: string, t: TFunction) {
+async function testFallbackModelResponse(selectedModel: string, accessToken: string) {
   const isLocal = process.env.NODE_ENV === "development";
   if (isLocal != true) {
     console.log = function () {};
@@ -96,7 +94,7 @@ async function testFallbackModelResponse(selectedModel: string, accessToken: str
   });
 
   try {
-    toast.info(t("routerSettings.fallbacks.toasts.testing"));
+    toast.info("Testing fallback model response...");
 
     const response = await client.chat.completions.create({
       model: selectedModel,
@@ -112,35 +110,29 @@ async function testFallbackModelResponse(selectedModel: string, accessToken: str
 
     toast.success(
       <span>
-        <Trans
-          i18nKey="routerSettings.fallbacks.toasts.testResult"
-          components={{
-            model: <strong>{selectedModel}</strong>,
-            received: <strong>{response.model}</strong>,
-            docs: (
-              <a
-                href="#"
-                onClick={() => window.open("https://docs.litellm.ai/docs/proxy/reliability", "_blank")}
-                style={{ textDecoration: "underline", color: "blue" }}
-              />
-            ),
-          }}
-        />
+        Test model=<strong>{selectedModel}</strong>, received model=
+        <strong>{response.model}</strong>. See{" "}
+        <a
+          href="#"
+          onClick={() => window.open("https://docs.litellm.ai/docs/proxy/reliability", "_blank")}
+          style={{ textDecoration: "underline", color: "blue" }}
+        >
+          curl
+        </a>
       </span>,
     );
   } catch (error) {
-    toast.fromError(t("routerSettings.fallbacks.toasts.testFailed", { error: String(error) }));
+    toast.fromError(`Error occurred while generating model response. Please try again. Error: ${error}`);
   }
 }
 
-function fallbacksWriteHint(source: RouterSettingsSource | null, ownedByConfig: boolean): ParseKeys | undefined {
+function fallbacksWriteHint(source: RouterSettingsSource | null, ownedByConfig: boolean): string | undefined {
   if (ownedByConfig) return CONFIG_OWNED_HINT;
   if (source === null) return SOURCE_UNKNOWN_HINT;
   return undefined;
 }
 
 const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) => {
-  const { t } = useTranslation();
   const [routerSettings, setRouterSettings] = useState<{ [key: string]: any }>({});
   const [isDeleting, setIsDeleting] = useState(false);
   const [fallbackToDelete, setFallbackToDelete] = useState<FallbackEntry | null>(null);
@@ -218,9 +210,9 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
     try {
       await setCallbacksCall(accessToken, payload);
       setRouterSettings(updatedSettings);
-      toast.success(t("routerSettings.fallbacks.toasts.updated"));
+      toast.success("Router settings updated successfully");
     } catch (error) {
-      toast.fromError(t("routerSettings.fallbacks.toasts.updateFailed", { error: String(error) }));
+      toast.fromError("Failed to update router settings: " + error);
     } finally {
       setIsDeleting(false);
       setIsDeleteModalOpen(false);
@@ -257,7 +249,7 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
       setRouterSettings(updatedSettings);
     } catch (error) {
       // Revert on error by refetching from server
-      toast.fromError(t("routerSettings.fallbacks.toasts.updateFailed", { error: String(error) }));
+      toast.fromError("Failed to update router settings: " + error);
       if (accessToken && userRole && userID) {
         getCallbacksCall(accessToken, userID, userRole).then((data) => {
           let router_settings = data.router_settings;
@@ -276,8 +268,7 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
   // Admin Viewer follows the read-parity rule: see fallbacks, no writes.
   const canModify = isProxyAdminRole(userRole ?? "");
   const ownedByConfig = routerSettingsSource !== null && isOwnedByConfig(routerSettingsSource, "fallbacks");
-  const writeHintKey = fallbacksWriteHint(routerSettingsSource, ownedByConfig);
-  const writeHint = writeHintKey === undefined ? undefined : t(writeHintKey);
+  const writeHint = fallbacksWriteHint(routerSettingsSource, ownedByConfig);
   const canWrite = canModify && writeHint === undefined;
   const writeActionClass = (hoverClass: string) =>
     canWrite ? `${iconWrapperClass} cursor-pointer ${hoverClass}` : `${iconWrapperClass} cursor-not-allowed opacity-50`;
@@ -297,15 +288,17 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
       )}
       {!hasFallbacks ? (
         <div className="rounded-lg border border-border bg-muted px-4 py-6 text-center">
-          <span className="text-muted-foreground">{t("routerSettings.fallbacks.empty")}</span>
+          <span className="text-muted-foreground">
+            No fallbacks configured. Add fallbacks to automatically try another model when the primary fails.
+          </span>
         </div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t("routerSettings.fallbacks.columns.modelName")}</TableHead>
-              <TableHead>{t("routerSettings.fallbacks.columns.fallbacks")}</TableHead>
-              <TableHead>{t("routerSettings.fallbacks.columns.actions")}</TableHead>
+              <TableHead>Model Name</TableHead>
+              <TableHead>Fallbacks</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
 
@@ -326,14 +319,14 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
                           <TooltipTrigger
                             render={
                               <span
-                                onClick={() => testFallbackModelResponse(Object.keys(item)[0], accessToken || "", t)}
+                                onClick={() => testFallbackModelResponse(Object.keys(item)[0], accessToken || "")}
                                 className={`${iconWrapperClass} cursor-pointer hover:text-info`}
                               />
                             }
                           >
                             <Play className="h-5 w-5 shrink-0" />
                           </TooltipTrigger>
-                          <TooltipContent>{t("routerSettings.fallbacks.actions.test")}</TooltipContent>
+                          <TooltipContent>Test fallback</TooltipContent>
                         </Tooltip>
                         <Tooltip>
                           <TooltipTrigger
@@ -351,7 +344,7 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
                           >
                             <Pencil className="h-5 w-5 shrink-0" />
                           </TooltipTrigger>
-                          <TooltipContent>{writeHint ?? t("routerSettings.fallbacks.actions.edit")}</TooltipContent>
+                          <TooltipContent>{writeHint ?? "Edit fallback"}</TooltipContent>
                         </Tooltip>
                         <Tooltip>
                           <TooltipTrigger
@@ -369,7 +362,7 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
                           >
                             <Trash2 className="h-5 w-5 shrink-0" />
                           </TooltipTrigger>
-                          <TooltipContent>{writeHint ?? t("routerSettings.fallbacks.actions.delete")}</TooltipContent>
+                          <TooltipContent>{writeHint ?? "Delete fallback"}</TooltipContent>
                         </Tooltip>
                       </>
                     )}
@@ -392,12 +385,12 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
       )}
       <DeleteResourceModal
         isOpen={isDeleteModalOpen}
-        title={t("routerSettings.fallbacks.deleteModal.title")}
-        message={t("routerSettings.fallbacks.deleteModal.message")}
-        resourceInformationTitle={t("routerSettings.fallbacks.deleteModal.informationTitle")}
+        title="Delete Fallback?"
+        message="Are you sure you want to delete this fallback? This action cannot be undone."
+        resourceInformationTitle="Fallback Information"
         resourceInformation={[
           {
-            label: t("routerSettings.fallbacks.deleteModal.modelName"),
+            label: "Model Name",
             value: fallbackToDelete ? Object.keys(fallbackToDelete)[0] : "",
             code: true,
           },

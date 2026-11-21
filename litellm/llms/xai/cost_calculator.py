@@ -120,11 +120,12 @@ def _web_search_cost_per_call_from_model_info(model_info: "ModelInfo") -> float:
     search_costs: Final = model_info.get("search_context_cost_per_query")
     if not isinstance(search_costs, Mapping):
         return _DEFAULT_WEB_SEARCH_COST_PER_CALL
-    for value in (
-        search_costs.get("search_context_size_medium"),
-        search_costs.get("search_context_size_low"),
-        search_costs.get("search_context_size_high"),
+    for key in (
+        "search_context_size_medium",
+        "search_context_size_low",
+        "search_context_size_high",
     ):
+        value = search_costs.get(key)
         if value is None:
             continue
         try:

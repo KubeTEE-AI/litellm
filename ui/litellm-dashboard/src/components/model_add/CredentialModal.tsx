@@ -1,11 +1,9 @@
-import type { ParseKeys } from "i18next";
 import { Input } from "@/components/ui/input";
 import { SearchSelect, type SearchSelectOption } from "@/components/shared/SearchSelect";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
-import { useTranslation } from "react-i18next";
 import { authTypeFieldKeys } from "../add_model/provider_auth_types";
 import ProviderSpecificFields from "../add_model/provider_specific_fields";
 import { requiredRule } from "../common_components/formRules";
@@ -55,9 +53,9 @@ const AUTH_METHOD_SELECT_ID = "credential_auth_method";
 const API_KEY_FIELDS: readonly string[] = ["api_key"];
 const NO_HIDDEN_FIELDS: readonly string[] = [];
 
-const authMethodItems: { value: AuthMethod; labelKey: ParseKeys }[] = [
-  { value: "api_key", labelKey: "modelAdd.credentialModal.authMethods.apiKey" },
-  { value: "federation", labelKey: "modelAdd.credentialModal.authMethods.federation" },
+const authMethodItems: { value: AuthMethod; label: string }[] = [
+  { value: "api_key", label: "API key" },
+  { value: "federation", label: "Workload identity federation" },
 ];
 
 interface CredentialModalProps {
@@ -86,7 +84,6 @@ export default function CredentialModal({
   initialAuthTypeId,
   providerLocked = false,
 }: CredentialModalProps) {
-  const { t } = useTranslation();
   const isEdit = mode === "edit";
   const [selectedProvider, setSelectedProvider] = useState<string | null>(
     (existingCredential?.credential_info.custom_llm_provider as Providers) ?? initialProvider ?? Providers.OpenAI,
@@ -166,9 +163,7 @@ export default function CredentialModal({
     <Dialog open={open} onOpenChange={(open) => !open && closeAndReset()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>
-            {isEdit ? t("modelAdd.credentialModal.editTitle") : t("modelAdd.credentialModal.addTitle")}
-          </DialogTitle>
+          <DialogTitle>{isEdit ? "Edit Credential" : "Add New Credential"}</DialogTitle>
         </DialogHeader>
         <FormProvider {...form}>
           <MountedFormProvider value={{ control: form.control, registry }}>
@@ -179,10 +174,10 @@ export default function CredentialModal({
               }}
             >
               <MountedFormField
-                label={t("modelAdd.credentialModal.credentialName")}
+                label="Credential Name:"
                 name="credential_name"
                 required
-                rules={{ validate: { required: requiredRule(t("modelAdd.credentialModal.credentialNameRequired")) } }}
+                rules={{ validate: { required: requiredRule("Credential name is required") } }}
                 className="mb-4"
               >
                 {(control) => (
@@ -191,38 +186,35 @@ export default function CredentialModal({
                     value={typeof control.value === "string" ? control.value : ""}
                     onChange={control.onChange}
                     onBlur={control.onBlur}
-                    placeholder={t("modelAdd.credentialModal.credentialNamePlaceholder")}
+                    placeholder="Unique name that models reference this credential by"
                     disabled={isEdit}
                   />
                 )}
               </MountedFormField>
 
-              <MountedFormField label={t("modelAdd.credentialModal.displayName")} name="display_name" className="mb-4">
+              <MountedFormField label="Display Name:" name="display_name" className="mb-4">
                 {(control) => (
                   <Input
                     id={control.id}
                     value={typeof control.value === "string" ? control.value : ""}
                     onChange={control.onChange}
                     onBlur={control.onBlur}
-                    placeholder={t("modelAdd.credentialModal.displayNamePlaceholder")}
+                    placeholder="e.g. Production OpenAI"
                   />
                 )}
               </MountedFormField>
 
               <MountedFormField
-                label={labelWithHint(
-                  t("modelAdd.credentialModal.provider"),
-                  t("modelAdd.credentialModal.providerHint"),
-                )}
+                label={labelWithHint("Provider:", "Helper to auto-populate provider specific fields")}
                 name="custom_llm_provider"
                 required
-                rules={{ validate: { required: requiredRule(t("modelAdd.credentialModal.required")) } }}
+                rules={{ validate: { required: requiredRule("Required") } }}
                 className="mb-4"
               >
                 {(control) => (
                   <SearchSelect
                     inputId={control.id}
-                    placeholder={t("modelAdd.credentialModal.selectProvider")}
+                    placeholder="Select a provider"
                     options={providerOptions}
                     value={typeof control.value === "string" ? control.value : null}
                     disabled={providerLocked}
@@ -238,12 +230,12 @@ export default function CredentialModal({
                 <div className="mb-4 flex flex-col gap-2">
                   <label htmlFor={AUTH_METHOD_SELECT_ID} className="text-sm font-medium">
                     {labelWithHint(
-                      t("modelAdd.credentialModal.authentication"),
-                      t("modelAdd.credentialModal.authenticationHint"),
+                      "Authentication:",
+                      "Workload identity federation exchanges an identity token for a short-lived access token from the provider, so no API key is stored.",
                     )}
                   </label>
                   <Select
-                    items={authMethodItems.map((item) => ({ value: item.value, label: t(item.labelKey) }))}
+                    items={authMethodItems}
                     value={authMethod}
                     onValueChange={(value) => changeAuthMethod(value as AuthMethod)}
                   >
@@ -253,7 +245,7 @@ export default function CredentialModal({
                     <SelectContent>
                       {authMethodItems.map((item) => (
                         <SelectItem key={item.value} value={item.value}>
-                          {t(item.labelKey)}
+                          {item.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -279,19 +271,17 @@ export default function CredentialModal({
               <InternalIssuerJwks panel={jwksPanelFor(existingCredential, selection)} />
 
               <div className="flex justify-between items-center">
-                <SimpleTooltip content={t("modelAdd.credentialModal.helpTooltip")}>
+                <SimpleTooltip content="Get help on our github">
                   <a href="https://github.com/BerriAI/litellm/issues" className="text-sm text-primary hover:underline">
-                    {t("modelAdd.credentialModal.needHelp")}
+                    Need Help?
                   </a>
                 </SimpleTooltip>
 
                 <div>
                   <Button variant="outline" className="mr-2.5" onClick={closeAndReset}>
-                    {t("modelAdd.credentialModal.cancel")}
+                    Cancel
                   </Button>
-                  <Button type="submit">
-                    {isEdit ? t("modelAdd.credentialModal.updateSubmit") : t("modelAdd.credentialModal.addSubmit")}
-                  </Button>
+                  <Button type="submit">{isEdit ? "Update Credential" : "Add Credential"}</Button>
                 </div>
               </div>
             </form>

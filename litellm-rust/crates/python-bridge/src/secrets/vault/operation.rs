@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use litellm_secret_value::SecretValue;
-use litellm_secrets::hashicorp::{HashicorpVault, RawOperationError};
-
+use litellm_secrets::{
+    SecretValue,
+    hashicorp::{Error, HashicorpVault, RawOperationError},
+};
 use litellm_secrets_types::{HashicorpOperationContext, SecretWriteContext};
 use serde_json::value::RawValue;
 
@@ -52,10 +53,12 @@ impl Failure {
 }
 
 fn native_failure(name: &str, error: RawOperationError) -> Failure {
-    if error.is_unsafe_secret_name() {
-        return FailureKind::UnsafeName(name.to_owned()).into();
+    match error {
+        RawOperationError::Local(Error::InvalidSecretName(_)) => {
+            FailureKind::UnsafeName(name.to_owned()).into()
+        }
+        error => FailureKind::Native(error).into(),
     }
-    FailureKind::Native(error).into()
 }
 
 pub(crate) async fn write(

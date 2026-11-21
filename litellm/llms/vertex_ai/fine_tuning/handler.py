@@ -27,11 +27,6 @@ from litellm.types.utils import LiteLLMFineTuningJob
 _JSON_VALUE: Final = TypeAdapter(object)
 
 
-def _response_tuning_job(response: httpx.Response) -> ResponseTuningJob:
-    tuning_job: Final[ResponseTuningJob] = response.json()
-    return ResponseTuningJob(**tuning_job)
-
-
 class VertexFineTuningAPI(VertexLLM):
     """
     Vertex methods to support for batches
@@ -192,7 +187,9 @@ class VertexFineTuningAPI(VertexLLM):
                 "got response from creating fine tuning job: %s", _JSON_VALUE.validate_python(response.json())
             )
 
-            vertex_response: Final = _response_tuning_job(response)
+            vertex_response: Final = ResponseTuningJob(
+                **response.json(),
+            )
 
             verbose_logger.debug("vertex_response %s", vertex_response)
             open_ai_response: Final = self.convert_vertex_response_to_open_ai_response(vertex_response)
@@ -275,7 +272,9 @@ class VertexFineTuningAPI(VertexLLM):
         verbose_logger.debug(
             "got response from creating fine tuning job: %s", _JSON_VALUE.validate_python(response.json())
         )
-        vertex_response: Final = _response_tuning_job(response)
+        vertex_response: Final = ResponseTuningJob(
+            **response.json(),
+        )
 
         verbose_logger.debug("vertex_response %s", vertex_response)
         open_ai_response: Final = self.convert_vertex_response_to_open_ai_response(vertex_response)

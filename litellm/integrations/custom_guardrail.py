@@ -6,9 +6,8 @@ import os
 import secrets
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
-from itertools import chain
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, Optional, Protocol, cast, get_args
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, Optional, cast, get_args
 
 import httpx
 from pydantic import BaseModel, TypeAdapter
@@ -21,7 +20,6 @@ from litellm.litellm_core_utils.core_helpers import (
     get_metadata_variable_name_from_kwargs,
     get_or_create_metadata_bucket,
     redact_nested_match_and_regex_keys,
-    require_attributes,
 )
 from litellm.secret_managers.main import str_to_bool
 from litellm.types.guardrails import (
@@ -170,22 +168,18 @@ def _strict_guardrail_modes_enabled() -> bool:
     return True if parsed is None else parsed
 
 
-class _SupportsGet(Protocol):
-    def get(self, key: str, /) -> object: ...
-
-
-def get_session_id_from_request_data(request_data: Mapping[str, object]) -> str | None:
+def get_session_id_from_request_data(request_data: dict[str, Any]) -> str | None:
     """Extract session_id from request data (litellm_session_id or metadata)."""
     session_id = request_data.get("litellm_session_id")
     if session_id:
         return str(session_id)
 
-    metadata: Final = require_attributes(request_data.get("metadata") or {}, _SupportsGet, "get")
+    metadata: Final = request_data.get("metadata") or {}
     session_id = metadata.get("session_id")
     if session_id:
         return str(session_id)
 
-    litellm_metadata: Final = require_attributes(request_data.get("litellm_metadata") or {}, _SupportsGet, "get")
+    litellm_metadata: Final = request_data.get("litellm_metadata") or {}
     session_id = litellm_metadata.get("session_id")
     if session_id:
         return str(session_id)
@@ -216,46 +210,6 @@ def guardrail_request_data_with_streaming(
         **data_without_server_classification,
         SERVER_STREAMING_CLASSIFICATION_KEY: SERVER_STREAMING_CLASSIFICATION_MARKER,
     }
-
-
-_GUARDRAIL_ENTRY_WITH_SETTINGS: Final = TypeAdapter(Mapping[str, object])
-
-
-def merged_guardrail_entries(*entry_lists: Iterable[object]) -> list[object]:
-    """Merges guardrail lists so each guardrail is named once: the first ``{name: settings}`` entry naming it wins over
-    any plain name in either order, else its first plain name stays"""
-    entries: Final = tuple(chain.from_iterable(entry_lists))
-    settings_names: Final = tuple(_settings_entry_names(entry) for entry in entries)
-    named_with_settings: Final = frozenset[str]().union(*settings_names)
-    return [
-        entry
-        for index, entry in enumerate(entries)
-        if not _superseded_guardrail_entry(entries, settings_names, named_with_settings, index)
-    ]
-
-
-def guardrail_entry_names(entry: object) -> tuple[str, ...]:
-    if isinstance(entry, str):
-        return (entry,)
-    if isinstance(entry, dict):
-        return tuple(_GUARDRAIL_ENTRY_WITH_SETTINGS.validate_python(entry))
-    return ()
-
-
-def _settings_entry_names(entry: object) -> frozenset[str]:
-    return frozenset(guardrail_entry_names(entry)) if isinstance(entry, dict) else frozenset()
-
-
-def _superseded_guardrail_entry(
-    entries: tuple[object, ...],
-    settings_names: tuple[frozenset[str], ...],
-    named_with_settings: frozenset[str],
-    index: int,
-) -> bool:
-    entry: Final = entries[index]
-    if isinstance(entry, str):
-        return entry in named_with_settings or entry in entries[:index]
-    return bool(settings_names[index]) and settings_names[index] <= frozenset[str]().union(*settings_names[:index])
 
 
 def _request_is_streaming(data: object, event_type: GuardrailEventHooks | None = None) -> bool:
@@ -380,14 +334,7 @@ def _response_carries_marker(response: object, marker: str | None) -> bool:
 _REQUEST_FIELDS: Final = TypeAdapter(Mapping[str, object])
 
 
-def _guardrails_listed_in(metadata: object) -> list[str | dict[str, DynamicGuardrailParams]]:
-    if not isinstance(metadata, dict):
-        return []
-    return metadata.get("guardrails") or []
-
-
 class CustomGuardrail(CustomLogger):
-    mcp_block_behavior: Literal["tool_result", "raise"] | None = None
     # If True, during_call runs async_moderation_hook instead of the unified apply_guardrail path.
     use_native_during_call_hook: ClassVar[bool] = False
 
@@ -521,7 +468,7 @@ class CustomGuardrail(CustomLogger):
         self,
         violation_message: str,
         request_data: dict[str, Any],
-        detection_info: Mapping[str, object] | None = None,
+        detection_info: dict[str, Any] | None = None,
         original_response: object = None,
     ) -> None:
         """
@@ -960,22 +907,28 @@ class CustomGuardrail(CustomLogger):
                 return True
             raise
 
-    def get_guardrail_from_metadata(self, data: dict) -> list[str | dict[str, DynamicGuardrailParams]]:
+    def get_guardrail_from_metadata(self, data: dict) -> list[str] | list[dict[str, DynamicGuardrailParams]]:
         """
-        Returns the guardrail(s) to be run from the root, else from both metadata fields together
+        Returns the guardrail(s) to be run from the metadata or root
         """
 
         if "guardrails" in data:
             return data["guardrails"]
-        request_fields: Final = _REQUEST_FIELDS.validate_python(data)
-        return [
-            *_guardrails_listed_in(request_fields.get("metadata")),
-            *_guardrails_listed_in(request_fields.get("litellm_metadata")),
-        ]
+        # Check both metadata locations. For regular endpoints move_guardrails_to_metadata
+        # writes to "metadata"; for thread/assistant endpoints it writes to
+        # "litellm_metadata". We check the one that actually contains the "guardrails"
+        # key so that a non-empty litellm_metadata without guardrails does not shadow
+        # the merged list stored in metadata (which would cause team guardrails to be
+        # silently skipped while default_on=True policy guardrails still fire).
+        for meta_key in ("metadata", "litellm_metadata"):
+            meta = data.get(meta_key) or {}
+            if isinstance(meta, dict) and "guardrails" in meta:
+                return meta.get("guardrails") or []
+        return []
 
     def _guardrail_is_in_requested_guardrails(
         self,
-        requested_guardrails: Sequence[str | dict[str, DynamicGuardrailParams]],
+        requested_guardrails: list[str] | list[dict[str, DynamicGuardrailParams]],
     ) -> bool:
         for _guardrail in requested_guardrails:
             if isinstance(_guardrail, dict):
@@ -1173,12 +1126,6 @@ class CustomGuardrail(CustomLogger):
         enrich_http_exception_with_guardrail_context(result, self)
         raise result
 
-    def runs_post_call_deployment_hook(self, request_data: Mapping[str, object]) -> bool:
-        return (
-            isinstance(request_data.get("guardrails"), list)
-            and self.should_run_guardrail(data=request_data, event_type=GuardrailEventHooks.post_call) is True
-        )
-
     async def async_post_call_success_deployment_hook(
         self,
         request_data: dict,
@@ -1188,7 +1135,12 @@ class CustomGuardrail(CustomLogger):
         """
         Allow modifying / reviewing the response just after it's received from the deployment.
         """
-        if not self.runs_post_call_deployment_hook(request_data):
+        # should run guardrail
+        litellm_guardrails: Final = request_data.get("guardrails")
+        if litellm_guardrails is None or not isinstance(litellm_guardrails, list):
+            return None
+
+        if self.should_run_guardrail(data=request_data, event_type=GuardrailEventHooks.post_call) is not True:
             return None
 
         target: Final = self._deployment_hook_target()
@@ -1587,10 +1539,7 @@ class CustomGuardrail(CustomLogger):
         if event_type is not None:
             guardrail_mode = event_type
         elif isinstance(self.event_hook, Mode):
-            guardrail_mode = GuardrailMode(
-                tags=copy.deepcopy(self.event_hook.tags),
-                default=copy.deepcopy(self.event_hook.default),
-            )
+            guardrail_mode = GuardrailMode(**dict(self.event_hook.model_dump()))
         else:
             guardrail_mode = self.event_hook
 

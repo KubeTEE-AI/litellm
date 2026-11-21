@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Any, Final
 from litellm.integrations.opentelemetry import OpenTelemetry
 
 if TYPE_CHECKING:
+    from opentelemetry.trace import Span as _Span
+
     from litellm.integrations.opentelemetry import (
         OpenTelemetryConfig as _OpenTelemetryConfig,
     )
@@ -11,9 +13,11 @@ if TYPE_CHECKING:
 
     Protocol = _Protocol
     OpenTelemetryConfig = _OpenTelemetryConfig
+    Span = _Span | Any
 else:
     Protocol = Any
     OpenTelemetryConfig = Any
+    Span = Any
 
 
 class LevoConfig:

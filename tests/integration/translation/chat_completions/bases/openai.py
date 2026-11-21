@@ -1,5 +1,4 @@
 from typing import Final
-from unittest.mock import ANY
 
 from integration._support.client import object_value
 from integration.translation.case import TranslationTestCase
@@ -421,7 +420,6 @@ GPT_6_LUNA_TEST_CASE: Final = TranslationTestCase(
                             "summary": [],
                         }
                     ],
-                    "provider_specific_fields": {"phase": "commentary", "openai_responses_replay": ANY},
                 },
             }
         ],
@@ -632,7 +630,6 @@ GPT_5_4_MINI_TEST_CASE: Final = TranslationTestCase(
                             "type": "function",
                         },
                     ],
-                    "provider_specific_fields": {"phase": "commentary", "openai_responses_replay": ANY},
                 },
             }
         ],
@@ -732,7 +729,6 @@ GPT_6_SOL_TEST_CASE: Final = TranslationTestCase(
                         },
                     ],
                     "content": None,
-                    "provider_specific_fields": {"openai_responses_replay": ANY},
                 },
             }
         ],
@@ -890,7 +886,6 @@ GPT_6_1_SOL_TEST_CASE: Final = TranslationTestCase(
                             "summary": [],
                         }
                     ],
-                    "provider_specific_fields": {"phase": "commentary", "openai_responses_replay": ANY},
                 },
             }
         ],
@@ -1047,7 +1042,6 @@ GPT_6_ASTRA_TEST_CASE: Final = TranslationTestCase(
                             "summary": [],
                         }
                     ],
-                    "provider_specific_fields": {"phase": "commentary", "openai_responses_replay": ANY},
                 },
             }
         ],
@@ -1207,7 +1201,6 @@ GPT_5_6_TERRA_TEST_CASE: Final = TranslationTestCase(
                             "summary": [],
                         }
                     ],
-                    "provider_specific_fields": {"phase": "commentary", "openai_responses_replay": ANY},
                 },
             }
         ],

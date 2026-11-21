@@ -1,11 +1,10 @@
-import type { ParseKeys } from "i18next";
 import type { TelemetryGroup } from "@/app/(dashboard)/hooks/telemetry/useTelemetrySettings";
 
 export interface GroupCopy {
-  readonly title: ParseKeys;
-  readonly slices?: ParseKeys;
-  readonly counts: ParseKeys;
-  readonly helps: ParseKeys;
+  readonly title: string;
+  readonly slices?: string;
+  readonly counts: string;
+  readonly helps: string;
 }
 
 export const PROXY_GROUPS: readonly TelemetryGroup[] = [
@@ -21,42 +20,42 @@ export const UI_GROUPS: readonly TelemetryGroup[] = ["page_navigation"];
 
 export const GROUP_COPY: Readonly<Record<TelemetryGroup, GroupCopy>> = {
   heartbeat: {
-    title: "telemetry.groups.heartbeat.title",
-    counts: "telemetry.groups.heartbeat.counts",
-    helps: "telemetry.groups.heartbeat.helps",
+    title: "Heartbeat",
+    counts: "Random instance id, LiteLLM version, report window, which groups are on",
+    helps: "Which versions are running",
   },
   request_success: {
-    title: "telemetry.groups.requestSuccess.title",
-    slices: "telemetry.groups.requestSuccess.slices",
-    counts: "telemetry.groups.requestSuccess.counts",
-    helps: "telemetry.groups.requestSuccess.helps",
+    title: "Request success",
+    slices: "endpoint, LiteLLM status, provider status, stream, handled by Rust, LiteLLM cache hit",
+    counts: "requests, provider attempts, latency to headers and to first byte",
+    helps: "Error-rate and latency regressions, Rust vs Python",
   },
   token_info: {
-    title: "telemetry.groups.tokenInfo.title",
-    slices: "telemetry.groups.tokenInfo.slices",
-    counts: "telemetry.groups.tokenInfo.counts",
-    helps: "telemetry.groups.tokenInfo.helps",
+    title: "Token info",
+    slices: "provider prompt-cache hit",
+    counts: "input, output and cache-read token sums",
+    helps: "Broken prompt caching or token counting",
   },
   request_taxonomy: {
-    title: "telemetry.groups.requestTaxonomy.title",
-    slices: "telemetry.groups.requestTaxonomy.slices",
-    counts: "telemetry.groups.requestTaxonomy.counts",
-    helps: "telemetry.groups.requestTaxonomy.helps",
+    title: "Request taxonomy",
+    slices: "provider, salted deployment hash",
+    counts: "one row per provider attempt with its status",
+    helps: "Which provider is failing, retries and fallbacks",
   },
   event_details: {
-    title: "telemetry.groups.eventDetails.title",
-    counts: "telemetry.groups.eventDetails.counts",
-    helps: "telemetry.groups.eventDetails.helps",
+    title: "Event details",
+    counts: "message block counts and types, allowlisted header names (no values), provider time to first token",
+    helps: "Which request shapes and clients fail",
   },
   instance_configuration: {
-    title: "telemetry.groups.instanceConfiguration.title",
-    counts: "telemetry.groups.instanceConfiguration.counts",
-    helps: "telemetry.groups.instanceConfiguration.helps",
+    title: "Instance configuration",
+    counts: "names of allowlisted config keys that are set (no values)",
+    helps: "Which features an upgrade must keep working",
   },
   page_navigation: {
-    title: "telemetry.groups.pageNavigation.title",
-    counts: "telemetry.groups.pageNavigation.counts",
-    helps: "telemetry.groups.pageNavigation.helps",
+    title: "Page navigation",
+    counts: "Admin UI page views and tab switches by route name (no ids or typed text)",
+    helps: "Which pages and tabs get used",
   },
 };
 

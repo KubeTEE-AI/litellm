@@ -1,6 +1,6 @@
 from typing import Literal
 
-from typing_extensions import NotRequired, ReadOnly, Required, TypedDict
+from typing_extensions import Required, TypedDict
 
 
 class ImageEmbeddingInput(TypedDict, total=False):
@@ -15,9 +15,3 @@ class ImageEmbeddingRequest(TypedDict, total=False):
     input: Required[list[ImageEmbeddingInput]]
     dimensions: int
     encoding_format: EncodingFormat
-
-
-class FoundryAgentReference(TypedDict):
-    type: ReadOnly[Literal["agent_reference"]]
-    name: ReadOnly[str]
-    version: ReadOnly[NotRequired[str]]

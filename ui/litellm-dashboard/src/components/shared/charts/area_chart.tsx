@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useTranslation } from "react-i18next";
 import { Area, AreaChart as RechartsAreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, type ChartConfig } from "@/components/ui/chart";
 import { cn } from "@/lib/cva.config";
@@ -39,7 +38,6 @@ export function AreaChart<TDatum extends Record<string, unknown>>({
   className,
   style,
 }: AreaChartProps<TDatum>) {
-  const { t } = useTranslation();
   const gradientId = React.useId().replace(/:/g, "");
 
   if (data.length === 0) {
@@ -48,7 +46,7 @@ export function AreaChart<TDatum extends Record<string, unknown>>({
         className={cn("flex h-80 w-full items-center justify-center rounded-lg border border-dashed", className)}
         style={style}
       >
-        <p className="text-sm text-muted-foreground">{t("shared.charts.areaChart.noData")}</p>
+        <p className="text-sm text-muted-foreground">No data</p>
       </div>
     );
   }

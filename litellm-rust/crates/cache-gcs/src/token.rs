@@ -1,39 +1,36 @@
 use std::{future::Future, pin::Pin};
 
-use litellm_auth_gcp::{CredentialSource, GcpAuth};
-use litellm_secret_value::SecretValue;
-
+use litellm_auth_gcp::{VertexAuth, VertexConfig};
+use litellm_auth_types::{InputSource, SecretValue, Sourced};
 use litellm_cache::Error;
 
 pub trait TokenSource: Send + Sync + 'static {
     fn bearer_token(&self) -> Pin<Box<dyn Future<Output = Result<String, Error>> + Send + '_>>;
 }
 
-pub struct GcsTokenSource {
-    auth: GcpAuth,
-    credentials: Option<String>,
+pub struct GcpTokenSource {
+    auth: VertexAuth,
+    config: VertexConfig,
 }
 
-impl GcsTokenSource {
+impl GcpTokenSource {
     pub fn new(path_service_account: Option<String>) -> Self {
+        let credentials = path_service_account
+            .map(|path| Sourced::new(SecretValue::new(path), InputSource::Deployment));
         Self {
-            auth: GcpAuth::default(),
-            credentials: path_service_account.filter(|path| !path.trim().is_empty()),
+            auth: VertexAuth::default(),
+            config: VertexConfig::new(credentials, None, None),
         }
     }
 }
 
-impl TokenSource for GcsTokenSource {
+impl TokenSource for GcpTokenSource {
     fn bearer_token(&self) -> Pin<Box<dyn Future<Output = Result<String, Error>> + Send + '_>> {
         Box::pin(async move {
             self.auth
-                .access_token(match &self.credentials {
-                    Some(path) => CredentialSource::Trusted(SecretValue::new(path.clone())),
-                    None => CredentialSource::application_default(&|name| std::env::var(name).ok()),
-                })
+                .access_token(&self.config, &|name| std::env::var(name).ok())
                 .await
-                .map(|token| token.expose().to_owned())
-                .map_err(Error::unavailable)
+                .map_err(|_| Error::Unavailable)
         })
     }
 }

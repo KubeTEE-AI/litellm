@@ -20,7 +20,6 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "@/lib/toast";
 import { CheckCircle, Pencil, Play, Trash2, Upload } from "lucide-react";
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
 import CloudZeroUpdateModal from "./CloudZeroUpdateModal";
 import { CloudZeroSettings } from "./types";
 
@@ -41,13 +40,9 @@ const DetailRow = ({ label, children }: DetailRowProps) => (
   </div>
 );
 
-const NotConfigured = () => {
-  const { t } = useTranslation();
-  return <span className="text-muted-foreground italic">{t("loggingAndAlerts.cloudZero.settings.notConfigured")}</span>;
-};
+const NotConfigured = () => <span className="text-muted-foreground italic">Not configured</span>;
 
 export function CloudZeroIntegrationSettings({ settings, onSettingsUpdated }: CloudZeroIntegrationSettingsProps) {
-  const { t } = useTranslation();
   const { accessToken } = useAuthorized();
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -64,10 +59,10 @@ export function CloudZeroIntegrationSettings({ settings, onSettingsUpdated }: Cl
       { limit: 10 },
       {
         onSuccess: (data) => {
-          toast.success(t("loggingAndAlerts.cloudZero.settings.toasts.dryRunSucceeded"));
+          toast.success("Dry run completed successfully");
         },
         onError: (error) => {
-          toast.error(error?.message || t("loggingAndAlerts.cloudZero.settings.toasts.dryRunFailed"));
+          toast.error(error?.message || "Failed to perform dry run");
         },
       },
     );
@@ -82,11 +77,11 @@ export function CloudZeroIntegrationSettings({ settings, onSettingsUpdated }: Cl
       { operation: "replace_hourly" },
       {
         onSuccess: () => {
-          toast.success(t("loggingAndAlerts.cloudZero.settings.toasts.exported"));
+          toast.success("Data successfully exported to CloudZero");
           setIsExportConfirmOpen(false);
         },
         onError: (error) => {
-          toast.error(error?.message || t("loggingAndAlerts.cloudZero.settings.toasts.exportFailed"));
+          toast.error(error?.message || "Failed to export data");
         },
       },
     );
@@ -114,12 +109,12 @@ export function CloudZeroIntegrationSettings({ settings, onSettingsUpdated }: Cl
 
     deleteMutation.mutate(undefined, {
       onSuccess: () => {
-        toast.success(t("loggingAndAlerts.cloudZero.settings.toasts.deleted"));
+        toast.success("CloudZero integration deleted successfully");
         setIsDeleteModalOpen(false);
         onSettingsUpdated();
       },
       onError: (error) => {
-        toast.error(error?.message || t("loggingAndAlerts.cloudZero.settings.toasts.deleteFailed"));
+        toast.error(error?.message || "Failed to delete CloudZero integration");
       },
     });
   };
@@ -134,66 +129,59 @@ export function CloudZeroIntegrationSettings({ settings, onSettingsUpdated }: Cl
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
-              {t("loggingAndAlerts.cloudZero.settings.title")}
+              CloudZero Configuration
               <Badge variant="secondary" className="capitalize">
-                {settings.status || t("loggingAndAlerts.cloudZero.settings.statusFallback")}
+                {settings.status || "Active"}
               </Badge>
             </CardTitle>
             <CardAction className="flex gap-2">
               <Button variant="outline" onClick={handleEdit}>
                 <Pencil />
-                {t("loggingAndAlerts.cloudZero.settings.edit")}
+                Edit
               </Button>
               <Button variant="destructive" onClick={handleDeleteClick}>
                 <Trash2 />
-                {t("loggingAndAlerts.cloudZero.settings.delete")}
+                Delete
               </Button>
             </CardAction>
           </CardHeader>
 
           <CardContent>
             <dl className="rounded-md border border-border">
-              <DetailRow label={t("loggingAndAlerts.cloudZero.settings.fields.apiKey")}>
+              <DetailRow label="API Key (Redacted)">
                 <span className="font-mono">{settings.api_key_masked || <NotConfigured />}</span>
               </DetailRow>
-              <DetailRow label={t("loggingAndAlerts.cloudZero.settings.fields.connectionId")}>
+              <DetailRow label="Connection ID">
                 <span className="font-mono">{settings.connection_id || <NotConfigured />}</span>
               </DetailRow>
-              <DetailRow label={t("loggingAndAlerts.cloudZero.settings.fields.timezone")}>
-                {settings.timezone || (
-                  <span className="text-muted-foreground italic">
-                    {t("loggingAndAlerts.cloudZero.settings.defaultTimezone")}
-                  </span>
-                )}
+              <DetailRow label="Timezone">
+                {settings.timezone || <span className="text-muted-foreground italic">Default (UTC)</span>}
               </DetailRow>
             </dl>
 
             <div className="mt-6 flex items-center gap-3">
-              <span className="text-sm text-muted-foreground">{t("loggingAndAlerts.cloudZero.settings.actions")}</span>
+              <span className="text-sm text-muted-foreground">Actions</span>
               <Separator className="flex-1" />
             </div>
 
             <div className="mt-4 mb-6 flex flex-wrap gap-4">
               <Button variant="outline" onClick={handleDryRun} disabled={dryRunMutation.isPending}>
                 <Play />
-                {t("loggingAndAlerts.cloudZero.settings.dryRun")}
+                Run Dry Run Simulation
               </Button>
 
               <Button onClick={() => setIsExportConfirmOpen(true)} disabled={exportMutation.isPending}>
                 <Upload />
-                {t("loggingAndAlerts.cloudZero.settings.exportNow")}
+                Export Data Now
               </Button>
             </div>
 
             {dryRunResult && (
               <Alert>
                 <CheckCircle />
-                <AlertTitle>{t("loggingAndAlerts.cloudZero.settings.dryRunResults")}</AlertTitle>
+                <AlertTitle>Dry Run Results</AlertTitle>
                 <AlertDescription>
-                  <p>
-                    {t("loggingAndAlerts.cloudZero.settings.simulationOutputPrefix")}
-                    {settings.connection_id}
-                  </p>
+                  <p>Simulation output for connection: {settings.connection_id}</p>
                   <pre className="overflow-x-auto rounded-md border border-border bg-muted p-4 font-mono text-xs text-foreground">
                     {dryRunResult}
                   </pre>
@@ -207,17 +195,15 @@ export function CloudZeroIntegrationSettings({ settings, onSettingsUpdated }: Cl
       <AlertDialog open={isExportConfirmOpen} onOpenChange={setIsExportConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("loggingAndAlerts.cloudZero.settings.exportDialog.title")}</AlertDialogTitle>
+            <AlertDialogTitle>Export Data to CloudZero</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("loggingAndAlerts.cloudZero.settings.exportDialog.description")}
+              This will push the current accumulated cost data to CloudZero. Continue?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={exportMutation.isPending}>
-              {t("loggingAndAlerts.cloudZero.settings.exportDialog.cancel")}
-            </AlertDialogCancel>
+            <AlertDialogCancel disabled={exportMutation.isPending}>Cancel</AlertDialogCancel>
             <Button onClick={handleExport} disabled={exportMutation.isPending}>
-              {t("loggingAndAlerts.cloudZero.settings.exportDialog.confirm")}
+              Export
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -232,18 +218,18 @@ export function CloudZeroIntegrationSettings({ settings, onSettingsUpdated }: Cl
 
       <DeleteResourceModal
         isOpen={isDeleteModalOpen}
-        title={t("loggingAndAlerts.cloudZero.settings.deleteDialog.title")}
-        message={t("loggingAndAlerts.cloudZero.settings.deleteDialog.message")}
-        resourceInformationTitle={t("loggingAndAlerts.cloudZero.settings.deleteDialog.infoTitle")}
+        title="Delete CloudZero Integration?"
+        message="Are you sure you want to delete this CloudZero integration? All associated settings and configurations will be permanently removed."
+        resourceInformationTitle="Integration Details"
         resourceInformation={[
           {
-            label: t("loggingAndAlerts.cloudZero.settings.deleteDialog.connectionId"),
+            label: "Connection ID",
             value: settings.connection_id,
             code: true,
           },
           {
-            label: t("loggingAndAlerts.cloudZero.settings.deleteDialog.timezone"),
-            value: settings.timezone || t("loggingAndAlerts.cloudZero.settings.defaultTimezone"),
+            label: "Timezone",
+            value: settings.timezone || "Default (UTC)",
           },
         ]}
         onCancel={handleDeleteCancel}

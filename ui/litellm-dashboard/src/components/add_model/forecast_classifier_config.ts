@@ -1,6 +1,4 @@
 import { z } from "zod";
-import type { TFunction } from "i18next";
-import i18n from "@/i18n/i18n";
 import type { ClassifierType, ComplexityRouterConfigValue, ComplexityTiers } from "./ComplexityRouterConfig";
 import { pruneTierModelParams } from "./complexity_router_tiers";
 import { tierOrderFor } from "./tier_rows";
@@ -173,47 +171,41 @@ export const prepareForecastClassifier = (
   };
 };
 
-export const getForecastConfigError = (
-  value: ComplexityRouterConfigValue,
-  t: TFunction = i18n.t.bind(i18n),
-): string | null => {
+export const getForecastConfigError = (value: ComplexityRouterConfigValue): string | null => {
   if (!isForecastClassifier(value.classifier_type) || value.custom_tier_set) return null;
   const timeout = value.classifier_llm_config?.timeout_ms;
   if (timeout !== undefined && (!Number.isInteger(timeout) || timeout <= 0))
-    return t("addModel.forecastClassifierConfig.errors.timeout");
+    return "Enter a positive whole-number classifier timeout";
   const [efficient, capable] = forecastTierNames(value);
   const order: readonly string[] = tierOrderFor(value.enable_non_reasoning_tier);
   if (!order.includes(efficient) || !order.includes(capable) || order.indexOf(capable) <= order.indexOf(efficient))
-    return t("addModel.forecastClassifierConfig.errors.tierOrder");
+    return "The capable tier must be higher than the efficient tier";
   const efficientModels = forecastModels(value.tiers, efficient);
   const capableModels = forecastModels(value.tiers, capable);
   if (!efficientModels.length || !capableModels.length)
-    return t("addModel.forecastClassifierConfig.errors.solverModels");
+    return "Select models for both the efficient and capable solvers";
   if (value.classifier_type === "capability") {
     const result = capabilitySettingsSchema.safeParse(value.capability_classifier_config);
-    if (!result.success) return t("addModel.forecastClassifierConfig.errors.capabilitySettings");
+    if (!result.success)
+      return "Enter a solve threshold between 0 and 1 and valid capability settings, including any calibration coefficients";
     if (result.data.base_threshold + 2 * (result.data.threshold_step ?? 0) > 1)
-      return t("addModel.forecastClassifierConfig.errors.thresholdStep");
+      return "The solve threshold plus twice the boundary step must be at most 1";
     return null;
   }
-  return getFuseConfigError(value, efficient, capable, t);
+  return getFuseConfigError(value, efficient, capable);
 };
 
-const getFuseConfigError = (
-  value: ComplexityRouterConfigValue,
-  efficient: string,
-  capable: string,
-  t: TFunction,
-): string | null => {
+const getFuseConfigError = (value: ComplexityRouterConfigValue, efficient: string, capable: string): string | null => {
   const efficientModels = forecastModels(value.tiers, efficient);
   const capableModels = forecastModels(value.tiers, capable);
-  if (value.adaptive) return t("addModel.forecastClassifierConfig.errors.fuseAdaptive");
-  if (value.enable_non_reasoning_tier) return t("addModel.forecastClassifierConfig.errors.fuseNonReasoningTier");
+  if (value.adaptive) return "Turn off adaptive routing for Fuse v2";
+  if (value.enable_non_reasoning_tier) return "Fuse v2 does not support the non-reasoning tier";
   if (efficientModels.length !== 1 || capableModels.length !== 1 || efficientModels[0] === capableModels[0])
-    return t("addModel.forecastClassifierConfig.errors.fuseDistinctModels");
+    return "Fuse v2 requires one distinct model group for each solver";
   if (Object.entries(value.tiers).some(([tier, models]) => models.length > 0 && ![efficient, capable].includes(tier)))
-    return t("addModel.forecastClassifierConfig.errors.fuseOnlyItsTiers");
+    return "Fuse v2 supports only its efficient and capable tiers";
   const result = fuseSettingsSchema.safeParse(value.llm_v2_config);
-  if (!result.success) return t("addModel.forecastClassifierConfig.errors.fuseSettings");
+  if (!result.success)
+    return "Complete both solver profiles, the harness, and a quality gap between 0 and 1; any calibration needs valid coefficients and a version";
   return null;
 };

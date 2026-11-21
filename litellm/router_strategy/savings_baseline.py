@@ -14,15 +14,14 @@ bare string with no provider beside them; an operator who writes ``deepseek-r1``
 Azure would otherwise be priced against whoever else owns that name.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from litellm._logging import verbose_router_logger
-from litellm.router_deprecated import renamed_router_param
 from litellm.types.utils import PromptTokensDetailsWrapper, Usage
 
 if TYPE_CHECKING:
-    from litellm.router_api import RoutingContext
+    from litellm.router import Router
 
 
 _REFERENCE_REQUEST: Final = Usage(
@@ -71,7 +70,7 @@ def canonical_model(model: str, custom_llm_provider: str | None = None) -> str |
     return f"{provider}/{resolved}"
 
 
-def _models_in(ctx: "RoutingContext", group_name: str) -> tuple[Baseline, ...]:
+def _models_in(router: "Router", group_name: str) -> tuple[Baseline, ...]:
     """The candidates a tier entry actually calls, each with its own pricing key.
 
     `litellm_params.model` is not always a model: on Azure it is the deployment name,
@@ -81,11 +80,12 @@ def _models_in(ctx: "RoutingContext", group_name: str) -> tuple[Baseline, ...]:
     straight at a provider model rather than at a configured group, and prices under
     its own name because there is no deployment to override it.
     """
-    deployments: Final = ctx.registry().deployments(group_name, source="named")
-    if not deployments:
+    indices: Final = router.model_name_to_deployment_indices.get(group_name)
+    if not indices:
         return (Baseline(qualified),) if (qualified := canonical_model(group_name)) else ()
 
-    def candidate(deployment: Mapping[str, object]) -> Baseline | None:
+    def candidate(index: int) -> Baseline | None:
+        deployment: Final = router.model_list[index]
         params: Final = deployment.get("litellm_params")
         if not isinstance(params, dict):
             return None
@@ -98,10 +98,10 @@ def _models_in(ctx: "RoutingContext", group_name: str) -> tuple[Baseline, ...]:
         deployment_id: Final = info.get("id") if isinstance(info, dict) else None
         return Baseline(qualified, str(deployment_id) if deployment_id else None)
 
-    return tuple(c for deployment in deployments if (c := candidate(deployment)) is not None)
+    return tuple(c for index in indices if (c := candidate(index)) is not None)
 
 
-def _priced(ctx: "RoutingContext", candidate: Baseline) -> tuple[float, Baseline] | None:
+def _priced(router: "Router", candidate: Baseline) -> tuple[float, Baseline] | None:
     """``(cost_of_the_reference_request, candidate)``, or ``None`` when unpriceable.
 
     "Most expensive" is a property of a request, not of a rate: a deployment dearer per
@@ -115,7 +115,7 @@ def _priced(ctx: "RoutingContext", candidate: Baseline) -> tuple[float, Baseline
 
     provider, _, model_name = candidate.model.partition("/")
     try:
-        info: Final = ctx.registry().deployment_model_info(candidate.deployment_id or "", candidate.model, cached=True)
+        info: Final = router.get_deployment_model_info(candidate.deployment_id or "", candidate.model)
         if info is None:
             return None
         prompt_cost, completion_cost = generic_cost_per_token(
@@ -134,17 +134,16 @@ def _priced(ctx: "RoutingContext", candidate: Baseline) -> tuple[float, Baseline
     return (cost, candidate)
 
 
-def _most_expensive(ctx: "RoutingContext", candidates: Iterable[Baseline]) -> Baseline | None:
+def _most_expensive(router: "Router", candidates: Iterable[Baseline]) -> Baseline | None:
     """The candidate that would have cost the most on the reference request."""
-    priced: Final = tuple(r for candidate in candidates if (r := _priced(ctx, candidate)) is not None)
+    priced: Final = tuple(r for candidate in candidates if (r := _priced(router, candidate)) is not None)
     if not priced:
         verbose_router_logger.debug("savings baseline: no priceable candidates; savings driver disabled")
         return None
     return max(priced)[1]
 
 
-@renamed_router_param("router")
-def resolve_baseline(ctx: "RoutingContext", group_names: Iterable[str]) -> Baseline | None:
+def resolve_baseline(router: "Router", group_names: Iterable[str]) -> Baseline | None:
     """The derived baseline for a router whose hardest tier offers ``group_names``.
 
     Holds no cache of its own; each pricing pass walks the pool, so the caller is
@@ -157,7 +156,7 @@ def resolve_baseline(ctx: "RoutingContext", group_names: Iterable[str]) -> Basel
     over; an unresolvable baseline zeroes the savings driver instead.
     """
     try:
-        return _most_expensive(ctx, (c for name in group_names for c in _models_in(ctx, name)))
+        return _most_expensive(router, (c for name in group_names for c in _models_in(router, name)))
     except Exception as e:  # noqa: BLE001  # see docstring: routing must not fail for a metric
         verbose_router_logger.warning("savings baseline: could not resolve, savings will read zero (%s)", e)
         return None

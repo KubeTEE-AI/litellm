@@ -9,8 +9,9 @@ existing tag-based routing.
 
 import pytest
 
-from litellm import Router
-from litellm.router_api import RoutingContext
+
+from unittest.mock import MagicMock
+
 from litellm.router_strategy import tag_based_routing
 from litellm.router_strategy.tag_based_routing import get_deployments_for_tag
 
@@ -104,17 +105,20 @@ REGULAR_DEPLOYMENT = {
 ALL_DEPLOYMENTS = [CLAUDE_CODE_DEPLOYMENT, REGULAR_DEPLOYMENT]
 
 
-def _make_routing_ctx(enable_tag_filtering=True, match_any=True) -> RoutingContext:
-    """The candidates come in as healthy_deployments, so the router itself configures none."""
-    return Router(model_list=[], enable_tag_filtering=enable_tag_filtering, tag_filtering_match_any=match_any)._core_ctx
+def _make_router_mock(enable_tag_filtering=True, match_any=True):
+    mock = MagicMock()
+    mock.enable_tag_filtering = enable_tag_filtering
+    mock.tag_filtering_match_any = match_any
+    mock.tag_routing_prefix = ""
+    return mock
 
 
 @pytest.mark.asyncio
 async def test_claude_code_ua_routes_to_cc_deployment():
     """claude-code/x.y.z UA → claude-code-deployment via tag_regex."""
-    ctx = _make_routing_ctx()
+    router = _make_router_mock()
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="claude-sonnet",
         healthy_deployments=ALL_DEPLOYMENTS,
         request_deployments=ALL_DEPLOYMENTS,
@@ -127,9 +131,9 @@ async def test_claude_code_ua_routes_to_cc_deployment():
 @pytest.mark.asyncio
 async def test_regular_ua_routes_to_default_deployment():
     """Mozilla UA → regular-deployment via default tag fallback."""
-    ctx = _make_routing_ctx()
+    router = _make_router_mock()
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="claude-sonnet",
         healthy_deployments=ALL_DEPLOYMENTS,
         request_deployments=ALL_DEPLOYMENTS,
@@ -142,9 +146,9 @@ async def test_regular_ua_routes_to_default_deployment():
 @pytest.mark.asyncio
 async def test_no_ua_routes_to_default_deployment():
     """No User-Agent → default deployment."""
-    ctx = _make_routing_ctx()
+    router = _make_router_mock()
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="claude-sonnet",
         healthy_deployments=ALL_DEPLOYMENTS,
         request_deployments=ALL_DEPLOYMENTS,
@@ -157,10 +161,10 @@ async def test_no_ua_routes_to_default_deployment():
 @pytest.mark.asyncio
 async def test_tag_routing_metadata_written_for_regex_match():
     """tag_routing metadata block is populated when regex matches."""
-    ctx = _make_routing_ctx()
+    router = _make_router_mock()
     metadata: dict = {"user_agent": "claude-code/2.0.0-beta.1"}
     await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="claude-sonnet",
         healthy_deployments=ALL_DEPLOYMENTS,
         request_deployments=ALL_DEPLOYMENTS,
@@ -176,9 +180,9 @@ async def test_tag_routing_metadata_written_for_regex_match():
 @pytest.mark.asyncio
 async def test_tag_filtering_disabled_returns_all_deployments():
     """When enable_tag_filtering is False, all deployments returned regardless of UA."""
-    ctx = _make_routing_ctx(enable_tag_filtering=False)
+    router = _make_router_mock(enable_tag_filtering=False)
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="claude-sonnet",
         healthy_deployments=ALL_DEPLOYMENTS,
         request_deployments=ALL_DEPLOYMENTS,
@@ -195,9 +199,9 @@ async def test_empty_healthy_deployments_with_request_tags_returns_empty_list():
     Tag-based filtering runs only against non-empty healthy_deployments; an empty list is
     returned unchanged for the router's standard handling.
     """
-    ctx = _make_routing_ctx()
+    router = _make_router_mock()
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="gpt-5.2",
         healthy_deployments=[],
         request_deployments=[],
@@ -221,13 +225,13 @@ async def test_explicit_tag_match_takes_precedence_over_regex():
         },
         "model_info": {"id": "both-deployment"},
     }
-    ctx = _make_routing_ctx()
+    router = _make_router_mock()
     metadata: dict = {
         "tags": ["premium"],
         "user_agent": "claude-code/1.0",
     }
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="claude-sonnet",
         healthy_deployments=[deployment_with_both],
         request_deployments=[deployment_with_both],
@@ -265,11 +269,11 @@ async def test_user_agent_present_no_tag_regex_deployments_does_not_raise():
             "model_info": {"id": "free-deployment"},
         },
     ]
-    ctx = _make_routing_ctx()
+    router = _make_router_mock()
     # The request has a User-Agent (as all proxy requests do) but NO tags and
     # neither deployment has tag_regex — must not raise, must return all.
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="gpt-4",
         healthy_deployments=plain_tag_only_deployments,
         request_deployments=plain_tag_only_deployments,
@@ -303,10 +307,10 @@ async def test_tag_routing_metadata_not_overwritten_for_multiple_matches():
         },
         "model_info": {"id": "cc-deployment-b"},
     }
-    ctx = _make_routing_ctx()
+    router = _make_router_mock()
     metadata: dict = {"user_agent": "claude-code/1.0"}
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="claude-sonnet",
         healthy_deployments=[deployment_a, deployment_b],
         request_deployments=[deployment_a, deployment_b],
@@ -353,13 +357,13 @@ async def test_match_any_false_strict_tag_check_blocks_regex_fallback():
     # match_any=False: req_set must be a subset of dep_set.
     # Request has "vip" which is NOT in ["premium"], so tag check fails.
     # Even though UA matches tag_regex, the deployment must NOT be selected.
-    ctx = _make_routing_ctx(enable_tag_filtering=True, match_any=False)
+    router = _make_router_mock(enable_tag_filtering=True, match_any=False)
     metadata: dict = {
         "tags": ["vip"],  # "vip" not in deployment tags → strict check fails
         "user_agent": "claude-code/1.0",
     }
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="claude-sonnet",
         healthy_deployments=[deployment_strict, default_deployment],
         request_deployments=[deployment_strict, default_deployment],
@@ -388,9 +392,9 @@ async def test_match_any_false_regex_only_deployment_still_matches():
         },
         "model_info": {"id": "regex-only-deployment"},
     }
-    ctx = _make_routing_ctx(enable_tag_filtering=True, match_any=False)
+    router = _make_router_mock(enable_tag_filtering=True, match_any=False)
     result = await get_deployments_for_tag(
-        ctx=ctx,
+        llm_router_instance=router,
         model="claude-sonnet",
         healthy_deployments=[regex_only_deployment],
         request_deployments=[regex_only_deployment],

@@ -1,18 +1,15 @@
 import React from "react";
-import { Trans, useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ComplexityRouterConfigValue } from "./ComplexityRouterConfig";
 import { getReminderMarkersError, type ReminderMarkerPair } from "./build_complexity_router_config";
-import { codeSamples } from "@/i18n/untranslated/codeSamples";
 
 const ReminderMarkers: React.FC<{
   value: ComplexityRouterConfigValue;
   onChange: (value: ComplexityRouterConfigValue) => void;
   showValidationErrors?: boolean;
 }> = ({ value, onChange, showValidationErrors = false }) => {
-  const { t } = useTranslation();
   const markers = value.reminder_markers ?? [];
   const update = (index: number, patch: Partial<ReminderMarkerPair>) =>
     onChange({
@@ -25,36 +22,36 @@ const ReminderMarkers: React.FC<{
     const next = markers.filter((_, markerIndex) => markerIndex !== index);
     onChange({ ...value, reminder_markers: next.length > 0 ? next : undefined });
   };
-  const error = getReminderMarkersError(value.reminder_markers, t);
+  const error = getReminderMarkersError(value.reminder_markers);
   return (
     <div>
       <p className="mb-4 text-sm text-muted-foreground">
-        <Trans
-          i18nKey="addModel.reminderMarkers.description"
-          components={{ marker: <code>&lt;system-reminder&gt;</code> }}
-        />
+        Auto Router already ignores built-in reminder tags, such as <code>&lt;system-reminder&gt;</code>, when choosing
+        a model. Leave this empty to keep the defaults. Add custom opening and closing tags to ignore the text between
+        them when routing. Custom pairs replace the defaults, so include any built-in pairs you still need. The selected
+        model still receives the full message. Matching is case-insensitive.
       </p>
       <div className="space-y-3">
         {markers.map((marker, index) => (
           <div className="flex items-end gap-2" key={index}>
             <div className="flex-1">
               <label className="mb-1 block text-sm font-medium" htmlFor={`reminder-marker-${index}-open`}>
-                {t("addModel.reminderMarkers.openingTag")}
+                Opening tag
               </label>
               <Input
                 id={`reminder-marker-${index}-open`}
-                placeholder={codeSamples.models.reminderMarkerOpen}
+                placeholder="<note>"
                 value={marker.open}
                 onChange={(event) => update(index, { open: event.target.value })}
               />
             </div>
             <div className="flex-1">
               <label className="mb-1 block text-sm font-medium" htmlFor={`reminder-marker-${index}-close`}>
-                {t("addModel.reminderMarkers.closingTag")}
+                Closing tag
               </label>
               <Input
                 id={`reminder-marker-${index}-close`}
-                placeholder={codeSamples.models.reminderMarkerClose}
+                placeholder="</note>"
                 value={marker.close}
                 onChange={(event) => update(index, { close: event.target.value })}
               />
@@ -62,7 +59,7 @@ const ReminderMarkers: React.FC<{
             <Button
               variant="ghost"
               size="icon"
-              aria-label={t("addModel.reminderMarkers.removePairAria", { number: index + 1 })}
+              aria-label={`Remove tag pair ${index + 1}`}
               onClick={() => remove(index)}
             >
               <Trash2 />
@@ -76,7 +73,7 @@ const ReminderMarkers: React.FC<{
         onClick={() => onChange({ ...value, reminder_markers: [...markers, { open: "", close: "" }] })}
       >
         <Plus />
-        {t("addModel.reminderMarkers.addPair")}
+        Add tag pair
       </Button>
       {showValidationErrors && error && <p className="mt-2 text-xs text-destructive">{error}</p>}
     </div>

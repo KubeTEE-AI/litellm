@@ -11,9 +11,7 @@ mod vault;
 
 use std::sync::Arc;
 
-#[cfg(test)]
-pub(crate) use error::read_error;
-pub(crate) use error::{ManagerError, python_error};
+pub(crate) use error::python_error;
 use litellm_secrets::source::{EnvironmentSecrets, SecretSource};
 use pyo3::prelude::*;
 use python::PythonSecrets;

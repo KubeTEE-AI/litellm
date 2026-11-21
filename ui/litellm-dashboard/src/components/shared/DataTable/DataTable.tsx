@@ -26,10 +26,8 @@ import {
   type VisibilityState,
 } from "@tanstack/react-table";
 import { SearchX } from "lucide-react";
-import { ErrorState } from "@/components/shared/ErrorState";
 import * as React from "react";
 import { Fragment, useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -354,14 +352,13 @@ function MessageRow({
 }
 
 function DefaultEmptyState() {
-  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-1 py-6">
       <div className="mb-1 flex size-10 items-center justify-center rounded-lg bg-muted">
         <SearchX className="size-5 text-muted-foreground" />
       </div>
-      <div className="text-sm font-medium text-foreground">{t("shared.dataTable.defaultEmptyState.title")}</div>
-      <div className="text-sm text-muted-foreground">{t("shared.dataTable.defaultEmptyState.description")}</div>
+      <div className="text-sm font-medium text-foreground">No results</div>
+      <div className="text-sm text-muted-foreground">No rows match your search or filters.</div>
     </div>
   );
 }
@@ -598,15 +595,11 @@ function useSettledPageClamp<TData extends RowData>(table: Table<TData>, options
 }
 
 export function DataTable<TData extends RowData, TValue>(props: DataTableProps<TData, TValue>) {
-  const { t } = useTranslation();
   const resolved: DataTableResolvedProps<TData, TValue> = props;
 
   const {
     isLoading = false,
-    isError = false,
-    errorMessage,
-    onRetry,
-    loadingMessage = t("shared.dataTable.loadingMessage"),
+    loadingMessage = "Loading…",
     skeletonRowCount = 8,
     noDataMessage,
     paginationMode = "none",
@@ -663,13 +656,6 @@ export function DataTable<TData extends RowData, TValue>(props: DataTableProps<T
           size={size}
           message={loadingMessage}
         />
-      );
-    }
-    if (isError && rows.length === 0) {
-      return (
-        <MessageRow colSpan={visibleColumnCount} stretch={stretchEmpty}>
-          <ErrorState message={errorMessage} onRetry={onRetry} />
-        </MessageRow>
       );
     }
     if (rows.length === 0) {

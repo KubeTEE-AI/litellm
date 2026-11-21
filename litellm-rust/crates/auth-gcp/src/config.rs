@@ -4,9 +4,7 @@ use base64::{
     Engine, alphabet,
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
 };
-use litellm_auth_types::{Error, ErrorDetail, InputSource, Sourced};
-use litellm_secret_value::SecretValue;
-
+use litellm_auth_types::{Error, ErrorDetail, InputSource, SecretValue, Sourced};
 use serde_json::{Map, Value};
 
 use litellm_auth_types::VertexParams;
@@ -146,20 +144,6 @@ pub enum CredentialSource {
     Adc,
 }
 
-impl CredentialSource {
-    pub fn from_vertex_environment(env_lookup: &dyn Fn(&str) -> Option<String>) -> Self {
-        VertexParams::CREDENTIALS
-            .resolve(&|_| None, env_lookup)
-            .map(|configured| Self::Trusted(SecretValue::new(configured)))
-            .unwrap_or_else(|| Self::application_default(env_lookup))
-    }
-
-    pub fn application_default(env_lookup: &dyn Fn(&str) -> Option<String>) -> Self {
-        non_empty_env(env_lookup, GOOGLE_APPLICATION_CREDENTIALS_ENV)
-            .map_or(Self::Adc, Self::ApplicationCredentials)
-    }
-}
-
 pub(crate) fn credential_source(
     config: &VertexConfig,
     env_lookup: &dyn Fn(&str) -> Option<String>,
@@ -172,7 +156,12 @@ pub(crate) fn credential_source(
             }
         };
     }
-    CredentialSource::from_vertex_environment(env_lookup)
+    if let Some(configured) = VertexParams::CREDENTIALS.resolve(&|_| None, env_lookup) {
+        return CredentialSource::Trusted(SecretValue::new(configured));
+    }
+    non_empty_env(env_lookup, GOOGLE_APPLICATION_CREDENTIALS_ENV)
+        .map(CredentialSource::ApplicationCredentials)
+        .unwrap_or(CredentialSource::Adc)
 }
 
 fn optional_credentials(
@@ -324,24 +313,6 @@ mod tests {
         );
         assert!(matches!(
             credential_source(&empty, &|_| None),
-            CredentialSource::Adc
-        ));
-    }
-
-    #[rstest::rstest]
-    fn application_default_ignores_vertex_credentials() {
-        let env = |name: &str| match name {
-            VERTEXAI_CREDENTIALS_ENV => Some("environment-json".to_string()),
-            GOOGLE_APPLICATION_CREDENTIALS_ENV => Some("adc.json".to_string()),
-            _ => None,
-        };
-        assert!(
-            matches!(CredentialSource::application_default(&env), CredentialSource::ApplicationCredentials(path) if path == "adc.json")
-        );
-        assert!(matches!(
-            CredentialSource::application_default(
-                &|name| (name == VERTEXAI_CREDENTIALS_ENV).then(|| "environment-json".into())
-            ),
             CredentialSource::Adc
         ));
     }

@@ -148,12 +148,10 @@ async fn routes_prompts_and_resources_without_rewriting_uris(#[future] harness: 
         "fixture://{file}"
     );
     let read = Operation::ReadResource(ReadResourceRequestParams::new("fixture://document"));
-    let ambiguous = harness
-        .gateway
-        .execute(read.clone(), context(None))
-        .await
-        .expect_err("read without a server scope");
-    assert_eq!(ambiguous.status(), axum::http::StatusCode::BAD_REQUEST);
+    assert!(matches!(
+        harness.gateway.execute(read.clone(), context(None)).await,
+        Err(Error::InvalidRequest(_))
+    ));
     let result = harness
         .gateway
         .execute(read, context(Some("alpha")))

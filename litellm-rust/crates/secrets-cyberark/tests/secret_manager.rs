@@ -9,10 +9,8 @@ use std::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 use litellm_core_utils::settings::Lookup;
 use litellm_http::{HttpClientPool, HttpSettings, Resolution, media::PublicDnsResolver};
-use litellm_secret_value::SecretValue;
 use litellm_secrets_cyberark::{CyberArkSecretManager, DeleteOutcome, Error};
-use litellm_secrets_types::{BaseSecretManager, CyberarkOperationContext};
-
+use litellm_secrets_types::{BaseSecretManager, CyberarkOperationContext, SecretValue};
 use rstest::{fixture, rstest};
 use serde::Deserialize;
 use wiremock::{

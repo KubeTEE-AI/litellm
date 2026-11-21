@@ -1,42 +1,29 @@
-import { useTerminology } from "@/contexts/TerminologyContext";
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { usePathname } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Check, ChevronDown, ChevronsUpDown } from "lucide-react";
-import { useSidebar } from "@/components/shared/Sidebar";
+import { Check, ChevronsUpDown, LayoutGrid } from "lucide-react";
 import { usePluginMode } from "@/contexts/PluginModeContext";
 import { useUISettings } from "@/app/(dashboard)/hooks/uiSettings/useUISettings";
 import { uiHref } from "@/utils/uiHref";
-import { cn } from "@/lib/cva.config";
-import i18n from "@/i18n/i18n";
-import { productNames } from "@/i18n/untranslated/productNames";
+import moyaiHead from "../../../public/assets/moyai/moyai-head.svg";
 
 const GATEWAY = "ai-gateway";
 const CHAT = "chat";
 const MOYAI = "moyai";
 
-function isWorkspaceRoute(pathname: string, workspace: string): boolean {
-  const routes = [uiHref(workspace)];
-  if (process.env.NODE_ENV === "development") routes.push(`/ui/${workspace}`);
-  return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+function isRoute(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function activeWorkspaceLabel(
-  isChatRoute: boolean,
-  isMoyaiRoute: boolean,
-  pluginLabel: string | undefined,
-  gatewayLabel: string,
-): string {
-  if (isChatRoute) return i18n.t("shell.viewSwitcher.chat");
+function activeLabelFor(isChatRoute: boolean, isMoyaiRoute: boolean, pluginLabel: string | undefined): string {
+  if (isChatRoute) return "Chat";
   if (isMoyaiRoute) return "Moyai";
-  return pluginLabel ?? gatewayLabel;
+  return pluginLabel ?? "AI Gateway";
 }
 
 interface ViewSwitcherItem {
@@ -46,15 +33,7 @@ interface ViewSwitcherItem {
   onClick?: () => void;
 }
 
-interface ViewSwitcherProps {
-  className?: string;
-  contentClassName?: string;
-}
-
-export default function ViewSwitcher({ className, contentClassName }: ViewSwitcherProps) {
-  const { t } = useTranslation();
-  const term = useTerminology();
-  const { collapsed } = useSidebar();
+export default function ViewSwitcher() {
   const { mode, setMode, plugins } = usePluginMode();
   const { data: uiSettings } = useUISettings();
   const pathname = usePathname();
@@ -63,20 +42,14 @@ export default function ViewSwitcher({ className, contentClassName }: ViewSwitch
   const moyaiUrl = (uiSettings?.values?.moyai_url as string | undefined) ?? null;
 
   const normalizedPathname = (pathname ?? "").replace(/\/+$/, "");
-  const isChatRoute = isWorkspaceRoute(normalizedPathname, CHAT);
-  const isMoyaiRoute = isWorkspaceRoute(normalizedPathname, MOYAI);
+  const isChatRoute = chatEnabled && isRoute(normalizedPathname, uiHref(CHAT));
+  const isMoyaiRoute = isRoute(normalizedPathname, uiHref(MOYAI));
   const isStandaloneRoute = isChatRoute || isMoyaiRoute;
 
-  const gatewayLabel = term(t("shell.viewSwitcher.aiGateway"));
-  const activeLabel = activeWorkspaceLabel(
-    isChatRoute,
-    isMoyaiRoute,
-    plugins.find((p) => p.name === mode)?.display_name,
-    gatewayLabel,
-  );
+  const activeLabel = activeLabelFor(isChatRoute, isMoyaiRoute, plugins.find((p) => p.name === mode)?.display_name);
 
   const modeEntries = [
-    { key: GATEWAY, label: gatewayLabel },
+    { key: GATEWAY, label: "AI Gateway" },
     ...plugins.map((p) => ({ key: p.name, label: p.display_name })),
   ];
 
@@ -87,46 +60,50 @@ export default function ViewSwitcher({ className, contentClassName }: ViewSwitch
     }
   };
 
-  const chatItem: ViewSwitcherItem = {
-    key: CHAT,
-    disabled: !chatEnabled,
-    label: (
-      <div className="flex w-full items-center justify-between gap-6 py-0.5">
-        <span className="flex max-w-[220px] flex-col">
-          <span className="font-medium">{t("shell.viewSwitcher.chat")}</span>{" "}
-          <span className="text-xs leading-snug text-muted-foreground">{t("shell.viewSwitcher.chatDescription")}</span>{" "}
-          {!chatEnabled && (
+  const chatItem: ViewSwitcherItem = chatEnabled
+    ? {
+        key: CHAT,
+        label: (
+          <div className="flex items-center justify-between gap-6 py-0.5">
+            <span className="font-medium">Chat</span>
+            {isChatRoute && <Check className="size-4 text-info" />}
+          </div>
+        ),
+        onClick: () => window.location.assign(uiHref(CHAT)),
+      }
+    : {
+        key: CHAT,
+        disabled: true,
+        label: (
+          <div className="flex max-w-[220px] flex-col py-0.5">
+            <span className="font-medium">Chat</span>
             <span className="whitespace-normal text-xs leading-snug text-muted-foreground">
-              {t("shell.viewSwitcher.chatDisabled")}
+              Admins can enable in Settings
             </span>
-          )}
-        </span>
-        {isChatRoute && <Check className="size-4 text-info" />}
-      </div>
-    ),
-    onClick: chatEnabled ? () => window.location.assign(uiHref(CHAT)) : undefined,
-  };
+          </div>
+        ),
+      };
 
   const items: ViewSwitcherItem[] = [
     ...modeEntries.map((e) => ({
       key: e.key,
       label: (
-        <div className="flex w-full items-center justify-between gap-6 py-0.5">
+        <div className="flex items-center justify-between gap-6 py-0.5">
           <span className="font-medium">{e.label}</span>
           {!isStandaloneRoute && e.key === mode && <Check className="size-4 text-info" />}
         </div>
       ),
       onClick: () => selectMode(e.key),
     })),
-    chatItem,
     {
       key: MOYAI,
       label: (
-        <div className="flex w-full items-center justify-between gap-6 py-0.5">
-          <span className="flex flex-col">
-            <span className="font-medium">{productNames.moyai}</span>{" "}
-            <span className="text-xs leading-snug text-muted-foreground">
-              {t("shell.viewSwitcher.moyaiDescription")}
+        <div className="flex items-center justify-between gap-6 py-0.5">
+          <span className="flex items-center gap-2">
+            <img src={moyaiHead.src} alt="" className="h-4 w-auto" />
+            <span className="flex flex-col">
+              <span className="font-medium">Moyai</span>
+              <span className="text-xs leading-snug text-muted-foreground">Cloud Coding Agent</span>
             </span>
           </span>
           {isMoyaiRoute && <Check className="size-4 text-info" />}
@@ -134,41 +111,28 @@ export default function ViewSwitcher({ className, contentClassName }: ViewSwitch
       ),
       onClick: () => window.location.assign(moyaiUrl ?? uiHref(MOYAI)),
     },
+    chatItem,
   ];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={t("shell.viewSwitcher.trigger", { workspace: activeLabel })}
         render={
-          <Button
+          <button
             type="button"
-            variant="outline"
-            size="sm"
-            title={collapsed ? t("shell.viewSwitcher.trigger", { workspace: activeLabel }) : undefined}
-            className={cn(
-              "max-w-[220px] gap-1.5 px-3 dark:bg-transparent",
-              className,
-              collapsed &&
-                "mx-auto flex size-9 justify-center gap-0 border-sidebar-border p-0 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-            )}
+            className="flex h-8 max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-background pl-1.5 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           />
         }
       >
-        {collapsed ? (
-          <ChevronDown className="size-4 text-muted-foreground" />
-        ) : (
-          <>
-            <span data-slot="workspace-label" className="truncate">
-              {activeLabel}
-            </span>
-            <ChevronsUpDown data-slot="workspace-chevron" className="size-3.5 flex-none text-muted-foreground" />
-          </>
-        )}
+        <span className="flex size-5 flex-none items-center justify-center rounded bg-muted text-muted-foreground">
+          <LayoutGrid className="size-[13px]" />
+        </span>
+        <span className="truncate">{activeLabel}</span>
+        <ChevronsUpDown className="size-3.5 flex-none text-muted-foreground" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent className={cn("w-auto", contentClassName)}>
+      <DropdownMenuContent className="w-auto">
         {items.map((item) => (
-          <DropdownMenuItem key={item.key} disabled={item.disabled} onClick={item.onClick} className="w-full">
+          <DropdownMenuItem key={item.key} disabled={item.disabled} onClick={item.onClick}>
             {item.label}
           </DropdownMenuItem>
         ))}

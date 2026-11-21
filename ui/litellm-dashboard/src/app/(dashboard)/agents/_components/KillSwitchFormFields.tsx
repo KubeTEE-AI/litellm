@@ -1,6 +1,5 @@
 import React from "react";
 import { useFieldArray, useFormContext, useWatch } from "react-hook-form";
-import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,10 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldTitle } from "@/components/ui/field";
 import { PasswordInput } from "@/components/shared/PasswordInput";
-import i18n from "@/i18n/i18n";
 import { AgentFormField, AgentFormValues, labelWithHint } from "./AgentFormKit";
 import { KILL_SWITCH_AUTH_TYPES, KILL_SWITCH_METHODS, validateKillSwitchBody } from "./kill_switch_config";
-import { codeSamples } from "@/i18n/untranslated/codeSamples";
 
 const KeyValueFieldArray = ({
   name,
@@ -24,7 +21,6 @@ const KeyValueFieldArray = ({
   keyPlaceholder: string;
   valuePlaceholder: string;
 }) => {
-  const { t } = useTranslation();
   const { control } = useFormContext<AgentFormValues>();
   const { fields, append, remove } = useFieldArray({ control, name });
 
@@ -32,10 +28,7 @@ const KeyValueFieldArray = ({
     <div className="flex flex-col gap-2">
       {fields.map((item, index) => (
         <div key={item.id} className="flex items-start gap-2">
-          <AgentFormField
-            name={`${name}.${index}.key`}
-            rules={{ required: t("agents.killSwitchFields.errors.nameRequired") }}
-          >
+          <AgentFormField name={`${name}.${index}.key`} rules={{ required: "Name required" }}>
             {({ value, onChange, ref, ...control }) => (
               <Input
                 {...control}
@@ -63,7 +56,7 @@ const KeyValueFieldArray = ({
             type="button"
             variant="ghost"
             size="icon"
-            aria-label={t("agents.killSwitchFields.removeItem", { item: addLabel.replace(/^Add /, "").toLowerCase() })}
+            aria-label={`Remove ${addLabel.replace(/^Add /, "").toLowerCase()}`}
             className="text-destructive hover:text-destructive/80"
             onClick={() => remove(index)}
           >
@@ -116,50 +109,24 @@ const TextField = ({
 );
 
 const KillSwitchAuthFields = () => {
-  const { t } = useTranslation();
   const { control } = useFormContext<AgentFormValues>();
   const authType = useWatch({ control, name: "kill_switch.auth_type" });
 
   switch (authType) {
     case "bearer":
-      return (
-        <TextField
-          name="kill_switch.auth_token"
-          label={t("agents.killSwitchFields.auth.bearerToken")}
-          required={t("agents.killSwitchFields.errors.tokenRequired")}
-          secret
-        />
-      );
+      return <TextField name="kill_switch.auth_token" label="Bearer token" required="Token required" secret />;
     case "api_key":
       return (
         <>
-          <TextField
-            name="kill_switch.auth_header_name"
-            label={t("agents.killSwitchFields.auth.headerName")}
-            placeholder={codeSamples.agents.killSwitchAuthHeader}
-          />
-          <TextField
-            name="kill_switch.auth_api_key"
-            label={t("agents.killSwitchFields.auth.apiKey")}
-            required={t("agents.killSwitchFields.errors.apiKeyRequired")}
-            secret
-          />
+          <TextField name="kill_switch.auth_header_name" label="Header name" placeholder="X-API-Key" />
+          <TextField name="kill_switch.auth_api_key" label="API key" required="API key required" secret />
         </>
       );
     case "basic":
       return (
         <>
-          <TextField
-            name="kill_switch.auth_username"
-            label={t("agents.killSwitchFields.auth.username")}
-            required={t("agents.killSwitchFields.errors.usernameRequired")}
-          />
-          <TextField
-            name="kill_switch.auth_password"
-            label={t("agents.killSwitchFields.auth.password")}
-            required={t("agents.killSwitchFields.errors.passwordRequired")}
-            secret
-          />
+          <TextField name="kill_switch.auth_username" label="Username" required="Username required" />
+          <TextField name="kill_switch.auth_password" label="Password" required="Password required" secret />
         </>
       );
     default:
@@ -172,13 +139,13 @@ const KillSwitchFormFields = () => (
     <TextField
       name="kill_switch.url"
       label={labelWithHint(
-        i18n.t("agents.killSwitchFields.webhookUrl.label"),
-        i18n.t("agents.killSwitchFields.webhookUrl.hint"),
+        "Webhook URL",
+        "Absolute http(s) URL LiteLLM calls when the kill switch is triggered. Leave empty to remove the kill switch.",
       )}
       placeholder="https://example.com/hooks/kill-agent"
     />
 
-    <AgentFormField name="kill_switch.method" label={i18n.t("agents.killSwitchFields.method")}>
+    <AgentFormField name="kill_switch.method" label="Method">
       {({ value, onChange, ref: _ref, ...control }) => (
         <Select value={typeof value === "string" ? value : "POST"} onValueChange={onChange}>
           <SelectTrigger {...control} className="w-full">
@@ -196,28 +163,28 @@ const KillSwitchFormFields = () => (
     </AgentFormField>
 
     <Field>
-      <FieldTitle>{i18n.t("agents.killSwitchFields.headers.title")}</FieldTitle>
+      <FieldTitle>Headers</FieldTitle>
       <KeyValueFieldArray
         name="kill_switch.headers"
-        addLabel={i18n.t("agents.killSwitchFields.headers.add")}
-        keyPlaceholder={i18n.t("agents.killSwitchFields.headers.keyPlaceholder")}
-        valuePlaceholder={i18n.t("agents.killSwitchFields.headers.valuePlaceholder")}
+        addLabel="Add Header"
+        keyPlaceholder="Header name"
+        valuePlaceholder="Header value"
       />
     </Field>
 
     <Field>
-      <FieldTitle>{i18n.t("agents.killSwitchFields.queryParams.title")}</FieldTitle>
+      <FieldTitle>Query Parameters</FieldTitle>
       <KeyValueFieldArray
         name="kill_switch.query_params"
-        addLabel={i18n.t("agents.killSwitchFields.queryParams.add")}
-        keyPlaceholder={i18n.t("agents.killSwitchFields.queryParams.keyPlaceholder")}
-        valuePlaceholder={i18n.t("agents.killSwitchFields.queryParams.valuePlaceholder")}
+        addLabel="Add Query Parameter"
+        keyPlaceholder="Parameter name"
+        valuePlaceholder="Parameter value"
       />
     </Field>
 
     <AgentFormField
       name="kill_switch.body"
-      label={labelWithHint(i18n.t("agents.killSwitchFields.body.label"), i18n.t("agents.killSwitchFields.body.hint"))}
+      label={labelWithHint("JSON Body", "Optional JSON object sent as the request body")}
       rules={{ validate: (value) => validateKillSwitchBody(typeof value === "string" ? value : "") }}
     >
       {({ value, onChange, ref, ...control }) => (
@@ -225,14 +192,14 @@ const KillSwitchFormFields = () => (
           {...control}
           ref={ref}
           rows={4}
-          placeholder={codeSamples.agents.killSwitchPayloadJson}
+          placeholder='{"reason": "manual kill switch"}'
           value={typeof value === "string" ? value : ""}
           onChange={onChange}
         />
       )}
     </AgentFormField>
 
-    <AgentFormField name="kill_switch.auth_type" label={i18n.t("agents.killSwitchFields.authentication")}>
+    <AgentFormField name="kill_switch.auth_type" label="Authentication">
       {({ value, onChange, ref: _ref, ...control }) => (
         <Select value={typeof value === "string" ? value : "none"} onValueChange={onChange}>
           <SelectTrigger {...control} className="w-full">
@@ -241,7 +208,7 @@ const KillSwitchFormFields = () => (
           <SelectContent>
             {KILL_SWITCH_AUTH_TYPES.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {i18n.t(option.labelKey)}
+                {option.label}
               </SelectItem>
             ))}
           </SelectContent>

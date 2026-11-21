@@ -1,7 +1,6 @@
 "use client";
 
 import { MCPServer } from "@/components/mcp_tools/types";
-import i18n from "@/i18n/i18n";
 
 export interface RequiredFieldDef {
   key: string;
@@ -17,79 +16,51 @@ export interface FieldGroup {
 
 export const FIELD_GROUPS: FieldGroup[] = [
   {
-    get label() {
-      return i18n.t("mcpServers.standardsSettings.groups.documentation");
-    },
+    label: "Documentation",
     fields: [
       {
         key: "description",
-        get label() {
-          return i18n.t("mcpServers.standardsSettings.fields.description.label");
-        },
-        get description() {
-          return i18n.t("mcpServers.standardsSettings.fields.description.description");
-        },
+        label: "Description",
+        description: "Must have a non-empty description",
         check: (s) => !!s.description?.trim(),
       },
       {
         key: "alias",
-        get label() {
-          return i18n.t("mcpServers.standardsSettings.fields.alias.label");
-        },
-        get description() {
-          return i18n.t("mcpServers.standardsSettings.fields.alias.description");
-        },
+        label: "Alias",
+        description: "Must have a display alias",
         check: (s) => !!s.alias?.trim(),
       },
     ],
   },
   {
-    get label() {
-      return i18n.t("mcpServers.standardsSettings.groups.source");
-    },
+    label: "Source",
     fields: [
       {
         key: "source_url",
-        get label() {
-          return i18n.t("mcpServers.standardsSettings.fields.sourceUrl.label");
-        },
-        get description() {
-          return i18n.t("mcpServers.standardsSettings.fields.sourceUrl.description");
-        },
+        label: "GitHub / Source URL",
+        description: "Must link to a source repository",
         check: (s) => !!s.source_url?.trim(),
       },
     ],
   },
   {
-    get label() {
-      return i18n.t("mcpServers.standardsSettings.groups.connection");
-    },
+    label: "Connection",
     fields: [
       {
         key: "url",
-        get label() {
-          return i18n.t("mcpServers.standardsSettings.fields.url.label");
-        },
-        get description() {
-          return i18n.t("mcpServers.standardsSettings.fields.url.description");
-        },
+        label: "Server URL",
+        description: "Must have a URL configured",
         check: (s) => !!s.url?.trim(),
       },
     ],
   },
   {
-    get label() {
-      return i18n.t("mcpServers.standardsSettings.groups.security");
-    },
+    label: "Security",
     fields: [
       {
         key: "auth_type",
-        get label() {
-          return i18n.t("mcpServers.standardsSettings.fields.authType.label");
-        },
-        get description() {
-          return i18n.t("mcpServers.standardsSettings.fields.authType.description");
-        },
+        label: "Auth configured",
+        description: "Must use authentication (not 'none')",
         check: (s) => !!s.auth_type && s.auth_type !== "none",
       },
     ],

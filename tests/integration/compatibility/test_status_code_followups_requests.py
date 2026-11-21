@@ -20,6 +20,7 @@ from integration.compatibility._status_code_audit import (
     RESPONSES_FRAMES,
     assembled_text,
     assert_no_provider_call,
+    drain_rig_upstream,
     invalid_request,
     json_response,
     one_outbound,
@@ -35,6 +36,11 @@ from pydantic import JsonValue
 from tests.integration.cost_calculation.cost_tracking_case import StoredResponse
 
 pytestmark: Final = pytest.mark.timeout(180)
+
+
+@pytest.fixture(autouse=True)
+def _drained_upstream() -> None:
+    drain_rig_upstream()
 
 
 _OCR: Final[dict[str, JsonValue]] = {

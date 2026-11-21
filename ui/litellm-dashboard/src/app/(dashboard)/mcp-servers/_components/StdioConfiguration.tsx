@@ -1,6 +1,5 @@
 import { Info } from "lucide-react";
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 
 import { MountedFormField } from "@/components/common_components/MountedFormField";
@@ -31,15 +30,14 @@ const PLACEHOLDER = `{
 }`;
 
 const StdioConfiguration: React.FC<StdioConfigurationProps> = ({ isVisible, required = true }) => {
-  const { t } = useTranslation();
   if (!isVisible) return null;
 
   return (
     <MountedFormField
       label={
         <span className="text-sm font-medium text-foreground flex items-center">
-          {t("mcpServers.stdioConfiguration.label")}
-          <SimpleTooltip content={t("mcpServers.stdioConfiguration.tooltip")}>
+          Stdio Configuration (JSON)
+          <SimpleTooltip content="Paste your stdio MCP server configuration in JSON format. You can use the full mcpServers structure from config.yaml or just the inner server configuration.">
             <Info className="ml-2 size-4 text-info hover:text-info/80 cursor-help" />
           </SimpleTooltip>
         </span>
@@ -48,8 +46,8 @@ const StdioConfiguration: React.FC<StdioConfigurationProps> = ({ isVisible, requ
       required={required}
       rules={{
         validate: {
-          ...(required ? { required: requiredRule(t("mcpServers.stdioConfiguration.errors.required")) } : {}),
-          json: parsesAsJson(t("mcpServers.stdioConfiguration.errors.invalidJson")),
+          ...(required ? { required: requiredRule("Please enter stdio configuration") } : {}),
+          json: parsesAsJson("Please enter valid JSON"),
         },
       }}
     >

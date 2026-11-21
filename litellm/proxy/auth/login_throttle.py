@@ -431,10 +431,6 @@ class LoginAttempt:
     throttle: LoginThrottle
     username: str
 
-    async def refuse_if_blocked_while_waiting(self) -> None:
-        """Refuses a login that waited in line while failures ahead of it blocked this key."""
-        await self.throttle.attempt(self.username)
-
     async def succeeded(self) -> None:
         if not self.throttle.enabled:
             return

@@ -1,21 +1,19 @@
 mod common_utils;
 mod constants;
 mod handler;
+mod prepare;
 pub mod route;
 mod types;
 
 use futures_util::FutureExt;
 use litellm_auth::AuthServices;
-use litellm_host::interceptors::Interceptors;
-use litellm_inference::context::CallContext;
-use litellm_inference::provider::resolve_llm_provider;
+use litellm_host::interceptors::{Cost, ExecutionFacts, Interceptors, ResultSource};
+
+use litellm_inference::{caching::CallCache, context::CallContext};
 use litellm_secrets::source::SecretSource;
 use std::sync::Arc;
 
-use crate::common_utils::messages_provider;
-
-pub use common_utils::merge_messages_header_sources;
-pub use litellm_inference::Error;
+pub use litellm_inference::RouteError as Error;
 pub use types::{
     MessagesCall, MessagesCallResponse, MessagesSettings, MessagesShaping, litellm_params,
     messages_body,
@@ -76,23 +74,39 @@ impl MessagesRoute {
         context: CallContext<'_, impl Interceptors<Error>>,
     ) -> Result<MessagesCallResponse, Error> {
         litellm_inference::diagnostic::call(async {
-            let provider = resolve_llm_provider(
-                &call.body.model,
-                call.custom_llm_provider.as_deref(),
-                "messages",
-            )?;
-            let config = messages_provider(provider.provider, provider.model).ok_or_else(|| {
-                Error::InvalidProvider(<&str>::from(provider.provider).to_string())
-            })?;
+            let prepared = prepare::prepare(call, self.secrets.as_ref()).await?;
             litellm_inference::diagnostic::provider(
-                provider.model,
-                <&'static str>::from(provider.provider),
+                &prepared.body.model,
+                prepared.provider.as_str(),
             );
-            let model = provider.model.to_owned();
-            let secrets = self.secrets.resolve(config.config().secret_names()).await?;
-            handler::execute(self, config, model, call, secrets, &context)
-                .boxed()
-                .await
+            let request = self.prepare_outbound(prepared, &context).boxed().await?;
+            let cache = CallCache::<route::Messages>::from_wire(
+                self.cache.as_ref().filter(|_| request.cacheable()),
+                context.cache,
+                &request.identity,
+                &request.wire,
+            );
+            let identity = request.identity.clone();
+            let config = request.provider.config();
+            let (output, source) = match cache.lookup().await {
+                Some(hit) => hit,
+                None => (
+                    self.call_provider(request, &context).await?,
+                    ResultSource::Provider,
+                ),
+            };
+            let reported = match &output {
+                MessagesCallResponse::Complete(response) => config.reported_cost(response),
+                MessagesCallResponse::Stream { .. } => None,
+            };
+            context
+                .result_ready(ExecutionFacts {
+                    provider: identity,
+                    cost: Cost::settle(&source, reported),
+                    source: source.clone(),
+                })
+                .await?;
+            Ok(cache.finish(output, &source).await)
         })
         .await
     }

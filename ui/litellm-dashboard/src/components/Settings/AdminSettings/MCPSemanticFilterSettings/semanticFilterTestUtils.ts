@@ -1,5 +1,3 @@
-import type { TFunction } from "i18next";
-import i18n from "@/i18n/i18n";
 import { toast } from "@/lib/toast";
 import { testMCPSemanticFilter } from "@/components/networking";
 
@@ -25,26 +23,23 @@ const parseFilterHeaders = (headers: FilterHeaders): TestResult | null => {
   return { totalTools: total, selectedTools: selected, tools };
 };
 
-export const runSemanticFilterTest = async (
-  {
-    accessToken,
-    testModel,
-    testQuery,
-    setIsTesting,
-    setTestResult,
-    setTestError,
-  }: {
-    accessToken: string;
-    testModel: string | null;
-    testQuery: string;
-    setIsTesting: (value: boolean) => void;
-    setTestResult: (result: TestResult | null) => void;
-    setTestError: (error: string | null) => void;
-  },
-  t: TFunction = i18n.t.bind(i18n),
-) => {
+export const runSemanticFilterTest = async ({
+  accessToken,
+  testModel,
+  testQuery,
+  setIsTesting,
+  setTestResult,
+  setTestError,
+}: {
+  accessToken: string;
+  testModel: string | null;
+  testQuery: string;
+  setIsTesting: (value: boolean) => void;
+  setTestResult: (result: TestResult | null) => void;
+  setTestError: (error: string | null) => void;
+}) => {
   if (!testQuery || !testModel || !accessToken) {
-    toast.error(t("mcpServers.semanticFilterTestUtils.missingInput"));
+    toast.error("Please enter a query and select a model");
     return;
   }
 
@@ -57,18 +52,17 @@ export const runSemanticFilterTest = async (
     const parsedResult = parseFilterHeaders(headers);
 
     if (!parsedResult) {
-      toast.warning(t("mcpServers.semanticFilterTestUtils.notFiltered"));
+      toast.warning("Semantic filter is not enabled or no tools were filtered");
       return;
     }
 
     setTestResult(parsedResult);
-    toast.success(t("mcpServers.semanticFilterTestUtils.completed"));
+    toast.success("Semantic filter test completed successfully");
   } catch (error) {
     console.error("Test failed:", error);
-    const message =
-      error instanceof Error && error.message ? error.message : t("mcpServers.semanticFilterTestUtils.failed");
+    const message = error instanceof Error && error.message ? error.message : "Failed to test semantic filter";
     setTestError(message);
-    toast.error(t("mcpServers.semanticFilterTestUtils.failed"));
+    toast.error("Failed to test semantic filter");
   } finally {
     setIsTesting(false);
   }

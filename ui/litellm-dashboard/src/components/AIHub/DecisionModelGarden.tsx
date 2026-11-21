@@ -1,7 +1,5 @@
 import React, { useMemo, useState } from "react";
-import type { ParseKeys } from "i18next";
 import { BookOpen, Plus, Sparkles } from "lucide-react";
-import { Trans, useTranslation } from "react-i18next";
 
 import { useModelCostMap } from "@/app/(dashboard)/hooks/models/useModelCostMap";
 import { useProviderFields } from "@/app/(dashboard)/hooks/providers/useProviderFields";
@@ -22,18 +20,17 @@ import { uiHref } from "@/utils/uiHref";
 
 const PREVIEW_COUNT = 8;
 
-const ROUTE_LINKS: Readonly<Record<DecisionRoute, { readonly href: string; readonly label: ParseKeys }>> = {
-  decisions: { href: DECISIONS_DOCS_URL, label: "aiHub.decisionModelGarden.routes.decisions" },
-  "self-hosted": { href: DECISIONS_SELF_HOSTED_DOCS_URL, label: "aiHub.decisionModelGarden.routes.selfHosted" },
-  "needs-upgrade": { href: DECISIONS_PROVIDERS_DOCS_URL, label: "aiHub.decisionModelGarden.routes.needsUpgrade" },
+const plural = (count: number, one: string, many: string): string => (count === 1 ? one : many);
+
+const ROUTE_LINKS: Readonly<Record<DecisionRoute, { readonly href: string; readonly label: string }>> = {
+  decisions: { href: DECISIONS_DOCS_URL, label: "/v1/decisions docs" },
+  "self-hosted": { href: DECISIONS_SELF_HOSTED_DOCS_URL, label: "Self-hosted, own route" },
+  "needs-upgrade": { href: DECISIONS_PROVIDERS_DOCS_URL, label: "Needs a newer LiteLLM" },
 };
 
 const DEPLOYMENT_NAMED_PROVIDERS: ReadonlySet<string> = new Set(["azure", "azure_ai"]);
 
-const OWN_DEPLOYMENT_LINK = {
-  href: DECISIONS_PROVIDERS_DOCS_URL,
-  label: "aiHub.decisionModelGarden.routes.ownDeployment",
-} as const;
+const OWN_DEPLOYMENT_LINK = { href: DECISIONS_PROVIDERS_DOCS_URL, label: "Deploy under your own name" } as const;
 
 const needsOwnDeploymentName = (row: DecisionGardenModel): boolean =>
   row.route === "decisions" && DEPLOYMENT_NAMED_PROVIDERS.has(row.provider);
@@ -52,7 +49,6 @@ interface DecisionModelCardProps {
 }
 
 function DecisionModelCard({ row, canAddModels }: DecisionModelCardProps) {
-  const { t } = useTranslation();
   const { displayName } = getProviderLogoAndName(row.provider);
   const link = cardLink(row);
   return (
@@ -74,12 +70,12 @@ function DecisionModelCard({ row, canAddModels }: DecisionModelCardProps) {
           rel="noopener noreferrer"
           className="text-xs text-muted-foreground underline"
         >
-          {t(link.label)}
+          {link.label}
         </a>
         {canAddModels && (
           <Button size="xs" variant="outline" nativeButton={false} role="link" render={<a href={addModelHref(row)} />}>
             <Plus />
-            {t("aiHub.decisionModelGarden.addModel")}
+            Add model
           </Button>
         )}
       </div>
@@ -93,7 +89,6 @@ interface DecisionModelGardenProps {
 }
 
 const DecisionModelGarden: React.FC<DecisionModelGardenProps> = ({ accessToken, canAddModels }) => {
-  const { t } = useTranslation();
   const { data: costMap } = useModelCostMap(true, true);
   const { data: providerFields } = useProviderFields();
   const { data: proxyProviders, isLoading: proxyProvidersLoading } = useProxyDecisionProviders(accessToken);
@@ -123,16 +118,15 @@ const DecisionModelGarden: React.FC<DecisionModelGardenProps> = ({ accessToken, 
           <Sparkles className="size-4 text-muted-foreground" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-base font-semibold text-foreground">{t("aiHub.decisionModelGarden.title")}</h3>
+          <h3 className="m-0 text-base font-semibold text-foreground">Decision models LiteLLM supports</h3>
           <p className="m-0 mt-0.5 text-sm text-muted-foreground">
-            <Trans
-              i18nKey="aiHub.decisionModelGarden.summary"
-              count={routedRows.length}
-              values={{ providers: routedProviderCount }}
-              components={{ code: <code /> }}
-            />
-            {selfHostedCount > 0 && ` ${t("aiHub.decisionModelGarden.selfHosted", { count: selfHostedCount })}`}
-            {needsUpgradeCount > 0 && ` ${t("aiHub.decisionModelGarden.needsUpgrade", { count: needsUpgradeCount })}`}
+            {routedRows.length} decision {plural(routedRows.length, "model", "models")} across {routedProviderCount}{" "}
+            {plural(routedProviderCount, "provider", "providers")} {plural(routedRows.length, "answers", "answer")} on{" "}
+            <code>/v1/decisions</code>.
+            {selfHostedCount > 0 &&
+              ` ${selfHostedCount} more ${plural(selfHostedCount, "is self-hosted and answers on its own route", "are self-hosted and answer on their own routes")}.`}
+            {needsUpgradeCount > 0 &&
+              ` ${needsUpgradeCount} more ${plural(needsUpgradeCount, "needs", "need")} a newer LiteLLM version.`}
           </p>
         </div>
         <Button
@@ -143,7 +137,7 @@ const DecisionModelGarden: React.FC<DecisionModelGardenProps> = ({ accessToken, 
           render={<a href={DECISIONS_DOCS_URL} target="_blank" rel="noopener noreferrer" />}
         >
           <BookOpen />
-          {t("aiHub.decisionModelGarden.docs")}
+          Decisions docs
         </Button>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -154,9 +148,7 @@ const DecisionModelGarden: React.FC<DecisionModelGardenProps> = ({ accessToken, 
       {rows.length > PREVIEW_COUNT && (
         <div className="mt-4 flex justify-center">
           <Button variant="ghost" type="button" onClick={() => setShowAll((value) => !value)}>
-            {showAll
-              ? t("aiHub.decisionModelGarden.showFewer")
-              : t("aiHub.decisionModelGarden.showAll", { total: rows.length })}
+            {showAll ? "Show fewer" : `Show all ${rows.length}`}
           </Button>
         </div>
       )}

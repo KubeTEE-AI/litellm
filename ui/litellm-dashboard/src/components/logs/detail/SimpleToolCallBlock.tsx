@@ -3,7 +3,6 @@
  * Used in compact/tree views
  */
 
-import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/cva.config";
 import { ToolCall } from "./prettyMessagesTypes";
 
@@ -13,7 +12,6 @@ interface SimpleToolCallBlockProps {
 }
 
 export function SimpleToolCallBlock({ tool, compact = false }: SimpleToolCallBlockProps) {
-  const { t } = useTranslation();
   return (
     <div
       className={cn(
@@ -23,7 +21,7 @@ export function SimpleToolCallBlock({ tool, compact = false }: SimpleToolCallBlo
     >
       {/* Function badge */}
       <div className="absolute -top-2 left-3 rounded-[3px] border border-border bg-background px-1.5 text-[10px] text-muted-foreground">
-        {t("logs.detail.toolCall.badge")}
+        function
       </div>
 
       <span className="mb-1.5 block text-[13px] font-semibold">{tool.name}</span>

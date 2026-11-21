@@ -1,5 +1,4 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { MessageType } from "@/components/chat_ui/types";
 
 interface AudioRendererProps {
@@ -7,7 +6,6 @@ interface AudioRendererProps {
 }
 
 const AudioRenderer: React.FC<AudioRendererProps> = ({ message }) => {
-  const { t } = useTranslation();
   // Check if this message contains audio
   if (!message.isAudio || typeof message.content !== "string") {
     return null;
@@ -16,7 +14,7 @@ const AudioRenderer: React.FC<AudioRendererProps> = ({ message }) => {
   return (
     <div className="mb-2">
       <audio controls src={message.content} className="max-w-full" style={{ maxWidth: "500px" }}>
-        {t("playground.chatUi.audioRenderer.unsupported")}
+        Your browser does not support the audio element.
       </audio>
     </div>
   );

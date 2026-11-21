@@ -235,9 +235,8 @@ pub fn normalize_response(
                     &mut output,
                     PythonJsonFormatter,
                 ))
-                .map_err(|error| Error::response_field(content_path("content"), error))?;
-                String::from_utf8(output)
-                    .map_err(|error| Error::response_field(content_path("content"), error))?
+                .map_err(|_| response_field("content"))?;
+                String::from_utf8(output).map_err(|_| response_field("content"))?
             };
             (data, fallback)
         }
@@ -262,12 +261,7 @@ pub fn normalize_response(
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?,
-        Some(_) => {
-            return Err(Error::ResponseField {
-                path: content_path("pages"),
-                cause: None,
-            });
-        }
+        Some(_) => return Err(response_field("pages")),
         None => Vec::new(),
     };
     let usage = ocr_data
@@ -279,12 +273,7 @@ pub fn normalize_response(
         .transpose()?;
     let model = match ocr_data.get("model") {
         Some(Value::String(model)) => model.clone(),
-        Some(_) => {
-            return Err(Error::ResponseField {
-                path: content_path("model"),
-                cause: None,
-            });
-        }
+        Some(_) => return Err(response_field("model")),
         None => model.to_string(),
     };
     Ok(LiteLLMOcrResponse {
@@ -380,8 +369,10 @@ impl serde_json::ser::Formatter for PythonJsonFormatter {
     }
 }
 
-fn content_path(field: &str) -> String {
-    format!("choices[0].message.content.{field}")
+fn response_field(field: &str) -> Error {
+    Error::ResponseField {
+        path: format!("choices[0].message.content.{field}"),
+    }
 }
 
 pub fn provider_model(model: &str) -> Result<String, Error> {
@@ -389,7 +380,6 @@ pub fn provider_model(model: &str) -> Result<String, Error> {
     if local_model.is_empty() {
         return Err(Error::RequestField {
             path: "model".into(),
-            cause: None,
         });
     }
     Ok(format!("{MODEL_PREFIX}{local_model}"))
@@ -421,7 +411,9 @@ impl VertexAIDeepSeekOCRConfig {
                 ])
             })
             .map(|url| url.into_string())
-            .map_err(|error| Error::request_field("api_base", error))
+            .map_err(|_| Error::RequestField {
+                path: "api_base".into(),
+            })
     }
 }
 
@@ -633,18 +625,20 @@ mod tests {
         assert_eq!(result["future"], "kept");
     }
 
-    #[rstest::rstest]
-    #[case::no_choices(json!({"choices":[]}))]
-    #[case::empty_object(json!({"choices":[{"message":{"content":{}}}]}))]
-    #[case::empty_string(json!({"choices":[{"message":{"content":""}}]}))]
-    #[case::malformed_string(json!({"choices":[{"message":{"content":"{\"pages\":[{\"markdown\":42}]}"}}]}))]
-    #[case::malformed_object(json!({"choices":[{"message":{"content":{"pages":[{"markdown":42}]}}}]}))]
-    fn response_transform_rejects_missing_empty_and_malformed_content(#[case] value: Value) {
-        let rejected = match serde_json::from_value::<DeepSeekOcrResponse>(value) {
-            Ok(response) => normalize_response("model", response).is_err(),
-            Err(_) => true,
-        };
-        assert!(rejected);
+    #[test]
+    fn response_transform_rejects_missing_empty_and_malformed_content() {
+        for value in [
+            json!({"choices":[]}),
+            json!({"choices":[{"message":{"content":{}}}]}),
+            json!({"choices":[{"message":{"content":""}}]}),
+            json!({"choices":[{"message":{"content":"{\"pages\":[{\"markdown\":42}]}"}}]}),
+            json!({"choices":[{"message":{"content":{"pages":[{"markdown":42}]}}}]}),
+        ] {
+            let result = serde_json::from_value::<DeepSeekOcrResponse>(value)
+                .map_err(|_| ())
+                .and_then(|response| normalize_response("model", response).map_err(|_| ()));
+            assert!(result.is_err());
+        }
     }
 
     #[test]

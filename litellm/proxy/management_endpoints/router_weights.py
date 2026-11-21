@@ -31,15 +31,9 @@ class _PrismaClient(Protocol):
         pass
 
 
-class _RouterRegistry(Protocol):
-    @abstractmethod
-    def deployment(self, id: str) -> object | None:
-        pass
-
-
 class _Router(Protocol):
     @abstractmethod
-    def registry(self) -> _RouterRegistry:
+    def get_deployment(self, model_id: str) -> object | None:
         pass
 
 
@@ -132,5 +126,5 @@ async def validate_router_settings_weights(
                 deployment_id,
                 team_id,
                 stored_by_id.get(deployment_id),
-                llm_router.registry().deployment(deployment_id) if llm_router is not None else None,
+                llm_router.get_deployment(model_id=deployment_id) if llm_router is not None else None,
             )

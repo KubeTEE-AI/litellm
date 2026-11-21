@@ -1,4 +1,3 @@
-import i18n from "@/i18n/i18n";
 import { toast } from "@/lib/toast";
 
 export function updateExistingKeys<Source extends object>(target: Source, source: object): Source {
@@ -53,13 +52,15 @@ export const getSpendString = (value: number | null | undefined, decimals: numbe
     return "-";
   }
 
-  const halfSmallestUnit = Number(`5e-${decimals + 1}`);
-  if (Math.abs(value) < halfSmallestUnit) {
+  const formatted = formatNumberWithCommas(value, decimals, false, false);
+  const numericFormatted = Number(formatted.replace(/,/g, ""));
+
+  if (numericFormatted === 0) {
     const threshold = (1 / 10 ** decimals).toFixed(decimals);
     return `< $${threshold}`;
   }
 
-  return `$${formatNumberWithCommas(value, decimals, false, false)}`;
+  return `$${formatted}`;
 };
 
 export const formatPerSecondCost = (cost: number): string =>
@@ -67,7 +68,7 @@ export const formatPerSecondCost = (cost: number): string =>
 
 export const copyToClipboard = async (
   text: string | null | undefined,
-  messageText: string = i18n.t("utils.dataUtils.copiedToClipboard"),
+  messageText: string = "Copied to clipboard",
 ): Promise<boolean> => {
   if (!text) return false;
 
@@ -102,22 +103,21 @@ const fallbackCopyToClipboard = (text: string, messageText: string): boolean => 
     textArea.setAttribute("readonly", "");
 
     document.body.appendChild(textArea);
-    try {
-      textArea.focus();
-      textArea.select();
+    textArea.focus();
+    textArea.select();
 
-      if (document.execCommand("copy")) {
-        toast.success(messageText);
-        return true;
-      }
-    } finally {
-      textArea.remove();
-      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+    const successful = document.execCommand("copy");
+    document.body.removeChild(textArea);
+    if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+
+    if (successful) {
+      toast.success(messageText);
+      return true;
+    } else {
+      throw new Error("execCommand failed");
     }
-    toast.fromError(i18n.t("utils.dataUtils.copyFailed"));
-    return false;
   } catch (err) {
-    toast.fromError(i18n.t("utils.dataUtils.copyFailed"));
+    toast.fromError("Failed to copy to clipboard");
     console.error("Failed to copy: ", err);
     return false;
   }

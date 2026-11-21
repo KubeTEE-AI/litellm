@@ -4,10 +4,14 @@ from litellm.llms.base_llm.image_generation.transformation import (
     BaseImageGenerationConfig,
 )
 
+from .dall_e_2_transformation import AzureDallE2ImageGenerationConfig
+from .dall_e_3_transformation import AzureDallE3ImageGenerationConfig
 from .gpt_transformation import AzureGPTImageGenerationConfig
 from .http_utils import azure_deployment_image_generation_json_body
 
 __all__ = [
+    "AzureDallE2ImageGenerationConfig",
+    "AzureDallE3ImageGenerationConfig",
     "AzureGPTImageGenerationConfig",
     "azure_deployment_image_generation_json_body",
 ]
@@ -17,7 +21,11 @@ def get_azure_image_generation_config(model: str) -> BaseImageGenerationConfig:
     model = model.lower()
     model = model.replace("-", "")
     model = model.replace("_", "")
-    if AzureFoundryMAIImageGenerationConfig.is_mai_model(model):
+    if model == "" or "dalle2" in model:  # empty model is dall-e-2
+        return AzureDallE2ImageGenerationConfig()
+    elif "dalle3" in model:
+        return AzureDallE3ImageGenerationConfig()
+    elif AzureFoundryMAIImageGenerationConfig.is_mai_model(model):
         return AzureFoundryMAIImageGenerationConfig()
     else:
         verbose_logger.debug(

@@ -15,7 +15,6 @@ Tests cover:
 - fail_closed raises HTTPException; fail_open forwards uncompressed
 """
 
-import datetime
 import hashlib
 import json
 from types import SimpleNamespace
@@ -26,9 +25,10 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-import litellm
 from litellm.constants import PRE_CALL_EXECUTED_GUARDRAILS_KEY
-from litellm.litellm_core_utils.litellm_logging import Logging
+from litellm.exceptions import BadRequestError
+from litellm.litellm_core_utils.chat_completion_agentic_loop import refuse_a_call_the_choice_excludes
+from litellm.litellm_core_utils.get_litellm_params import AGENTIC_LOOP_TOOL_CHOICE_KEY
 from litellm.proxy.guardrails.guardrail_hooks.compresr.compresr import (
     COMPRESR_RETRIEVE_TOOL_NAME,
     CompresrGuardrail,
@@ -37,7 +37,14 @@ from litellm.proxy.guardrails.guardrail_hooks.compresr.compresr import (
     _scoped_store_key,
     has_compresr_retrieve_tool,
 )
-from litellm.types.utils import CallTypes, GenericGuardrailAPIInputs
+from litellm.types.utils import (
+    ChatCompletionMessageToolCall,
+    Choices,
+    Function,
+    GenericGuardrailAPIInputs,
+    Message,
+    ModelResponse,
+)
 
 FAKE_API_BASE = "https://compresr.example.com"
 FAKE_API_KEY = "cmp_test-key"
@@ -1440,57 +1447,6 @@ async def test_agentic_plan_builds_responses_followup_shape(
 
 
 @pytest.mark.asyncio
-async def test_responses_retrieval_followup_reuses_the_model_the_caller_requested(
-    guardrail: CompresrGuardrail,
-) -> None:
-    requested_model: Final = "bedrock/converse/us.anthropic.claude-sonnet-5-5"
-    hash_value: Final = "f" * 24
-    logging_obj: Final = Logging(
-        model=requested_model,
-        messages=[],
-        stream=False,
-        call_type=CallTypes.responses.value,
-        start_time=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
-        litellm_call_id="call-1",
-        function_id="fn-compresr-followup",
-    )
-    litellm.responses(
-        model=requested_model,
-        input=USER_QUESTION,
-        mock_response="retrieving",
-        litellm_logging_obj=logging_obj,
-    )
-    guardrail._store_originals(_scoped_store_key(logging_obj), {hash_value: TOOL_OUTPUT})
-    response: Final = MagicMock()
-    response.output = [{"type": "function_call", "call_id": "fc_1"}]
-    response.content = None
-
-    plan: Final = await guardrail.async_build_agentic_loop_plan(
-        tools={
-            "tool_calls": [
-                {
-                    "id": "fc_1",
-                    "type": "function",
-                    "name": COMPRESR_RETRIEVE_TOOL_NAME,
-                    "arguments": {"hash": hash_value},
-                }
-            ]
-        },
-        model="converse/us.anthropic.claude-sonnet-5-5",
-        messages=[{"role": "user", "content": USER_QUESTION}],
-        response=response,
-        anthropic_messages_provider_config=None,
-        anthropic_messages_optional_request_params={},
-        logging_obj=logging_obj,
-        stream=False,
-        kwargs={},
-    )
-
-    assert plan.request_patch is not None
-    assert plan.request_patch.model == requested_model
-
-
-@pytest.mark.asyncio
 async def test_agentic_plan_chat_parallel_tool_calls_echoes_only_retrieve(
     guardrail: CompresrGuardrail,
 ):
@@ -2206,3 +2162,37 @@ async def test_warns_once_per_interval_when_recovery_skipped_without_scope():
                 logging_obj=logging_obj,
             )
             assert len(_no_scope_warnings(mock_log)) == 2
+
+
+def _model_response_calling(tool_name: str) -> ModelResponse:
+    return ModelResponse(
+        choices=[
+            Choices(
+                message=Message(
+                    content=None,
+                    tool_calls=[
+                        ChatCompletionMessageToolCall(
+                            id="call_1", type="function", function=Function(name=tool_name, arguments="{}")
+                        )
+                    ],
+                )
+            )
+        ]
+    )
+
+
+def test_allowed_tools_choice_lets_the_retrieve_call_run_and_still_refuses_a_client_tool_it_excludes():
+    weather_only: Final = {
+        AGENTIC_LOOP_TOOL_CHOICE_KEY: {
+            "type": "allowed_tools",
+            "mode": "auto",
+            "tools": [{"type": "function", "name": "get_weather"}],
+        }
+    }
+    callbacks: Final = [_make_guardrail()]
+
+    refuse_a_call_the_choice_excludes(
+        _model_response_calling(COMPRESR_RETRIEVE_TOOL_NAME), weather_only, callbacks, "gpt-5.6"
+    )
+    with pytest.raises(BadRequestError, match="get_time"):
+        refuse_a_call_the_choice_excludes(_model_response_calling("get_time"), weather_only, callbacks, "gpt-5.6")

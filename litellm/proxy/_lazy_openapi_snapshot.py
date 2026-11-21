@@ -16,7 +16,6 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
 from typing_extensions import ReadOnly, TypedDict
@@ -62,7 +61,7 @@ def load_snapshot() -> dict[str, dict] | None:
         return None
 
 
-def _normalize_operation_ids(paths: Mapping[str, object]) -> None:
+def _normalize_operation_ids(paths: dict[str, dict]) -> None:
     """Make FastAPI-generated operation IDs stable for multi-method routes.
 
     FastAPI derives the default operation ID suffix from the first item in the
@@ -70,30 +69,26 @@ def _normalize_operation_ids(paths: Mapping[str, object]) -> None:
     set iteration order can vary between processes, which makes the snapshot
     drift even when no routes changed.
     """
-    from litellm.litellm_core_utils.core_helpers import as_str_mapping
-
     for path_ops in paths.values():
-        operations = as_str_mapping(path_ops)
-        if not isinstance(operations, dict):
+        if not isinstance(path_ops, dict):
             continue
 
-        methods = {method for method in operations if method in HTTP_METHOD_SUFFIXES}
+        methods = {method for method in path_ops if method in HTTP_METHOD_SUFFIXES}
         if not methods:
             continue
 
-        for method, operation in operations.items():
-            entry = as_str_mapping(operation)
-            if method not in HTTP_METHOD_SUFFIXES or not isinstance(entry, dict):
+        for method, operation in path_ops.items():
+            if method not in HTTP_METHOD_SUFFIXES or not isinstance(operation, dict):
                 continue
 
-            operation_id = entry.get("operationId")
+            operation_id = operation.get("operationId")
             if not isinstance(operation_id, str):
                 continue
 
             for suffix in methods:
                 suffix_token = f"_{suffix}"
                 if operation_id.endswith(suffix_token):
-                    entry["operationId"] = operation_id[: -len(suffix_token)] + f"_{method}"
+                    operation["operationId"] = operation_id[: -len(suffix_token)] + f"_{method}"
                     break
 
 
@@ -122,7 +117,6 @@ def _register_feature(app: "FastAPI", feat: "LazyFeature") -> str | None:
 def _feature_fragment(app: "FastAPI", feat: "LazyFeature", used_operation_ids: set[str]) -> SnapshotFragment | None:
     from fastapi.openapi.utils import get_openapi
 
-    from litellm.litellm_core_utils.core_helpers import as_str_mapping
     from litellm.proxy.proxy_server import ensure_unique_openapi_operation_ids
 
     feat_routes: Final = [r for r in app.routes if feat.matches(getattr(r, "path", ""))]
@@ -130,29 +124,22 @@ def _feature_fragment(app: "FastAPI", feat: "LazyFeature", used_operation_ids: s
         return None
     _stabilize_multi_method_route_ids(feat_routes)
     full: Final = get_openapi(title=app.title, version=app.version, routes=feat_routes)
-    openapi: Final[Mapping[str, object]] = MappingProxyType(full)
-    paths: Final = as_str_mapping(openapi.get("paths", {})) or {}
+    paths: Final = full.get("paths", {})
     _normalize_operation_ids(paths)
     for path_ops in paths.values():
-        for method, op in (as_str_mapping(path_ops) or {}).items():
-            operation = as_str_mapping(op)
-            if isinstance(operation, dict):
-                operation_id = operation.get("operationId")
+        for method, op in path_ops.items():
+            if isinstance(op, dict):
+                operation_id = op.get("operationId")
                 if isinstance(operation_id, str):
                     for suffix in HTTP_METHOD_SUFFIXES:
                         if operation_id.endswith(f"_{suffix}"):
-                            operation["operationId"] = operation_id[: -len(suffix)] + method
+                            op["operationId"] = operation_id[: -len(suffix)] + method
                             break
-                operation["tags"] = [feat.name]
-    unique: Final[Mapping[str, object]] = MappingProxyType(
-        ensure_unique_openapi_operation_ids(full, used_operation_ids)
-    )
-    components: Final = as_str_mapping(unique.get("components", {})) or {}
+                op["tags"] = [feat.name]
+    unique: Final = ensure_unique_openapi_operation_ids(full, used_operation_ids)
     return {
-        "paths": {
-            path: operations for path, entry in paths.items() if (operations := as_str_mapping(entry)) is not None
-        },
-        "components": {"schemas": as_str_mapping(components.get("schemas", {})) or {}},
+        "paths": paths,
+        "components": {"schemas": unique.get("components", {}).get("schemas", {})},
     }
 
 

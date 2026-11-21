@@ -10,13 +10,16 @@ get_deployment_successes_for_current_minute
 """
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from litellm.constants import ROUTER_USAGE_COUNTED_TOKENS_METADATA_KEY
-from litellm.router_deprecated import renamed_router_param
 
 if TYPE_CHECKING:
-    from litellm.router_api import RoutingContext
+    from litellm.router import Router as _Router
+
+    LitellmRouter = _Router
+else:
+    LitellmRouter = Any
 
 _METADATA_CHANNELS: Final = ("litellm_metadata", "metadata")
 
@@ -39,16 +42,15 @@ def get_counted_usage_tokens(litellm_params: Mapping[str, object]) -> int | None
     return counted if isinstance(counted, int) and not isinstance(counted, bool) else None
 
 
-@renamed_router_param("litellm_router_instance")
 def increment_deployment_successes_for_current_minute(
-    ctx: "RoutingContext",
+    litellm_router_instance: LitellmRouter,
     deployment_id: str,
 ) -> str:
     """
     In-Memory: Increments the number of successes for the current minute for a deployment_id
     """
     key: Final = f"{deployment_id}:successes"
-    ctx.health().store.increment_cache(
+    litellm_router_instance.cache.increment_cache(
         local_only=True,
         key=key,
         value=1,
@@ -57,16 +59,15 @@ def increment_deployment_successes_for_current_minute(
     return key
 
 
-@renamed_router_param("litellm_router_instance")
 def increment_deployment_failures_for_current_minute(
-    ctx: "RoutingContext",
+    litellm_router_instance: LitellmRouter,
     deployment_id: str,
 ):
     """
     In-Memory: Increments the number of failures for the current minute for a deployment_id
     """
     key: Final = f"{deployment_id}:fails"
-    ctx.health().store.increment_cache(
+    litellm_router_instance.cache.increment_cache(
         local_only=True,
         key=key,
         value=1,
@@ -74,9 +75,8 @@ def increment_deployment_failures_for_current_minute(
     )
 
 
-@renamed_router_param("litellm_router_instance")
 def get_deployment_successes_for_current_minute(
-    ctx: "RoutingContext",
+    litellm_router_instance: LitellmRouter,
     deployment_id: str,
 ) -> int:
     """
@@ -86,7 +86,7 @@ def get_deployment_successes_for_current_minute(
     """
     key: Final = f"{deployment_id}:successes"
     return (
-        ctx.health().store.get_cache(
+        litellm_router_instance.cache.get_cache(
             local_only=True,
             key=key,
         )
@@ -94,9 +94,8 @@ def get_deployment_successes_for_current_minute(
     )
 
 
-@renamed_router_param("litellm_router_instance")
 def get_deployment_failures_for_current_minute(
-    ctx: "RoutingContext",
+    litellm_router_instance: LitellmRouter,
     deployment_id: str,
 ) -> int:
     """
@@ -106,7 +105,7 @@ def get_deployment_failures_for_current_minute(
     """
     key: Final = f"{deployment_id}:fails"
     return (
-        ctx.health().store.get_cache(
+        litellm_router_instance.cache.get_cache(
             local_only=True,
             key=key,
         )

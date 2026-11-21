@@ -5,13 +5,11 @@ from typing import TYPE_CHECKING, Final, cast
 from typing_extensions import NotRequired, ReadOnly, TypedDict
 
 from litellm.constants import OPENAI_CHAT_COMPLETION_PARAMS
-from litellm.litellm_core_utils.core_helpers import drops_unsupported_params
-from litellm.litellm_core_utils.hidden_params import get_hidden_params, served_from_cache, set_hidden_param
 
 if TYPE_CHECKING:
     from litellm import Logging as LiteLLMLoggingObj
     from litellm.types.llms.openai import ChatCompletionUserMessage, HttpxBinaryResponseContent
-    from litellm.types.utils import ModelResponse, Usage
+    from litellm.types.utils import ModelResponse
 
 
 def _completion_response_cost(model_response: "ModelResponse") -> float | None:
@@ -22,13 +20,6 @@ def _completion_response_cost(model_response: "ModelResponse") -> float | None:
     return response_cost if isinstance(response_cost, float) else None
 
 
-def _completion_usage(model_response: "ModelResponse") -> "Usage | None":
-    from litellm.types.utils import Usage
-
-    usage: Final = getattr(model_response, "usage", None)
-    return usage if isinstance(usage, Usage) else None
-
-
 GEMINI_TTS_CHAT_AUDIO_FORMAT: Final = "pcm16"
 GEMINI_TTS_RAW_RESPONSE_FORMAT: Final = "pcm"
 GEMINI_TTS_SUPPORTED_RESPONSE_FORMATS: Final = frozenset({"wav", GEMINI_TTS_RAW_RESPONSE_FORMAT})
@@ -37,11 +28,6 @@ GEMINI_TTS_SUPPORTED_RESPONSE_FORMATS: Final = frozenset({"wav", GEMINI_TTS_RAW_
 class ChatAudioParam(TypedDict):
     voice: ReadOnly[str]
     format: ReadOnly[NotRequired[str]]
-
-
-class ChatSpeechConfigAudioParam(TypedDict):
-    speech_config: ReadOnly[Mapping[str, object]]
-    format: ReadOnly[str]
 
 
 class SpeechToCompletionBridgeTransformationHandler:
@@ -55,20 +41,6 @@ class SpeechToCompletionBridgeTransformationHandler:
             return
         from litellm.exceptions import BadRequestError
 
-        if custom_llm_provider.startswith("vertex_ai"):
-            from litellm.llms.vertex_ai.text_to_speech.transformation import VertexAITextToSpeechConfig
-
-            vertex_supported: Final = ", ".join(
-                sorted({*GEMINI_TTS_SUPPORTED_RESPONSE_FORMATS, *VertexAITextToSpeechConfig.GEMINI_FORMAT_MAPPINGS})
-            )
-            raise BadRequestError(
-                message=(
-                    f"Vertex AI Gemini TTS does not support response_format='{response_format}'."
-                    f" Supported response formats: {vertex_supported}."
-                ),
-                model=model,
-                llm_provider=custom_llm_provider,
-            )
         supported: Final = ", ".join(sorted(GEMINI_TTS_SUPPORTED_RESPONSE_FORMATS))
         raise BadRequestError(
             message=(
@@ -95,27 +67,8 @@ class SpeechToCompletionBridgeTransformationHandler:
         return response_format if isinstance(response_format, str) else None
 
     def _chat_audio_param(
-        self,
-        model: str,
-        voice: str | Mapping[str, object] | None,
-        optional_params: Mapping[str, object],
-        drop_params: bool,
-        custom_llm_provider: str,
-    ) -> ChatAudioParam | ChatSpeechConfigAudioParam | None:
-        import litellm
-
-        if isinstance(voice, Mapping) and self._is_gemini_tts_model(litellm.model_alias_map.get(model, model)):
-            from litellm.llms.vertex_ai.gemini.vertex_and_google_ai_studio_gemini import (
-                normalize_gemini_speech_config,
-                reject_unknown_gemini_tts_voice_keys,
-            )
-
-            reject_unknown_gemini_tts_voice_keys(model, voice, drop_params, custom_llm_provider)
-            speech_audio: Final[ChatSpeechConfigAudioParam] = {
-                "speech_config": normalize_gemini_speech_config(voice, drops_unsupported_params(drop_params)),
-                "format": GEMINI_TTS_CHAT_AUDIO_FORMAT,
-            }
-            return speech_audio
+        self, model: str, voice: str | Mapping[str, object] | None, optional_params: Mapping[str, object]
+    ) -> ChatAudioParam | None:
         if not isinstance(voice, str):
             return None
         audio_format: Final = self._chat_audio_format(model, optional_params)
@@ -129,9 +82,9 @@ class SpeechToCompletionBridgeTransformationHandler:
         self,
         model: str,
         input: str,
-        voice: str | Mapping[str, object] | None,
-        optional_params: Mapping[str, object],
-        litellm_params: Mapping[str, object],
+        voice: str | dict | None,
+        optional_params: dict,
+        litellm_params: dict,
         headers: dict,
         litellm_logging_obj: "LiteLLMLoggingObj",
         custom_llm_provider: str,
@@ -143,13 +96,7 @@ class SpeechToCompletionBridgeTransformationHandler:
             "messages": [user_message],
             "modalities": ["audio"],
             **self._chat_completion_params(optional_params),
-            "audio": self._chat_audio_param(
-                model,
-                voice,
-                optional_params,
-                drops_unsupported_params(litellm_params.get("drop_params")),
-                custom_llm_provider,
-            ),
+            "audio": self._chat_audio_param(model, voice, optional_params),
             **litellm_params,
             "headers": headers,
             "litellm_logging_obj": litellm_logging_obj,
@@ -198,9 +145,8 @@ class SpeechToCompletionBridgeTransformationHandler:
         return wav_header + pcm_data
 
     def _is_gemini_tts_model(self, model: str) -> bool:
-        from litellm.utils import is_gemini_tts_model
-
-        return is_gemini_tts_model(model)
+        """Check if the model is a Gemini TTS model that returns PCM16 data."""
+        return "gemini" in model.lower() and ("tts" in model.lower() or "preview-tts" in model.lower())
 
     def _gemini_tts_response_body(self, decoded_audio: bytes, response_format: str | None) -> tuple[bytes, str]:
         if response_format == GEMINI_TTS_RAW_RESPONSE_FORMAT:
@@ -208,7 +154,7 @@ class SpeechToCompletionBridgeTransformationHandler:
         return self._convert_pcm16_to_wav(decoded_audio), "audio/wav"
 
     def transform_response(
-        self, model_response: "ModelResponse", model: str, response_format: str | None
+        self, model_response: "ModelResponse", response_format: str | None
     ) -> "HttpxBinaryResponseContent":
         import base64
 
@@ -222,9 +168,10 @@ class SpeechToCompletionBridgeTransformationHandler:
             raise ValueError("No audio part found in the response")
         decoded_audio: Final = base64.b64decode(audio_part.data)
 
+        model: Final = getattr(model_response, "model", "")
         content, content_type = (
             self._gemini_tts_response_body(decoded_audio, response_format)
-            if self._is_gemini_tts_model(model) or self._is_gemini_tts_model(model_response.model or "")
+            if self._is_gemini_tts_model(model)
             else (decoded_audio, "audio/mpeg")
         )
         response: Final = httpx.Response(
@@ -232,9 +179,4 @@ class SpeechToCompletionBridgeTransformationHandler:
         )
         binary_response: Final = HttpxBinaryResponseContent(response)
         binary_response.set_response_cost(_completion_response_cost(model_response))
-        binary_response.usage = _completion_usage(model_response)
-        cached_hidden_params: Final = get_hidden_params(model_response) if served_from_cache(model_response) else None
-        if cached_hidden_params is not None:
-            set_hidden_param(binary_response, "cache_hit", True)
-            set_hidden_param(binary_response, "cache_key", cached_hidden_params.get("cache_key"))
         return binary_response

@@ -79,7 +79,7 @@ export const MIGRATED_E2E_PAGES: Readonly<Record<string, MigratedPage>> = {
     group: "Tools",
     content: { role: "heading", name: "Tool Policies" },
   },
-  skills: { segment: "skills", linkName: "Skills Hub", content: { role: "heading", name: "Skills Hub" } },
+  skills: { segment: "skills", linkName: "Skills", content: { role: "heading", name: "Skills" } },
   caching: { segment: "caching", linkName: "Response Cache", content: { role: "tab", name: "Cache Settings" } },
   "cost-tracking": {
     segment: "cost-tracking",
@@ -118,6 +118,12 @@ export const MIGRATED_E2E_PAGES: Readonly<Record<string, MigratedPage>> = {
     content: { role: "heading", name: "AI Hub" },
   },
   new_usage: { segment: "usage", linkName: "Usage", content: { role: "heading", name: "Usage" } },
+  usage: {
+    segment: "old-usage",
+    linkName: "Old Usage",
+    group: "Experimental",
+    content: { role: "tab", name: "All Up" },
+  },
   agents: { segment: "agents", linkName: "Agents", group: "Agentic", content: { role: "heading", name: "Agents" } },
   "router-settings": {
     segment: "router-settings",

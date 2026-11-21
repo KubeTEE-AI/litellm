@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Final
 import httpx
 from pydantic import ConfigDict, TypeAdapter
 
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.image_generation.transformation import (
     BaseImageGenerationConfig,
 )
@@ -132,10 +131,11 @@ class StabilityImageGenerationConfig(BaseImageGenerationConfig):
         """
         Get the complete URL for the Stability AI API request.
         """
-        base_url: Final = api_base or get_secret_str("STABILITY_API_BASE") or self.DEFAULT_BASE_URL
+        base_url: str = api_base or get_secret_str("STABILITY_API_BASE") or self.DEFAULT_BASE_URL
+        base_url = base_url.rstrip("/")
 
         endpoint: Final = self._get_model_endpoint(model)
-        return join_api_base(base_url, endpoint)
+        return f"{base_url}{endpoint}"
 
     def validate_environment(
         self,

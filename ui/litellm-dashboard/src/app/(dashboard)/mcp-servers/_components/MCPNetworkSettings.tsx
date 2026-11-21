@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useId } from "react";
-import type { ParseKeys } from "i18next";
-import { useTranslation } from "react-i18next";
 import { Save, Plus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -110,7 +108,6 @@ interface AllowedClientDialogProps {
 }
 
 const AllowedClientDialog: React.FC<AllowedClientDialogProps> = ({ draft, onChange, onCommit, onRemove, onClose }) => {
-  const { t } = useTranslation();
   const aliasId = useId();
   const valueId = useId();
   if (draft === null) return null;
@@ -118,29 +115,28 @@ const AllowedClientDialog: React.FC<AllowedClientDialogProps> = ({ draft, onChan
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {draft.key === null
-              ? t("mcpServers.networkSettings.clientDialog.addTitle")
-              : t("mcpServers.networkSettings.clientDialog.editTitle")}
-          </DialogTitle>
-          <DialogDescription>{t("mcpServers.networkSettings.clientDialog.description")}</DialogDescription>
+          <DialogTitle>{draft.key === null ? "Add client" : "Edit client"}</DialogTitle>
+          <DialogDescription>
+            The alias is the name shown in the dashboard and gateway logs. The value is the exact JWT claim or header
+            value that identifies the client, such as the OAuth client ID your identity provider issues.
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor={aliasId}>{t("mcpServers.networkSettings.clientDialog.aliasLabel")}</Label>
+            <Label htmlFor={aliasId}>Alias</Label>
             <Input
               id={aliasId}
               value={draft.alias}
-              placeholder={t("mcpServers.networkSettings.clientDialog.aliasPlaceholder")}
+              placeholder="e.g. Coding CLI"
               onChange={(e) => onChange({ ...draft, alias: e.target.value })}
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor={valueId}>{t("mcpServers.networkSettings.clientDialog.valueLabel")}</Label>
+            <Label htmlFor={valueId}>Value</Label>
             <Input
               id={valueId}
               value={draft.value}
-              placeholder={t("mcpServers.networkSettings.clientDialog.valuePlaceholder")}
+              placeholder="e.g. 0oa1b2c3d4e5f6g7h8i9"
               className="font-mono"
               onChange={(e) => onChange({ ...draft, value: e.target.value })}
             />
@@ -149,16 +145,14 @@ const AllowedClientDialog: React.FC<AllowedClientDialogProps> = ({ draft, onChan
         <DialogFooter>
           {draft.key !== null && (
             <Button type="button" variant="destructive" className="sm:mr-auto" onClick={onRemove}>
-              {t("mcpServers.networkSettings.clientDialog.remove")}
+              Remove client
             </Button>
           )}
           <Button type="button" variant="outline" onClick={onClose}>
-            {t("mcpServers.networkSettings.clientDialog.cancel")}
+            Cancel
           </Button>
           <Button type="button" disabled={isIncomplete(trimClient(draft))} onClick={onCommit}>
-            {draft.key === null
-              ? t("mcpServers.networkSettings.clientDialog.add")
-              : t("mcpServers.networkSettings.clientDialog.done")}
+            {draft.key === null ? "Add" : "Done"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -168,16 +162,12 @@ const AllowedClientDialog: React.FC<AllowedClientDialogProps> = ({ draft, onChan
 
 type DisableableCapability = "prompts" | "resources";
 
-const CAPABILITY_TOGGLES: { capability: DisableableCapability; labelKey: ParseKeys; descriptionKey: ParseKeys }[] = [
-  {
-    capability: "prompts",
-    labelKey: "mcpServers.networkSettings.capabilities.prompts.label",
-    descriptionKey: "mcpServers.networkSettings.capabilities.prompts.description",
-  },
+const CAPABILITY_TOGGLES: { capability: DisableableCapability; label: string; description: string }[] = [
+  { capability: "prompts", label: "Prompts", description: "Advertise prompts and answer prompts/list and prompts/get" },
   {
     capability: "resources",
-    labelKey: "mcpServers.networkSettings.capabilities.resources.label",
-    descriptionKey: "mcpServers.networkSettings.capabilities.resources.description",
+    label: "Resources",
+    description: "Advertise resources and answer resources/list, resources/templates/list and resources/read",
   },
 ];
 
@@ -187,7 +177,6 @@ const parseDisabledCapabilities = (value: unknown): DisableableCapability[] =>
     : [];
 
 const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) => {
-  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [privateRanges, setPrivateRanges] = useState<string[]>([]);
@@ -314,7 +303,7 @@ const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) 
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (failures.length === 0) {
-      toast.success(t("mcpServers.networkSettings.saved"));
+      toast.success("MCP network settings saved");
       return;
     }
     failures.forEach((failure) => toast.fromError(failure.reason));
@@ -373,9 +362,10 @@ const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) 
   return (
     <div className="space-y-6 p-4">
       <div>
-        <p className="text-lg font-semibold">{t("mcpServers.networkSettings.privateRanges.title")}</p>
+        <p className="text-lg font-semibold">Private IP Ranges</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {t("mcpServers.networkSettings.privateRanges.description")}
+          Define which IP ranges are part of your private network. Callers from these IPs can see all MCP servers.
+          Callers from any other IP can only see servers marked &quot;Available on Public Internet&quot;.
         </p>
       </div>
 
@@ -383,12 +373,11 @@ const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) 
         {currentIp && (
           <div className="mb-4 rounded-lg bg-muted p-3">
             <p className="text-sm">
-              {t("mcpServers.networkSettings.privateRanges.currentIp")}{" "}
-              <span className="font-mono font-medium">{currentIp}</span>
+              Your current IP: <span className="font-mono font-medium">{currentIp}</span>
             </p>
             {suggestedRange && !privateRanges.includes(suggestedRange) && (
               <div className="mt-1 flex items-center gap-2">
-                <p className="text-sm">{t("mcpServers.networkSettings.privateRanges.suggestedRange")} </p>
+                <p className="text-sm">Suggested range: </p>
                 <Button
                   variant="outline"
                   size="sm"
@@ -404,7 +393,7 @@ const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) 
         )}
 
         <div className="mb-2 flex items-center">
-          <p className="text-sm font-medium">{t("mcpServers.networkSettings.privateRanges.listTitle")}</p>
+          <p className="text-sm font-medium">Your Private Network Ranges</p>
         </div>
         {privateRanges.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
@@ -413,7 +402,7 @@ const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) 
                 {range}
                 <button
                   type="button"
-                  aria-label={t("mcpServers.networkSettings.privateRanges.removeAriaLabel", { range })}
+                  aria-label={`Remove ${range}`}
                   onClick={() => setPrivateRanges(privateRanges.filter((r) => r !== range))}
                   className="ml-1 cursor-pointer"
                 >
@@ -425,7 +414,7 @@ const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) 
         )}
         <Input
           value={rangeDraft}
-          placeholder={t("mcpServers.networkSettings.privateRanges.placeholder")}
+          placeholder="Leave empty to use defaults: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8"
           onChange={(e) => setRangeDraft(e.target.value)}
           onBlur={commitDraft}
           onKeyDown={(e) => {
@@ -435,24 +424,33 @@ const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) 
             }
           }}
         />
-        <p className="mt-2 text-xs text-muted-foreground">{t("mcpServers.networkSettings.privateRanges.hint")}</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Enter CIDR ranges (e.g., 10.0.0.0/8). When empty, standard private IP ranges are used.
+        </p>
       </Card>
 
       <div>
-        <p className="text-lg font-semibold">{t("mcpServers.networkSettings.allowedClients.title")}</p>
+        <p className="text-lg font-semibold">Allowed Clients</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {t("mcpServers.networkSettings.allowedClients.description")}
+          Only the MCP client applications listed here can use the gateway. Leave empty to allow every client. A client
+          that authenticates with a JWT is identified by the claim named in litellm_jwtauth.mcp_client_id_jwt_field in
+          your proxy config (for example azp or client_id), which your identity provider asserts and the client cannot
+          change. Any other client is identified by the request header configured below, if you enable one.
         </p>
       </div>
 
       <Card className="p-6">
         {storedAllowlistIsMalformed && (
           <p className="mb-2 text-sm text-destructive">
-            {t("mcpServers.networkSettings.allowedClients.malformedWarning")}
+            The stored allowlist is not a list of alias and value pairs, so every client is denied. Add the clients you
+            want and save to replace it, or save with the list empty to remove it and allow every client again.
           </p>
         )}
         {storedAllowlistIsEmpty && (
-          <p className="mb-2 text-sm text-destructive">{t("mcpServers.networkSettings.allowedClients.emptyWarning")}</p>
+          <p className="mb-2 text-sm text-destructive">
+            An empty allowlist is currently stored, so every client is denied. Save with the list empty to remove it and
+            allow every client again.
+          </p>
         )}
         {allowedClients.length > 0 && (
           <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -476,35 +474,46 @@ const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) 
           onClick={() => setClientDraft({ key: null, alias: "", value: "" })}
         >
           <Plus />
-          {t("mcpServers.networkSettings.allowedClients.add")}
+          Add client
         </Button>
-        <p className="mt-2 text-xs text-muted-foreground">{t("mcpServers.networkSettings.allowedClients.hint")}</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Click a client to edit or remove it. Leave the list empty to allow every client. Every MCP request from an
+          unlisted client, or from one with no resolvable identity, gets a 403.
+        </p>
 
         <div className="mt-6 mb-2 flex items-center">
-          <p className="text-sm font-medium">{t("mcpServers.networkSettings.clientIdHeader.title")}</p>
+          <p className="text-sm font-medium">Client Identity Header (less secure)</p>
         </div>
         <Input
-          aria-label={t("mcpServers.networkSettings.clientIdHeader.ariaLabel")}
+          aria-label="Client identity header"
           value={clientIdHeader}
-          placeholder={t("mcpServers.networkSettings.clientIdHeader.placeholder")}
+          placeholder="Leave empty to identify clients by JWT only, e.g. x-mcp-client"
           onChange={(e) => setClientIdHeader(e.target.value)}
         />
-        <p className="mt-2 text-xs text-muted-foreground">{t("mcpServers.networkSettings.clientIdHeader.hint")}</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Optional header whose value names the client for callers without a JWT identity. Clients pick this value
+          themselves, so it is a policy control rather than a security boundary. Without it, callers that do not carry
+          the JWT claim are rejected while the allowlist is set.
+        </p>
       </Card>
 
       <div>
-        <p className="text-lg font-semibold">{t("mcpServers.networkSettings.capabilities.title")}</p>
-        <p className="mt-1 text-sm text-muted-foreground">{t("mcpServers.networkSettings.capabilities.description")}</p>
+        <p className="text-lg font-semibold">Served Capabilities</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Turn off prompts or resources when none of your MCP servers offer them. A capability that is turned off is
+          left out of the initialize response, its list calls return an empty list without contacting any upstream
+          server, and its get or read calls are rejected.
+        </p>
       </div>
 
       <Card className="space-y-4 p-6">
-        {CAPABILITY_TOGGLES.map(({ capability, labelKey, descriptionKey }) => (
+        {CAPABILITY_TOGGLES.map(({ capability, label, description }) => (
           <div key={capability} className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor={`${capabilityToggleId}-${capability}`} className="text-sm font-medium">
-                {t(labelKey)}
+                {label}
               </Label>
-              <p className="text-xs text-muted-foreground">{t(descriptionKey)}</p>
+              <p className="text-xs text-muted-foreground">{description}</p>
             </div>
             <Switch
               id={`${capabilityToggleId}-${capability}`}
@@ -519,7 +528,7 @@ const MCPNetworkSettings: React.FC<MCPNetworkSettingsProps> = ({ accessToken }) 
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving}>
           <Save />
-          {t("mcpServers.networkSettings.save")}
+          Save
         </Button>
       </div>
 

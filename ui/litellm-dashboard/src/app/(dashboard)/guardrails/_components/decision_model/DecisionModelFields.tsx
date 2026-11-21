@@ -1,10 +1,8 @@
 "use client";
 
-import type { ParseKeys } from "i18next";
 import { Info, Plus, X } from "lucide-react";
 import React from "react";
 import { useWatch } from "react-hook-form";
-import { Trans, useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@/components/shared/Alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,9 +36,9 @@ export interface DecisionModelFieldsProps {
   control: GuardrailFormControl;
 }
 
-const ACTION_ITEMS: { labelKey: ParseKeys; value: "block" | "log" }[] = [
-  { labelKey: "guardrails.decisionModel.actionOptions.block", value: "block" },
-  { labelKey: "guardrails.decisionModel.actionOptions.log", value: "log" },
+const ACTION_ITEMS = [
+  { label: "Block", value: "block" },
+  { label: "Log only", value: "log" },
 ];
 
 const ProviderLogo: React.FC<{ provider: string }> = ({ provider }) => (
@@ -48,21 +46,16 @@ const ProviderLogo: React.FC<{ provider: string }> = ({ provider }) => (
 );
 
 const NoDecisionModels: React.FC<{ providerFilter: string | null }> = ({ providerFilter }) => {
-  const { t } = useTranslation();
-  const description = providerFilter
-    ? t("guardrails.decisionModel.noModels.descriptionForProvider", {
-        provider: getProviderLogoAndName(providerFilter).displayName,
-      })
-    : t("guardrails.decisionModel.noModels.description");
+  const source = providerFilter ? ` from the ${getProviderLogoAndName(providerFilter).displayName} provider` : "";
   return (
-    <Alert variant="info" role="note" aria-label={t("guardrails.decisionModel.noModels.ariaLabel")}>
+    <Alert variant="info" role="note" aria-label="No decision models">
       <Info />
-      <AlertTitle>{t("guardrails.decisionModel.noModels.title")}</AlertTitle>
+      <AlertTitle>No decision models yet</AlertTitle>
       <AlertDescription>
         <p>
-          {description}{" "}
+          Add a decision model{source} to use this guardrail. A model shows up here once its mode is decisions.{" "}
           <a href={uiHref("models-and-endpoints")} target="_blank" rel="noopener noreferrer">
-            {t("guardrails.decisionModel.noModels.addModel")}
+            Add a model
           </a>
         </p>
       </AlertDescription>
@@ -100,11 +93,9 @@ const DecisionModelFields: React.FC<DecisionModelFieldsProps> = ({
   onChecksChange,
   control,
 }) => {
-  const { t } = useTranslation();
   const selectedModel = asText(useWatch({ control, name: "decision_model" }));
   const duplicateNames = duplicateDecisionCheckNames(checks);
   const providerByModel = new Map(decisionModels.map((option) => [option.model, option.provider]));
-  const actionItems = ACTION_ITEMS.map(({ labelKey, value }) => ({ label: t(labelKey), value }));
 
   const updateCheck = (id: string, patch: Partial<DecisionModelCheckDraft>) =>
     onChecksChange(checks.map((check) => (check.id === id ? { ...check, ...patch } : check)));
@@ -116,14 +107,19 @@ const DecisionModelFields: React.FC<DecisionModelFieldsProps> = ({
   return (
     <div className="space-y-5">
       <div className="rounded-md border border-success/20 bg-success/10 px-3.5 py-2.5 text-[13px] text-success">
-        <Trans i18nKey="guardrails.decisionModel.intro" components={{ strong: <strong /> }} />
+        The <strong>Decision Model</strong> answers yes/no questions about each request (pre_call, during_call) or
+        response (post_call). A question whose probability reaches its threshold blocks the call, or is recorded when
+        set to Log only.
       </div>
 
       <GuardrailField
         control={control}
         name="decision_model"
-        label={labelWithHint(t("guardrails.decisionModel.model.label"), t("guardrails.decisionModel.model.hint"))}
-        rules={requiredRule(t("guardrails.decisionModel.model.required"))}
+        label={labelWithHint(
+          "Decision Model",
+          "A decisions-API model on this proxy, such as typesafe/jev-latest. It scores every question below.",
+        )}
+        rules={requiredRule("Select a decision model")}
       >
         {({ id, value, onChange, "aria-invalid": ariaInvalid, "aria-describedby": ariaDescribedBy }) => (
           <Combobox
@@ -138,15 +134,11 @@ const DecisionModelFields: React.FC<DecisionModelFieldsProps> = ({
               id={id}
               aria-invalid={ariaInvalid}
               aria-describedby={ariaDescribedBy}
-              placeholder={
-                decisionModels.length > 0
-                  ? t("guardrails.decisionModel.model.placeholder")
-                  : t("guardrails.decisionModel.model.placeholderEmpty")
-              }
+              placeholder={decisionModels.length > 0 ? "Select a decision model" : "No decision models yet"}
               className="w-full"
             />
             <ComboboxContent>
-              <ComboboxEmpty>{t("guardrails.decisionModel.model.empty")}</ComboboxEmpty>
+              <ComboboxEmpty>No matching models</ComboboxEmpty>
               <ComboboxList>
                 {(model: string) => {
                   const provider = providerByModel.get(model);
@@ -168,8 +160,11 @@ const DecisionModelFields: React.FC<DecisionModelFieldsProps> = ({
       {decisionModels.length === 0 && <NoDecisionModels providerFilter={providerFilter} />}
 
       <Field>
-        <FieldLabel>{t("guardrails.decisionModel.questions.label")}</FieldLabel>
-        <p className="m-0 text-xs text-muted-foreground">{t("guardrails.decisionModel.questions.description")}</p>
+        <FieldLabel>Questions</FieldLabel>
+        <p className="m-0 text-xs text-muted-foreground">
+          Yes/no questions the decision model answers about the text. Block stops the call once a score reaches the
+          threshold, and Log only records it.
+        </p>
         {checks.map((check, index) => {
           const position = index + 1;
           return (
@@ -177,36 +172,30 @@ const DecisionModelFields: React.FC<DecisionModelFieldsProps> = ({
               <button
                 type="button"
                 onClick={() => removeCheck(check.id)}
-                aria-label={t("guardrails.decisionModel.question.remove", { position })}
+                aria-label={`Remove question ${position}`}
                 className="absolute top-2 right-2 p-1 text-muted-foreground transition-colors hover:text-destructive"
               >
                 <X className="size-4" />
               </button>
               <div>
-                <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                  {t("guardrails.decisionModel.question.nameLabel")}
-                </span>
+                <span className="mb-1 block text-xs font-medium text-muted-foreground">Name</span>
                 <Input
-                  aria-label={t("guardrails.decisionModel.question.nameAriaLabel", { position })}
-                  placeholder={t("guardrails.decisionModel.question.namePlaceholder")}
+                  aria-label={`Question ${position} name`}
+                  placeholder="Name (e.g. invoice_policy)"
                   className="bg-background"
                   value={check.name}
                   onChange={(event) => updateCheck(check.id, { name: event.target.value })}
                 />
                 {duplicateNames.has(check.name.trim()) && (
-                  <p className="m-0 mt-1 text-xs text-destructive">
-                    {t("guardrails.decisionModel.question.duplicateName")}
-                  </p>
+                  <p className="m-0 mt-1 text-xs text-destructive">Another question already uses this name</p>
                 )}
               </div>
               <div>
-                <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                  {t("guardrails.decisionModel.question.questionLabel")}
-                </span>
+                <span className="mb-1 block text-xs font-medium text-muted-foreground">Question</span>
                 <Textarea
-                  aria-label={t("guardrails.decisionModel.question.questionAriaLabel", { position })}
+                  aria-label={`Question ${position}`}
                   rows={2}
-                  placeholder={t("guardrails.decisionModel.question.questionPlaceholder")}
+                  placeholder="The question the decision model answers, e.g. Does the text ask about invoices?"
                   className="w-full resize-none bg-background"
                   value={check.instructions}
                   onChange={(event) => updateCheck(check.id, { instructions: event.target.value })}
@@ -214,24 +203,19 @@ const DecisionModelFields: React.FC<DecisionModelFieldsProps> = ({
               </div>
               <div className="flex items-end gap-6">
                 <div className="w-32">
-                  <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                    {t("guardrails.decisionModel.question.actionLabel")}
-                  </span>
+                  <span className="mb-1 block text-xs font-medium text-muted-foreground">Action</span>
                   <Select
-                    items={actionItems}
+                    items={ACTION_ITEMS}
                     value={check.action}
                     onValueChange={(next: string | null) =>
                       next && updateCheck(check.id, { action: next as "block" | "log" })
                     }
                   >
-                    <SelectTrigger
-                      className="w-full bg-background"
-                      aria-label={t("guardrails.decisionModel.question.actionAriaLabel", { position })}
-                    >
+                    <SelectTrigger className="w-full bg-background" aria-label={`Question ${position} action`}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {actionItems.map((item) => (
+                      {ACTION_ITEMS.map((item) => (
                         <SelectItem key={item.value} value={item.value}>
                           {item.label}
                         </SelectItem>
@@ -240,12 +224,10 @@ const DecisionModelFields: React.FC<DecisionModelFieldsProps> = ({
                   </Select>
                 </div>
                 <div className="w-56">
-                  <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                    {t("guardrails.decisionModel.question.thresholdLabel")}
-                  </span>
+                  <span className="mb-1 block text-xs font-medium text-muted-foreground">Threshold</span>
                   <div className="flex h-9 items-center">
                     <ThresholdSlider
-                      aria-label={t("guardrails.decisionModel.question.thresholdAriaLabel", { position })}
+                      aria-label={`Question ${position} threshold`}
                       value={check.threshold}
                       onChange={(next) => updateCheck(check.id, { threshold: next })}
                     />
@@ -258,7 +240,7 @@ const DecisionModelFields: React.FC<DecisionModelFieldsProps> = ({
         <div>
           <Button variant="outline" size="sm" onClick={addCheck}>
             <Plus className="size-3" />
-            {t("guardrails.decisionModel.questions.add")}
+            Add question
           </Button>
         </div>
       </Field>

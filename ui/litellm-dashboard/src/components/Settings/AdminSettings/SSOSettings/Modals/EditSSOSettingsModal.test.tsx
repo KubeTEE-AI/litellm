@@ -293,8 +293,6 @@ describe("EditSSOSettingsModal", () => {
         useEditSSOSettings: { mutateAsync: mockMutateAsync, isPending: false },
       });
 
-      (processSSOSettingsPayload as any).mockReturnValueOnce({}).mockReturnValueOnce(processedPayload);
-
       renderComponent();
 
       fireEvent.click(screen.getByTestId(TEST_IDS.TRIGGER_FORM_SUBMIT));

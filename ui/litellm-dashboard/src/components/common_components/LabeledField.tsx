@@ -1,5 +1,4 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import CopyButton from "@/components/shared/CopyButton";
 import { EntityLink } from "@/components/shared/EntityLink";
 import { cx } from "@/lib/cva.config";
@@ -25,7 +24,6 @@ export default function LabeledField({
   copyable = false,
   defaultUserIdCheck = false,
 }: LabeledFieldProps) {
-  const { t } = useTranslation();
   const isEmpty = !value;
   const isDefaultUser = defaultUserIdCheck && value === DEFAULT_PROXY_ADMIN_USER_ID;
   const displayValue = isEmpty ? "-" : value;
@@ -45,7 +43,7 @@ export default function LabeledField({
           {displayValue}
         </strong>
       )}
-      {isCopyable && <CopyButton value={value} label={t("labeledField.copy", { label })} />}
+      {isCopyable && <CopyButton value={value} label={`Copy ${label}`} />}
     </span>
   );
   return (

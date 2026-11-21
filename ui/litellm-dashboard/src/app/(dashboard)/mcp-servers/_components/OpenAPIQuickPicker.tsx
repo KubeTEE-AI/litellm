@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
 import { cn } from "@/lib/cva.config";
 import { fetchOpenAPIRegistry } from "@/components/networking";
@@ -31,7 +30,6 @@ interface OpenAPIQuickPickerProps {
 }
 
 const OpenAPIQuickPicker: React.FC<OpenAPIQuickPickerProps> = ({ accessToken, selectedName, onSelect }) => {
-  const { t } = useTranslation();
   const [apis, setApis] = useState<OpenAPIRegistryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [imgErrors, setImgErrors] = useState<Set<string>>(new Set());
@@ -52,7 +50,7 @@ const OpenAPIQuickPicker: React.FC<OpenAPIQuickPickerProps> = ({ accessToken, se
   if (loading) {
     return (
       <div className="mb-4">
-        <span className="text-sm font-medium">{t("mcpServers.openApiQuickPicker.title")}</span>
+        <span className="text-sm font-medium">Popular APIs</span>
         <div className="flex justify-center py-6">
           <UiLoadingSpinner className="size-5 text-muted-foreground" />
         </div>
@@ -64,7 +62,7 @@ const OpenAPIQuickPicker: React.FC<OpenAPIQuickPickerProps> = ({ accessToken, se
 
   return (
     <div className="mb-4">
-      <span className="mb-2 block text-sm font-medium">{t("mcpServers.openApiQuickPicker.title")}</span>
+      <span className="mb-2 block text-sm font-medium">Popular APIs</span>
 
       <div className="grid grid-cols-5 gap-2">
         {apis.map((api) => {
@@ -99,7 +97,9 @@ const OpenAPIQuickPicker: React.FC<OpenAPIQuickPickerProps> = ({ accessToken, se
         })}
       </div>
 
-      <p className="mt-2 text-xs text-muted-foreground">{t("mcpServers.openApiQuickPicker.hint")}</p>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Select an API to pre-fill the spec URL and OAuth 2.0 settings, or enter your own spec URL below.
+      </p>
     </div>
   );
 };

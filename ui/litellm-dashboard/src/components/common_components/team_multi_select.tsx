@@ -1,12 +1,10 @@
 import React, { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { PaginatedMultiSelect } from "@/components/shared/PaginatedMultiSelect";
 import type { SearchSelectOption } from "@/components/shared/SearchSelect";
 import { useInfiniteTeams } from "@/app/(dashboard)/hooks/teams/useTeams";
-import i18n from "@/i18n/i18n";
 
 interface TeamMultiSelectProps {
-  value?: readonly string[];
+  value?: string[];
   onChange?: (value: string[]) => void;
   disabled?: boolean;
   organizationId?: string | null;
@@ -20,9 +18,8 @@ const TeamMultiSelect: React.FC<TeamMultiSelectProps> = ({
   disabled,
   organizationId,
   pageSize = 20,
-  placeholder = i18n.t("teamMultiSelect.placeholder"),
+  placeholder = "Search teams by alias...",
 }) => {
-  const { t } = useTranslation();
   const [search, setSearch] = useState("");
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteTeams(
@@ -60,9 +57,9 @@ const TeamMultiSelect: React.FC<TeamMultiSelectProps> = ({
       isLoading={isLoading}
       isFetchingNextPage={isFetchingNextPage}
       placeholder={placeholder}
-      emptyText={t("teamMultiSelect.empty")}
-      loadingText={t("teamMultiSelect.loading")}
-      clearAllLabel={t("teamMultiSelect.clearAll")}
+      emptyText="No teams found"
+      loadingText="Loading teams..."
+      clearAllLabel="Clear all teams"
       disabled={disabled}
     />
   );

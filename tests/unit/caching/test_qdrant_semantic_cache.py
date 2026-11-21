@@ -4,8 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tests.unit.proxy.router_entry_point_stubs import route_entry_points_to_stubs
-
 
 
 def test_qdrant_semantic_cache_initialization(monkeypatch):
@@ -794,7 +792,7 @@ def test_qdrant_sync_get_cache_routes_through_router(monkeypatch):
     search_response.json.return_value = {"result": []}
     cache.sync_client.post.return_value = search_response
 
-    router = route_entry_points_to_stubs(MagicMock())
+    router = MagicMock()
     router.get_configured_token_limits.return_value = (None, None)
     router.embedding = MagicMock(
         return_value={"data": [{"embedding": [0.3, 0.3, 0.3]}]}
@@ -855,7 +853,7 @@ async def test_qdrant_async_embedding_forwards_full_metadata(monkeypatch):
     cache = QdrantSemanticCache.__new__(QdrantSemanticCache)
     cache.embedding_model = "sem-embed"
 
-    router = route_entry_points_to_stubs(MagicMock())
+    router = MagicMock()
     router.get_configured_token_limits.return_value = (None, None)
     router.aembedding = AsyncMock(return_value={"data": [{"embedding": [0.1, 0.2]}]})
     monkeypatch.setitem(
@@ -890,7 +888,7 @@ def test_qdrant_get_embedding_truncates_to_deployment_max_input_tokens(monkeypat
     cache = QdrantSemanticCache.__new__(QdrantSemanticCache)
     cache.embedding_model = "sem-embed"
 
-    router = route_entry_points_to_stubs(MagicMock())
+    router = MagicMock()
     router.get_configured_token_limits.return_value = (5, None)
     router.embedding = MagicMock(return_value={"data": [{"embedding": [0.5, 0.6]}]})
     monkeypatch.setitem(
@@ -914,7 +912,7 @@ async def test_qdrant_async_embedding_explicit_limit_beats_deployment_limit(monk
     cache.embedding_model = "sem-embed"
     cache.embedding_max_input_tokens = 3
 
-    router = route_entry_points_to_stubs(MagicMock())
+    router = MagicMock()
     router.get_configured_token_limits.return_value = (8191, None)
     router.aembedding = AsyncMock(return_value={"data": [{"embedding": [0.1, 0.2]}]})
     monkeypatch.setitem(
@@ -938,7 +936,7 @@ async def test_qdrant_async_embedding_call_is_bounded(monkeypatch):
     cache.embedding_max_input_tokens = None
     cache.embedding_timeout = 1.5
 
-    router = route_entry_points_to_stubs(MagicMock())
+    router = MagicMock()
     router.get_configured_token_limits.return_value = (None, None)
     router.aembedding = AsyncMock(return_value={"data": [{"embedding": [0.1, 0.2]}]})
     monkeypatch.setitem(
@@ -969,7 +967,7 @@ async def test_qdrant_async_embedding_gives_up_on_unresponsive_endpoint(monkeypa
         await asyncio.sleep(3)
         return {"data": [{"embedding": [0.1, 0.2]}]}
 
-    router = route_entry_points_to_stubs(MagicMock())
+    router = MagicMock()
     router.get_configured_token_limits.return_value = (None, None)
     router.aembedding = never_responds
     monkeypatch.setitem(
@@ -1010,7 +1008,7 @@ async def test_qdrant_async_embedding_truncates_off_the_event_loop(monkeypatch):
     cache.embedding_max_input_tokens = 5
     cache.embedding_timeout = 5
 
-    router = route_entry_points_to_stubs(MagicMock())
+    router = MagicMock()
     router.get_configured_token_limits.return_value = (8191, None)
     router.aembedding = AsyncMock(return_value={"data": [{"embedding": [0.1, 0.2]}]})
     monkeypatch.setitem(

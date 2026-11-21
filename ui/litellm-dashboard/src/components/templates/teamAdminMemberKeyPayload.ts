@@ -12,7 +12,6 @@ export const isTeamAdminEditingMemberKey = (args: {
 }): boolean => {
   if (isProxyAdminRole(args.userRole)) return false;
   if (!args.keyTeamId) return false;
-  if (!args.keyUserId) return false;
   if (args.keyUserId === args.userId) return false;
   return isUserTeamAdminForSingleTeam(args.teamMembers ?? null, args.userId);
 };

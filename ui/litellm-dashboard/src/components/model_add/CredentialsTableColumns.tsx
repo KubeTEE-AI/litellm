@@ -1,8 +1,6 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import type { TFunction } from "i18next";
-import { useTranslation } from "react-i18next";
 import { Copy, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 
 import { CredentialItem } from "@/components/networking";
@@ -21,14 +19,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import i18n from "@/i18n/i18n";
 import { cn } from "@/lib/cva.config";
 import { copyToClipboard } from "@/utils/dataUtils";
 
 import { inferAuthMethod } from "./credential_federation";
 
 function CredentialProviderCell({ provider, federated }: { provider: string | undefined; federated: boolean }) {
-  const { t } = useTranslation();
   if (!provider) {
     return <span className="text-sm text-muted-foreground">-</span>;
   }
@@ -46,7 +42,7 @@ function CredentialProviderCell({ provider, federated }: { provider: string | un
         />
       ) : null}
       <span className="truncate text-sm">{displayName || provider}</span>
-      {federated && <Badge variant="secondary">{t("modelAdd.credentialsTableColumns.federated")}</Badge>}
+      {federated && <Badge variant="secondary">Workload identity federation</Badge>}
     </div>
   );
 }
@@ -58,12 +54,11 @@ interface CredentialRowActionsProps {
 }
 
 function CredentialRowActions({ credential, onEdit, onDelete }: CredentialRowActionsProps) {
-  const { t } = useTranslation();
   const configOwned = credential.source === "config";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={t("modelAdd.credentialsTableColumns.openActions")}
+        aria-label="Open credential actions"
         data-testid={`credential-actions-${credential.credential_name}`}
         className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground")}
       >
@@ -74,7 +69,7 @@ function CredentialRowActions({ credential, onEdit, onDelete }: CredentialRowAct
           <>
             <DropdownMenuGroup>
               <DropdownMenuLabel data-testid="credential-config-owned-hint">
-                {t("modelAdd.credentialsTableColumns.configOwnedHint")}
+                Defined in config.yaml. Edit the file to change or delete it.
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
@@ -86,16 +81,14 @@ function CredentialRowActions({ credential, onEdit, onDelete }: CredentialRowAct
           onClick={() => onEdit(credential)}
         >
           <Pencil />
-          {t("modelAdd.credentialsTableColumns.edit")}
+          Edit
         </DropdownMenuItem>
         <DropdownMenuItem
           data-testid="credential-action-copy"
-          onClick={() =>
-            void copyToClipboard(credential.credential_name, t("modelAdd.credentialsTableColumns.nameCopied"))
-          }
+          onClick={() => void copyToClipboard(credential.credential_name, "Credential name copied")}
         >
           <Copy />
-          {t("modelAdd.credentialsTableColumns.copyName")}
+          Copy credential name
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -105,7 +98,7 @@ function CredentialRowActions({ credential, onEdit, onDelete }: CredentialRowAct
           onClick={() => onDelete(credential)}
         >
           <Trash2 />
-          {t("modelAdd.credentialsTableColumns.delete")}
+          Delete
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -118,18 +111,17 @@ interface CredentialsTableColumnsDeps {
   onDelete: (credential: CredentialItem) => void;
 }
 
-export const getCredentialsTableColumns = (
-  { canModifyCredentials, onEdit, onDelete }: CredentialsTableColumnsDeps,
-  t: TFunction = i18n.t.bind(i18n),
-): ColumnDef<CredentialItem>[] => {
+export const getCredentialsTableColumns = ({
+  canModifyCredentials,
+  onEdit,
+  onDelete,
+}: CredentialsTableColumnsDeps): ColumnDef<CredentialItem>[] => {
   const dataColumns: ColumnDef<CredentialItem>[] = [
     {
       id: "credential_name",
       accessorFn: credentialLabel,
-      meta: { title: t("modelAdd.credentialsTableColumns.credentialName") },
-      header: ({ column }) => (
-        <DataTableSortHeader column={column} title={t("modelAdd.credentialsTableColumns.credentialName")} />
-      ),
+      meta: { title: "Credential Name" },
+      header: ({ column }) => <DataTableSortHeader column={column} title="Credential Name" />,
       size: 260,
       enableSorting: true,
       cell: ({ row }) => (
@@ -144,8 +136,8 @@ export const getCredentialsTableColumns = (
     {
       id: "provider",
       accessorKey: "credential_info.custom_llm_provider",
-      meta: { title: t("modelAdd.credentialsTableColumns.provider") },
-      header: t("modelAdd.credentialsTableColumns.provider"),
+      meta: { title: "Provider" },
+      header: "Provider",
       size: 320,
       enableSorting: false,
       cell: ({ row }) => (
@@ -158,13 +150,13 @@ export const getCredentialsTableColumns = (
     {
       id: "source",
       accessorFn: (row) => row.source ?? "db",
-      meta: { title: t("modelAdd.credentialsTableColumns.source") },
-      header: t("modelAdd.credentialsTableColumns.source"),
+      meta: { title: "Source" },
+      header: "Source",
       size: 140,
       enableSorting: false,
       cell: ({ row }) =>
         row.original.source === "config" ? (
-          <StatusBadge tone="neutral" label={t("modelAdd.credentialsTableColumns.configSource")} />
+          <StatusBadge tone="neutral" label="Config" />
         ) : (
           <StatusBadge tone="info" label="DB" />
         ),
@@ -180,7 +172,7 @@ export const getCredentialsTableColumns = (
     {
       id: "actions",
       meta: { className: "text-right", headerClassName: "text-right" },
-      header: () => <span className="sr-only">{t("modelAdd.credentialsTableColumns.actions")}</span>,
+      header: () => <span className="sr-only">Actions</span>,
       size: 64,
       enableSorting: false,
       enableHiding: false,

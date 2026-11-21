@@ -13,7 +13,6 @@ from pydantic import TypeAdapter
 
 Schema = Mapping[str, Mapping[str, str]]
 MODELS: Final = re.compile(r"^[ \t]*model\s+(\w+)\s*\{(.*?)^[ \t]*\}", re.MULTILINE | re.DOTALL)
-DROPPED_UNUSED_MODELS: Final = frozenset({"LiteLLM_AccountingDelivery", "LiteLLM_AccountingEvent"})
 
 
 def parse_model_fields(schema: str) -> Schema:
@@ -28,18 +27,18 @@ def _field_changes(model: str, field: str, old_type: str, new_fields: Mapping[st
     if field not in new_fields:
         yield f"Breaking: Field {model}.{field} was removed"
         return
-    old_base: Final = old_type.split()[0]
-    new_base: Final = new_fields[field].split()[0]
-    if old_base.endswith("?") and not new_base.endswith("?"):
+    new_type: Final = new_fields[field]
+    if old_type == new_type:
+        return
+    if "?" in old_type and "?" not in new_type:
         yield f"Breaking: Field {model}.{field} changed from optional to required"
-    if old_base.rstrip("?") != new_base.rstrip("?"):
-        yield f"Breaking: Field {model}.{field} changed type from {old_base} to {new_base}"
+    if not old_type.startswith(new_type.split("?")[0]):
+        yield f"Breaking: Field {model}.{field} changed type from {old_type} to {new_type}"
 
 
 def _model_changes(model: str, old_fields: Mapping[str, str], new_schema: Schema) -> Iterator[str]:
     if model not in new_schema:
-        if model not in DROPPED_UNUSED_MODELS:
-            yield f"Breaking: Model {model} was removed"
+        yield f"Breaking: Model {model} was removed"
         return
     for field, old_type in old_fields.items():
         yield from _field_changes(model, field, old_type, new_schema[model])
@@ -53,20 +52,14 @@ def check_breaking_changes(old_schema: Schema, new_schema: Schema) -> tuple[str,
     return tuple(changes())
 
 
-def _merge_base(base_ref: str) -> str:
-    return subprocess.run(
-        ("git", "merge-base", "HEAD", base_ref), capture_output=True, text=True, check=True
-    ).stdout.strip()
-
-
 def main() -> int:
     parser: Final = argparse.ArgumentParser()
-    source: Final = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--base-ref", help="compare against the merge base of HEAD and this ref (needs history)")
-    source.add_argument("--base-commit", help="compare against this commit as is (works in a shallow clone)")
-    options: Final = TypeAdapter(dict[str, str | None]).validate_python(vars(parser.parse_args()))
-    base_commit: Final = options["base_commit"]
-    base: Final = base_commit if base_commit else _merge_base(options["base_ref"] or "")
+    parser.add_argument("--base-ref", required=True)
+    options: Final = parser.parse_args()
+    base_ref: Final = TypeAdapter(str).validate_python(options.base_ref)
+    base: Final = subprocess.run(
+        ("git", "merge-base", "HEAD", base_ref), capture_output=True, text=True, check=True
+    ).stdout.strip()
     previous: Final = subprocess.run(
         ("git", "show", f"{base}:schema.prisma"), capture_output=True, text=True, check=True
     ).stdout

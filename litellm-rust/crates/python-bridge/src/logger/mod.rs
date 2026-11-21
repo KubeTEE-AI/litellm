@@ -81,12 +81,8 @@ impl NativeDiagnosticProcessor {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("diagnostic processing failed")]
-struct ProcessingError(#[source] fancy_regex::Error);
-
-fn processing_error(error: fancy_regex::Error) -> PyErr {
-    PyRuntimeError::new_err(litellm_error::Report::new(&ProcessingError(error)).to_string())
+fn processing_error(_: fancy_regex::Error) -> PyErr {
+    PyRuntimeError::new_err("diagnostic processing failed")
 }
 
 struct PythonSink {

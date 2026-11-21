@@ -108,7 +108,13 @@ async fn a_call_without_credentials_fails_before_sending(
     .await
     .expect_err("a call without credentials fails");
 
-    assert!(error.is_missing_credential(), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            Error::Auth(litellm_auth::Error::MissingApiKey { .. })
+        ),
+        "{error:?}"
+    );
     assert!(received(&upstream).await.is_empty());
 }
 
@@ -179,9 +185,7 @@ async fn unsupported_providers_are_rejected_before_sending(
     .await
     .expect_err("unsupported provider errors");
 
-    assert!(error.is_request(), "{error:?}");
-    let report = litellm_error::Report::new(&error).to_string();
-    assert!(report.contains(reported), "{report}");
+    assert_eq!(error, Error::InvalidProvider(reported.into()));
 }
 
 #[rstest]
@@ -440,12 +444,7 @@ async fn an_oauth_key_sends_the_browser_access_header_and_the_oauth_beta(call: M
 #[case::deepseek("deepseek")]
 #[case::minimax("minimax")]
 #[tokio::test]
-/// Python adds a default unless that exact lowercase name is present, then folds the casings
-/// into one header, so a capitalised caller header is sent beside the default.
-async fn capitalised_caller_protocol_headers_are_joined_with_the_defaults(
-    call: MessagesCall,
-    #[case] provider: &str,
-) {
+async fn caller_protocol_headers_win_over_the_defaults(call: MessagesCall, #[case] provider: &str) {
     let upstream = upstream([message_response()]).await;
 
     run_message(MessagesCall {
@@ -462,13 +461,10 @@ async fn capitalised_caller_protocol_headers_are_joined_with_the_defaults(
     .await;
 
     let request = only_request(&upstream).await;
-    assert_eq!(
-        request.header_values("anthropic-version"),
-        ["2024-01-01, 2023-06-01"]
-    );
+    assert_eq!(request.header_values("anthropic-version"), ["2024-01-01"]);
     assert_eq!(
         request.header_values("content-type"),
-        ["application/json; charset=utf-8, application/json"]
+        ["application/json; charset=utf-8"]
     );
 }
 
@@ -517,9 +513,10 @@ async fn unsupported_params_are_dropped_under_drop_params_and_rejected_without_i
     let error = run(shaped(false))
         .await
         .expect_err("an unsupported param is rejected without drop_params");
-    assert!(error.is_request(), "{error:?}");
-    let report = litellm_error::Report::new(&error).to_string();
-    assert!(report.contains(rejected_as), "{report}");
+    assert!(
+        matches!(&error, Error::InvalidRequest(message) if message.to_string().contains(rejected_as)),
+        "{error:?}"
+    );
     assert!(received(&upstream).await.is_empty());
 
     run_message(shaped(true)).await;
@@ -960,10 +957,11 @@ async fn provider_validation_runs_before_caller_parameter_removal(
     ))
     .await;
     let error = result.expect_err("metadata is validated before removal");
-    let report = litellm_error::Report::new(&error).to_string();
     assert!(
-        report.contains("metadata.user_id must be a string"),
-        "{report}"
+        error
+            .to_string()
+            .contains("metadata.user_id must be a string"),
+        "{error}"
     );
     assert!(received(&upstream).await.is_empty());
 }

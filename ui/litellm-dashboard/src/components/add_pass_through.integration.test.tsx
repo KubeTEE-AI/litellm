@@ -19,9 +19,14 @@ const setup = () => userEvent.setup({ pointerEventsCheck: PointerEventsCheckLeve
 
 type User = ReturnType<typeof setup>;
 
-const renderForm = () =>
+const renderForm = (premiumUser = true) =>
   renderWithProviders(
-    <AddPassThroughEndpoint accessToken="test-token" passThroughItems={[]} setPassThroughItems={vi.fn()} />,
+    <AddPassThroughEndpoint
+      accessToken="test-token"
+      passThroughItems={[]}
+      setPassThroughItems={vi.fn()}
+      premiumUser={premiumUser}
+    />,
   );
 
 const openModal = async (user: User) => {
@@ -77,7 +82,7 @@ const reopenedPayload = {
   include_subpath: true,
   methods: undefined,
   default_query_params: undefined,
-  auth: true,
+  auth: undefined,
   timeout: undefined,
   cost_per_request: undefined,
 };
@@ -88,7 +93,7 @@ describe("add_pass_through submit payload", () => {
     createPassThroughEndpoint.mockResolvedValue({ endpoints: [{ id: "generated-id", path: "/bria" }] });
   });
 
-  it("sends the configured headers and numeric fields once", async () => {
+  it("sends exactly the antd payload, once, for a minimal endpoint", async () => {
     const user = setup();
     renderForm();
     await openModal(user);
@@ -109,7 +114,7 @@ describe("add_pass_through submit payload", () => {
       include_subpath: true,
       methods: undefined,
       default_query_params: undefined,
-      auth: true,
+      auth: undefined,
       timeout: "900",
       cost_per_request: "1.5",
     });
@@ -156,37 +161,32 @@ describe("add_pass_through submit payload", () => {
     expect(lastPayload().methods).toStrictEqual(["POST"]);
   });
 
-  it("creates an authenticated endpoint without adding headers", async () => {
+  it("sends auth true once the premium security toggle is switched on", async () => {
     const user = setup();
-    renderForm();
-    await openModal(user);
-    fireEvent.change(screen.getByPlaceholderText("bria"), { target: { value: "example" } });
-    fireEvent.change(screen.getByPlaceholderText("https://engine.prod.bria-api.com"), {
-      target: { value: "https://example.com" },
-    });
-
-    expect(screen.getByRole("switch", { name: "Require LiteLLM authentication" })).toBeChecked();
-    await submit(user);
-
-    await waitFor(() => expect(createPassThroughEndpoint).toHaveBeenCalledOnce());
-    expect(lastPayload()).toMatchObject({ path: "/example", headers: {}, auth: true });
-  });
-
-  it("saves authentication off with all headers removed and resets it on reopening", async () => {
-    const user = setup();
-    renderForm();
+    renderForm(true);
     await openModal(user);
     await fillRequiredFields(user);
-    await user.click(screen.getByRole("button", { name: "Remove header 1" }));
-    await user.click(screen.getByRole("switch", { name: "Require LiteLLM authentication" }));
+
+    const switches = screen.getAllByRole("switch");
+    expect(switches).toHaveLength(2);
+    await user.click(switches[1]);
 
     await submit(user);
 
-    await waitFor(() => expect(createPassThroughEndpoint).toHaveBeenCalledOnce());
-    expect(lastPayload()).toMatchObject({ headers: {}, auth: false });
+    await waitFor(() => expect(createPassThroughEndpoint).toHaveBeenCalled());
+    expect(lastPayload().auth).toBe(true);
+  });
+
+  it("omits the auth key entirely for a non-premium user", async () => {
+    const user = setup();
+    renderForm(false);
     await openModal(user);
-    expect(screen.getByRole("switch", { name: "Require LiteLLM authentication" })).toBeChecked();
-    expect(screen.queryByPlaceholderText("Header Name")).not.toBeInTheDocument();
+    await fillRequiredFields(user);
+
+    await submit(user);
+
+    await waitFor(() => expect(createPassThroughEndpoint).toHaveBeenCalled());
+    expect(lastPayload()).not.toHaveProperty("auth");
   });
 
   it("drops include_subpath to false when the toggle is switched off", async () => {
@@ -212,6 +212,7 @@ describe("add_pass_through submit payload", () => {
 
     expect(await screen.findByText("Path is required")).toBeInTheDocument();
     expect(screen.getByText("Target URL is required")).toBeInTheDocument();
+    expect(screen.getByText("Please configure the headers")).toBeInTheDocument();
     expect(createPassThroughEndpoint).not.toHaveBeenCalled();
   });
 

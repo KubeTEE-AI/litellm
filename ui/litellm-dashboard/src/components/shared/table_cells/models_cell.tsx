@@ -1,11 +1,8 @@
 "use client";
 
-import { useTranslation } from "react-i18next";
-
 import { deriveKeyModelScope } from "@/components/key_scope";
 import { getModelDisplayName } from "@/components/key_team_helpers/fetch_available_models_team_key";
 import { Badge } from "@/components/ui/badge";
-import i18n from "@/i18n/i18n";
 
 import { CellTooltip } from "./cell_tooltip";
 
@@ -20,29 +17,28 @@ const WILDCARD_MODEL = "all-proxy-models";
 
 const formatModel = (model: string): string => {
   if (model === WILDCARD_MODEL) {
-    return i18n.t("shared.tableCells.modelsCell.allProxyModels");
+    return "All Proxy Models";
   }
   const name = getModelDisplayName(model);
   return name.length > 30 ? `${name.slice(0, 30)}...` : name;
 };
 
 export function ModelsCell({ models, maxVisible = 3, allowedRoutes, keyType }: ModelsCellProps) {
-  const { t } = useTranslation();
   if (!Array.isArray(models) || models.length === 0) {
     const scope = deriveKeyModelScope(allowedRoutes, keyType);
     if (!scope.hasModelAccess) {
       return (
         <CellTooltip
-          content={t("shared.tableCells.modelsCell.scopedTooltip", { scope: scope.label })}
+          content={`Scoped to ${scope.label} routes; this key cannot call any models`}
           trigger={
             <Badge variant="secondary" className="cursor-default">
-              {t("shared.tableCells.modelsCell.noModelAccess")}
+              No model access
             </Badge>
           }
         />
       );
     }
-    return <Badge variant="secondary">{t("shared.tableCells.modelsCell.allProxyModels")}</Badge>;
+    return <Badge variant="secondary">All Proxy Models</Badge>;
   }
 
   const visible = models.slice(0, maxVisible);
@@ -66,7 +62,7 @@ export function ModelsCell({ models, maxVisible = 3, allowedRoutes, keyType }: M
           }
           trigger={
             <Badge variant="outline" className="cursor-default">
-              {t("shared.tableCells.modelsCell.more", { number: overflow.length })}
+              +{overflow.length} more
             </Badge>
           }
         />

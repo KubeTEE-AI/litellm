@@ -4,12 +4,11 @@ import { Suspense, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { useUISettings } from "@/app/(dashboard)/hooks/uiSettings/useUISettings";
+import Navbar from "@/components/navbar";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ChatShellProvider } from "@/contexts/ChatShellContext";
-import { PluginModeProvider } from "@/contexts/PluginModeContext";
 import ChatShell from "@/components/chat/ChatShell";
 import { uiHref } from "@/utils/uiHref";
-import "@/components/chat/moyai/moyai-chat.css";
 
 // The nuqs Next adapter uses useSearchParams, so keep the chat tree behind Suspense.
 function ChatLayoutContent({ children }: { children: React.ReactNode }) {
@@ -33,13 +32,13 @@ function ChatLayoutContent({ children }: { children: React.ReactNode }) {
   }, [blocked, router]);
 
   const identityReady = !isIdentityLoading && isAuthorized;
-  const chatReady = identityReady && !isUISettingsLoading && chatEnabled;
 
-  if (!chatReady) return null;
+  if (!identityReady || isUISettingsLoading || blocked) return null;
 
   return (
     <ThemeProvider accessToken={accessToken}>
-      <div className="flex h-dvh flex-col">
+      <div className="flex h-screen flex-col">
+        <Navbar accessToken={accessToken} isPublicPage={false} />
         <div className="min-h-0 flex-1">
           <ChatShellProvider
             accessToken={accessToken ?? ""}
@@ -48,9 +47,7 @@ function ChatLayoutContent({ children }: { children: React.ReactNode }) {
             userRole={userRole ?? ""}
             premiumUser={premiumUser ?? false}
           >
-            <PluginModeProvider accessToken={accessToken}>
-              <ChatShell>{children}</ChatShell>
-            </PluginModeProvider>
+            <ChatShell>{children}</ChatShell>
           </ChatShellProvider>
         </div>
       </div>

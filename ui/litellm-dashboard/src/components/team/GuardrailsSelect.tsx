@@ -2,7 +2,6 @@
 
 import { Globe } from "lucide-react";
 import React, { useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import {
   Combobox,
@@ -52,12 +51,9 @@ export const GuardrailsSelect: React.FC<GuardrailsSelectProps> = ({
   globalGuardrails,
   otherGuardrails,
   globalGuardrailNames,
-  placeholder,
-  emptyText,
+  placeholder = "Select guardrails",
+  emptyText = "No guardrails found",
 }) => {
-  const { t } = useTranslation();
-  const placeholderText = placeholder ?? t("teams.guardrailsSelect.placeholder");
-  const emptyStateText = emptyText ?? t("teams.guardrailsSelect.empty");
   const anchor = useComboboxAnchor();
   const [query, setQuery] = useState("");
 
@@ -66,8 +62,8 @@ export const GuardrailsSelect: React.FC<GuardrailsSelectProps> = ({
   const grouped = globalGuardrails.length > 0 && otherGuardrails.length > 0;
   const groups: GuardrailGroup[] = grouped
     ? [
-        { label: t("teams.guardrailsSelect.groups.global"), icon: true, items: [...globalGuardrails] },
-        { label: t("teams.guardrailsSelect.groups.other"), icon: false, items: [...otherGuardrails] },
+        { label: "Global", icon: true, items: [...globalGuardrails] },
+        { label: "Other", icon: false, items: [...otherGuardrails] },
       ]
     : [{ label: "", icon: false, items: known }];
 
@@ -93,24 +89,17 @@ export const GuardrailsSelect: React.FC<GuardrailsSelectProps> = ({
             <>
               {chips.map((option) => (
                 <ComboboxChip key={option.name} aria-label={option.name}>
-                  {globalGuardrailNames.has(option.name) && (
-                    <Globe className="size-3" aria-label={t("teams.guardrailsSelect.globalChip")} />
-                  )}
+                  {globalGuardrailNames.has(option.name) && <Globe className="size-3" aria-label="Global guardrail" />}
                   {option.name}
                 </ComboboxChip>
               ))}
-              <ComboboxChipsInput
-                id={id}
-                placeholder={placeholderText}
-                className="min-w-24"
-                aria-label={placeholderText}
-              />
+              <ComboboxChipsInput id={id} placeholder={placeholder} className="min-w-24" aria-label={placeholder} />
             </>
           )}
         </ComboboxValue>
       </ComboboxChips>
       <ComboboxContent anchor={anchor}>
-        <ComboboxEmpty>{emptyStateText}</ComboboxEmpty>
+        <ComboboxEmpty>{emptyText}</ComboboxEmpty>
         <ComboboxList>
           {(group: GuardrailGroup) => (
             <ComboboxGroup key={group.label} items={group.items}>

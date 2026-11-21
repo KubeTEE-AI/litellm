@@ -1,11 +1,9 @@
 use std::fmt;
 
-use litellm_secret_value::SecretValue;
+use litellm_auth_types::SecretValue;
 use serde::Deserialize;
 
-use crate::{
-    AdditionalFields, CacheSettings, Object, RedisSettings, Spelled, Value, value::one_or_many,
-};
+use crate::{AdditionalFields, Object, Spelled, Value, value::one_or_many};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -78,7 +76,7 @@ pub struct GeneralSettings {
     pub enable_public_model_hub: bool,
     pub dangerously_permit_weak_or_unset_master_key: Option<bool>,
     pub plugins: Option<Box<[Object]>>,
-    pub coordination_redis: Option<RedisSettings>,
+    pub coordination_redis: Option<Object>,
     pub mcp_allowed_hosts: Option<Box<[String]>>,
     pub mcp_allowed_origins: Box<[String]>,
     #[serde(flatten)]
@@ -222,7 +220,7 @@ pub struct LiteLlmSettings {
     pub request_timeout: Option<Spelled<f64>>,
     pub num_retries: Option<u64>,
     pub cache: Option<bool>,
-    pub cache_params: Option<CacheSettings>,
+    pub cache_params: Option<Object>,
     #[serde(deserialize_with = "one_or_many")]
     pub callbacks: Option<Vec<Value>>,
     #[serde(deserialize_with = "one_or_many")]

@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { MultiSelect, type MultiSelectOption } from "@/components/shared/MultiSelect";
 import { getAgentsList } from "../networking";
-import i18n from "@/i18n/i18n";
 
 interface Agent {
   agent_id: string;
@@ -28,10 +26,9 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({
   value,
   className,
   accessToken,
-  placeholder = i18n.t("agentSelector.placeholder"),
+  placeholder = "Select agents",
   disabled = false,
 }) => {
-  const { t } = useTranslation();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [accessGroups, setAccessGroups] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,12 +65,12 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({
     ...accessGroups.map((group) => ({
       label: group,
       value: `group:${group}`,
-      description: t("agentSelector.accessGroup"),
+      description: "Access Group",
     })),
     ...agents.map((agent) => ({
       label: `${agent.agent_name || agent.agent_id}`,
       value: agent.agent_id,
-      description: t("agentSelector.agent"),
+      description: "Agent",
     })),
   ];
 
@@ -94,7 +91,7 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({
         value={selectedValues}
         onValueChange={handleChange}
         placeholder={placeholder}
-        emptyText={t("agentSelector.empty")}
+        emptyText="No agents found"
         loading={loading}
         disabled={disabled}
         className={`w-full ${className ?? ""}`}

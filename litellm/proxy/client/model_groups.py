@@ -1,4 +1,4 @@
-from typing import Final
+from typing import Any, Final
 
 import requests
 
@@ -31,7 +31,7 @@ class ModelGroupsManagementClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
 
-    def info(self, return_request: bool = False) -> list[dict[str, object]] | requests.Request:
+    def info(self, return_request: bool = False) -> list[dict[str, Any]] | requests.Request:
         """
         Get detailed information about all model groups from the server.
 

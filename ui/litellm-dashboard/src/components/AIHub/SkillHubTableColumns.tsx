@@ -1,10 +1,7 @@
 "use client";
 
-import { getSkillMetadataColumns } from "@/components/claude_code_plugins/SkillMetadataColumns";
-
 import { ColumnDef } from "@tanstack/react-table";
 import { Copy, ExternalLink, Info, MoreHorizontal } from "lucide-react";
-import { useTranslation } from "react-i18next";
 
 import { DataTableSortHeader } from "@/components/shared/DataTable";
 import { IdentityCell, StatusBadge } from "@/components/shared/table_cells";
@@ -19,7 +16,6 @@ import {
 import { cn } from "@/lib/cva.config";
 import { copyToClipboard } from "@/utils/dataUtils";
 import { Plugin } from "@/components/claude_code_plugins/types";
-import i18n from "@/i18n/i18n";
 
 function getSkillSourceLink(skill: Plugin): { url: string; label: string } | null {
   const src = skill.source;
@@ -42,11 +38,10 @@ interface SkillHubRowActionsProps {
 }
 
 function SkillHubRowActions({ skill, onSkillClick }: SkillHubRowActionsProps) {
-  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={t("aiHub.skillHubColumns.rowActions.openActions")}
+        aria-label="Open skill actions"
         data-testid={`skill-hub-actions-${skill.id}`}
         className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground")}
       >
@@ -55,14 +50,14 @@ function SkillHubRowActions({ skill, onSkillClick }: SkillHubRowActionsProps) {
       <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuItem data-testid="skill-hub-action-details" onClick={() => onSkillClick(skill)}>
           <Info />
-          {t("aiHub.skillHubColumns.rowActions.viewDetails")}
+          View details
         </DropdownMenuItem>
         <DropdownMenuItem
           data-testid="skill-hub-action-copy"
-          onClick={() => void copyToClipboard(skill.name, t("aiHub.skillHubColumns.rowActions.nameCopied"))}
+          onClick={() => void copyToClipboard(skill.name, "Skill name copied")}
         >
           <Copy />
-          {t("aiHub.skillHubColumns.rowActions.copyName")}
+          Copy skill name
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -77,8 +72,8 @@ export const getSkillHubTableColumns = ({ onSkillClick }: SkillHubTableColumnsDe
   {
     id: "name",
     accessorKey: "name",
-    meta: { title: i18n.t("aiHub.skillHubColumns.name") },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.skillHubColumns.name")} />,
+    meta: { title: "Skill Name" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Skill Name" />,
     size: 200,
     enableSorting: true,
     sortingFn: "alphanumeric",
@@ -89,8 +84,8 @@ export const getSkillHubTableColumns = ({ onSkillClick }: SkillHubTableColumnsDe
   {
     id: "description",
     accessorKey: "description",
-    meta: { title: i18n.t("aiHub.skillHubColumns.description") },
-    header: i18n.t("aiHub.skillHubColumns.description"),
+    meta: { title: "Description" },
+    header: "Description",
     size: 260,
     enableSorting: false,
     cell: ({ row }) => (
@@ -102,8 +97,8 @@ export const getSkillHubTableColumns = ({ onSkillClick }: SkillHubTableColumnsDe
   {
     id: "category",
     accessorKey: "category",
-    meta: { title: i18n.t("aiHub.skillHubColumns.category"), skeleton: "badge" },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.skillHubColumns.category")} />,
+    meta: { title: "Category", skeleton: "badge" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Category" />,
     size: 130,
     enableSorting: true,
     sortingFn: "alphanumeric",
@@ -117,8 +112,8 @@ export const getSkillHubTableColumns = ({ onSkillClick }: SkillHubTableColumnsDe
   {
     id: "domain",
     accessorKey: "domain",
-    meta: { title: i18n.t("aiHub.skillHubColumns.domain") },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.skillHubColumns.domain")} />,
+    meta: { title: "Domain" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Domain" />,
     size: 130,
     enableSorting: true,
     sortingFn: "alphanumeric",
@@ -126,8 +121,8 @@ export const getSkillHubTableColumns = ({ onSkillClick }: SkillHubTableColumnsDe
   },
   {
     id: "source",
-    meta: { title: i18n.t("aiHub.skillHubColumns.source") },
-    header: i18n.t("aiHub.skillHubColumns.source"),
+    meta: { title: "Source" },
+    header: "Source",
     size: 200,
     enableSorting: false,
     cell: ({ row }) => {
@@ -150,22 +145,21 @@ export const getSkillHubTableColumns = ({ onSkillClick }: SkillHubTableColumnsDe
   {
     id: "enabled",
     accessorKey: "enabled",
-    meta: { title: i18n.t("aiHub.skillHubColumns.status"), skeleton: "badge" },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.skillHubColumns.status")} />,
+    meta: { title: "Status", skeleton: "badge" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Status" />,
     size: 100,
     enableSorting: true,
     cell: ({ row }) => (
       <StatusBadge
         tone={row.original.enabled ? "success" : "neutral"}
-        label={row.original.enabled ? i18n.t("aiHub.skillHubColumns.public") : i18n.t("aiHub.skillHubColumns.draft")}
+        label={row.original.enabled ? "Public" : "Draft"}
       />
     ),
   },
-  ...getSkillMetadataColumns<Plugin>(),
   {
     id: "actions",
     meta: { className: "text-right", headerClassName: "text-right" },
-    header: () => <span className="sr-only">{i18n.t("aiHub.skillHubColumns.actions")}</span>,
+    header: () => <span className="sr-only">Actions</span>,
     size: 64,
     enableSorting: false,
     enableHiding: false,

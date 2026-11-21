@@ -1,10 +1,8 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { Users } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MultiSelect, type MultiSelectOption } from "@/components/shared/MultiSelect";
 import { useAccessGroups, AccessGroupResponse } from "@/app/(dashboard)/hooks/accessGroups/useAccessGroups";
-import i18n from "@/i18n/i18n";
 
 export interface AccessGroupSelectorProps {
   value?: string[];
@@ -27,14 +25,13 @@ export interface AccessGroupSelectorProps {
 const AccessGroupSelector: React.FC<AccessGroupSelectorProps> = ({
   value,
   onChange,
-  placeholder = i18n.t("accessGroupSelector.placeholder"),
+  placeholder = "Select access groups",
   disabled = false,
   style,
   className,
   showLabel = false,
-  labelText = i18n.t("accessGroupSelector.label"),
+  labelText = "Access Group",
 }) => {
-  const { t } = useTranslation();
   const { data: accessGroups, isLoading, isError } = useAccessGroups();
 
   // ── Loading skeleton ─────────────────────────────────────────────────────
@@ -72,7 +69,7 @@ const AccessGroupSelector: React.FC<AccessGroupSelectorProps> = ({
           value={value}
           onValueChange={onChange ?? (() => {})}
           placeholder={placeholder}
-          emptyText={isError ? t("accessGroupSelector.loadFailed") : t("accessGroupSelector.empty")}
+          emptyText={isError ? "Failed to load access groups" : "No access groups found"}
           disabled={disabled}
           className={`w-full rounded-md ${className ?? ""}`}
         />

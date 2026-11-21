@@ -2,7 +2,6 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { FormProvider, useForm } from "react-hook-form";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderWithProviders } from "../../tests/test-utils";
 import { alertingSettingsCall, getCallbackConfigsCall, getCallbacksCall, setCallbacksCall } from "./networking";
 import Settings, { backendCallbackLogoSrc, CallbackSelector } from "./settings";
 
@@ -78,21 +77,15 @@ describe("Settings", () => {
   });
 
   it("should render the logging callbacks tab when access token is provided", async () => {
-    renderWithProviders(<Settings {...defaultProps} />);
+    render(<Settings {...defaultProps} />);
 
     await waitFor(() => {
       expect(screen.getByText("Active Logging Callbacks")).toBeInTheDocument();
     });
   });
 
-  it("opens the tab selected by the URL", async () => {
-    renderWithProviders(<Settings {...defaultProps} />, { searchParams: { tab: "alerting-types" } });
-
-    expect(await screen.findByRole("tab", { name: "Alerting Types" })).toHaveAttribute("aria-selected", "true");
-  });
-
   it("should display additional settings tabs", async () => {
-    renderWithProviders(<Settings {...defaultProps} />);
+    render(<Settings {...defaultProps} />);
 
     await waitFor(() => {
       expect(screen.getByText("CloudZero Cost Tracking")).toBeInTheDocument();
@@ -103,7 +96,7 @@ describe("Settings", () => {
   });
 
   it("should load callback configs from the backend when access token is provided", async () => {
-    renderWithProviders(<Settings {...defaultProps} />);
+    render(<Settings {...defaultProps} />);
 
     await waitFor(() => {
       expect(mockGetCallbackConfigsCall).toHaveBeenCalledWith(defaultProps.accessToken);
@@ -147,7 +140,7 @@ describe("Settings", () => {
     ]);
 
     const user = userEvent.setup();
-    renderWithProviders(<Settings {...defaultProps} />);
+    render(<Settings {...defaultProps} />);
 
     await waitFor(() => {
       expect(screen.getByText("Active Logging Callbacks")).toBeInTheDocument();
@@ -257,7 +250,7 @@ describe("Settings", () => {
 
   const openOtelEditModal = async () => {
     const user = userEvent.setup();
-    renderWithProviders(<Settings {...defaultProps} />);
+    render(<Settings {...defaultProps} />);
     await user.click(await screen.findByTestId("callback-actions-otel-success"));
     await user.click(await screen.findByTestId("callback-action-edit"));
     return user;
@@ -347,7 +340,7 @@ describe("Settings", () => {
 
   const openS3EditModal = async (callbackName = "s3") => {
     const user = userEvent.setup();
-    renderWithProviders(<Settings {...defaultProps} />);
+    render(<Settings {...defaultProps} />);
     await user.click(await screen.findByTestId(`callback-actions-${callbackName}-success`));
     await user.click(await screen.findByTestId("callback-action-edit"));
     return user;
@@ -499,7 +492,7 @@ describe("Settings", () => {
 
   it("should send the typed webhook url for an alert type when the alerting tab is saved", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<Settings {...defaultProps} />);
+    render(<Settings {...defaultProps} />);
 
     await user.click(await screen.findByRole("tab", { name: "Alerting Types" }));
 
@@ -532,7 +525,7 @@ describe("Settings", () => {
       }),
     );
 
-    renderWithProviders(<Settings {...defaultProps} />);
+    render(<Settings {...defaultProps} />);
 
     expect(screen.getAllByTestId("skeleton-row").length).toBeGreaterThan(0);
 
@@ -547,7 +540,7 @@ describe("Settings", () => {
   });
 
   it("should resolve loading without fetching when the user id is missing", async () => {
-    renderWithProviders(<Settings {...defaultProps} userID={null as unknown as string} />);
+    render(<Settings {...defaultProps} userID={null as unknown as string} />);
 
     await waitFor(() => {
       expect(screen.queryByTestId("skeleton-row")).not.toBeInTheDocument();
@@ -557,7 +550,7 @@ describe("Settings", () => {
   });
 
   it("should display CloudZero Cost Tracking tab", async () => {
-    renderWithProviders(<Settings {...defaultProps} />);
+    render(<Settings {...defaultProps} />);
 
     await waitFor(() => {
       expect(screen.getByText("Active Logging Callbacks")).toBeInTheDocument();

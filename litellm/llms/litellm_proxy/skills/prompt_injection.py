@@ -9,10 +9,9 @@ import posixpath
 import zipfile
 from collections.abc import Mapping
 from io import BytesIO
-from typing import Final
+from typing import Any, Final
 
 from litellm._logging import verbose_logger
-from litellm.litellm_core_utils.core_helpers import as_str_mapping
 from litellm.models.skills import LiteLLM_SkillsTable
 
 
@@ -252,29 +251,26 @@ class SkillPromptInjectionHandler:
         if len(description) > max_desc_length:
             description = description[: max_desc_length - 3] + "..."
 
-        params: Final = (
-            as_str_mapping(skill.metadata.get("parameters"))
-            if skill.metadata and isinstance(skill.metadata, dict)
-            else None
-        )
-        parameters: Final[Mapping[str, object]] = (
-            params
-            if params and isinstance(params, dict)
-            else {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            }
-        )
-
-        return {
+        tool: Final[dict[str, Any]] = {
             "type": "function",
             "function": {
                 "name": func_name,
                 "description": description,
-                "parameters": parameters,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
             },
         }
+
+        # If skill has metadata with parameter definitions, use them
+        if skill.metadata and isinstance(skill.metadata, dict):
+            params: Final = skill.metadata.get("parameters")
+            if params and isinstance(params, dict):
+                tool["function"]["parameters"] = params
+
+        return tool
 
     def convert_skill_to_anthropic_tool(self, skill: LiteLLM_SkillsTable) -> Mapping[str, object]:
         """

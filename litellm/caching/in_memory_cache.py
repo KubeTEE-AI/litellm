@@ -95,10 +95,7 @@ class InMemoryCache(BaseCache):
         """
         Check if a specific key is expired
         """
-        try:
-            return self._clock() > self.ttl_dict[key]
-        except KeyError:
-            return False
+        return key in self.ttl_dict and self._clock() > self.ttl_dict[key]
 
     def _cache_keys(self) -> tuple[str, ...]:
         return tuple(self.cache_dict)  # pyright: ignore[reportUnknownVariableType]  # cache_dict is untyped legacy state
@@ -230,10 +227,7 @@ class InMemoryCache(BaseCache):
         if key in self.cache_dict:
             if self.evict_element_if_expired(key):
                 return None
-            try:
-                original_cached_response: Final = self.cache_dict[key]
-            except KeyError:
-                return None
+            original_cached_response: Final = self.cache_dict[key]
             try:
                 cached_response = json.loads(original_cached_response)
             except Exception:
@@ -274,9 +268,7 @@ class InMemoryCache(BaseCache):
     ) -> list[float] | None:
         results: Final = []
         for increment in increment_list:
-            result = await self.async_increment(
-                increment["key"], increment["increment_value"], ttl=increment["ttl"], **kwargs
-            )
+            result = await self.async_increment(increment["key"], increment["increment_value"], **kwargs)
             results.append(result)
         return results
 

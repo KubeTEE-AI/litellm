@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import Field
 from typing_extensions import TypedDict
 
@@ -18,7 +20,7 @@ class EnkryptAIPolicyViolationDetail(TypedDict, total=False):
 class EnkryptAIPIIDetail(TypedDict, total=False):
     """Details for PII detection."""
 
-    pii: dict[str, object]
+    pii: dict[str, Any]
 
 
 class EnkryptAIToxicityDetail(TypedDict, total=False):
@@ -83,8 +85,8 @@ class EnkryptAIResponseDetails(TypedDict, total=False):
     toxicity: EnkryptAIToxicityDetail | None
     keyword_detected: EnkryptAIKeywordDetail | None
     bias: EnkryptAIBiasDetail | None
-    prompt_injection: dict[str, object] | None
-    jailbreak: dict[str, object] | None
+    prompt_injection: dict[str, Any] | None
+    jailbreak: dict[str, Any] | None
 
 
 class EnkryptAIResponse(TypedDict, total=False):
@@ -105,7 +107,7 @@ class EnkryptAIProcessedResult(TypedDict):
         | EnkryptAIToxicityDetail
         | EnkryptAIKeywordDetail
         | EnkryptAIBiasDetail
-        | dict[str, object],
+        | dict[str, Any],
     ]
 
 

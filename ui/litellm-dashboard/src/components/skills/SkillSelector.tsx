@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 import {
   Combobox,
   ComboboxChip,
@@ -46,10 +45,9 @@ const SkillSelector: React.FC<SkillSelectorProps> = ({
   value,
   className,
   accessToken,
-  placeholder,
+  placeholder = "Select skills (optional)",
   disabled = false,
 }) => {
-  const { t } = useTranslation();
   const anchor = useComboboxAnchor();
   const [options, setOptions] = useState<SkillOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -87,28 +85,18 @@ const SkillSelector: React.FC<SkillSelectorProps> = ({
             ))
           }
         </ComboboxValue>
-        <ComboboxChipsInput
-          placeholder={placeholder ?? t("skillSelector.placeholder")}
-          aria-label={placeholder ?? t("skillSelector.placeholder")}
-          disabled={disabled}
-        />
-        {value && value.length > 0 && <ComboboxClear aria-label={t("skillSelector.clearAll")} disabled={disabled} />}
+        <ComboboxChipsInput placeholder={placeholder} aria-label={placeholder} disabled={disabled} />
+        {value && value.length > 0 && <ComboboxClear aria-label="Clear all skills" disabled={disabled} />}
       </ComboboxChips>
       <ComboboxContent anchor={anchor}>
-        <ComboboxEmpty>{loading ? t("skillSelector.loading") : t("skillSelector.empty")}</ComboboxEmpty>
+        <ComboboxEmpty>{loading ? "Loading skills…" : "No skills found"}</ComboboxEmpty>
         <ComboboxList>
           {(skill: string) => {
             const isPrivate = options.some((option) => option.name === skill && !option.enabled);
             return (
-              <ComboboxItem
-                key={skill}
-                value={skill}
-                aria-label={isPrivate ? t("skillSelector.privateOptionLabel", { skill }) : skill}
-              >
+              <ComboboxItem key={skill} value={skill} aria-label={isPrivate ? `${skill} (private)` : skill}>
                 {skill}
-                {isPrivate && (
-                  <span className="ml-2 text-xs text-muted-foreground">{t("skillSelector.privateBadge")}</span>
-                )}
+                {isPrivate && <span className="ml-2 text-xs text-muted-foreground">private</span>}
               </ComboboxItem>
             );
           }}

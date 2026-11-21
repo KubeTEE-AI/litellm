@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Coroutine, Mapping
-from typing import ClassVar, Final
+from typing import Any, Final
 
 import httpx
 
@@ -9,10 +9,6 @@ from litellm.litellm_core_utils.cloud_storage_security import (
     BEDROCK_MANAGED_S3_PREFIXES,
     should_allow_legacy_cloud_file_ids,
     validate_managed_cloud_file_id,
-)
-from litellm.llms.bedrock.web_identity_session_policy import (
-    S3_OBJECT_READ_SESSION_POLICY,
-    WebIdentitySessionPolicy,
 )
 from litellm.llms.custom_httpx.http_handler import get_async_httpx_client
 from litellm.types.llms.openai import (
@@ -30,8 +26,6 @@ class BedrockFilesHandler(BaseAWSLLM):
     This implementation downloads files from S3 buckets where Bedrock
     stores batch output files.
     """
-
-    _web_identity_session_policy: ClassVar[WebIdentitySessionPolicy] = S3_OBJECT_READ_SESSION_POLICY
 
     def __init__(self):
         super().__init__()
@@ -145,7 +139,7 @@ class BedrockFilesHandler(BaseAWSLLM):
         optional_params: dict,
         timeout: float | httpx.Timeout,
         max_retries: int | None,
-    ) -> HttpxBinaryResponseContent | Coroutine[object, object, HttpxBinaryResponseContent]:
+    ) -> HttpxBinaryResponseContent | Coroutine[Any, Any, HttpxBinaryResponseContent]:
         """
         Download file content from S3 bucket for Bedrock files.
         Supports both sync and async operations.

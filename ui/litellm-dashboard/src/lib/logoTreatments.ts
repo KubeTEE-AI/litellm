@@ -32,7 +32,6 @@ const TREATMENT_BY_ASSET: Readonly<Record<string, LogoTreatment>> = {
   "v0.svg": "invert",
   "vercel.svg": "invert",
   "watsonx.svg": "invert",
-  "aiand.svg": "plate",
   "aiml_api.svg": "plate",
   "akto.svg": "plate",
   "aws.svg": "plate",

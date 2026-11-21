@@ -16,9 +16,9 @@ pub struct Connection {
 
 impl Connection {
     pub fn parse(value: &str) -> Result<Self, Error> {
-        let url = Url::parse(value).map_err(Error::InvalidUrl)?;
+        let url = Url::parse(value).map_err(|_| Error::InvalidUrl)?;
         if !matches!(url.scheme(), "http" | "https") || url.host().is_none() {
-            return Err(Error::UnsupportedUrl);
+            return Err(Error::InvalidUrl);
         }
         Ok(Self { url })
     }
@@ -33,11 +33,11 @@ impl Connection {
         connection
             .url
             .set_username(user)
-            .map_err(|()| Error::UnsupportedUrl)?;
+            .map_err(|_| Error::InvalidUrl)?;
         connection
             .url
             .set_password(Some(password))
-            .map_err(|()| Error::UnsupportedUrl)?;
+            .map_err(|_| Error::InvalidUrl)?;
         let pairs: Vec<_> = connection
             .url
             .query_pairs()

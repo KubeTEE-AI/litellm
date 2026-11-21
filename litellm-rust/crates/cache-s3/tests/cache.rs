@@ -147,15 +147,15 @@ async fn async_set_signs_with_the_configured_keys(#[future(awt)] server: MockSer
 #[case::malformed(
     "malformed",
     ResponseTemplate::new(200).set_body_string("not a cache entry"),
-    Err("invalid cache entry: ")
+    Err(Error::InvalidEntry)
 )]
-#[case::server_error("broken", ResponseTemplate::new(500), Err("cache is unavailable: "))]
+#[case::server_error("broken", ResponseTemplate::new(500), Err(Error::Unavailable))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_maps_s3_responses(
     #[future(awt)] server: MockServer,
     #[case] key: &str,
     #[case] response: ResponseTemplate,
-    #[case] expected: Result<Option<Value>, &str>,
+    #[case] expected: Result<Option<Value>, Error>,
 ) {
     Mock::given(method("GET"))
         .and(path(format!("/cache-bucket/team/{key}")))
@@ -164,21 +164,9 @@ async fn get_maps_s3_responses(
         .await;
     let cache = support::cache(&server.uri());
     let context = ExactCacheContext::default();
-    let outcome = |result: Result<Option<Value>, Error>| {
-        result.map_err(|error| litellm_error::Report::new(&error).to_string())
-    };
-    let sync = outcome(cache.get_cache(key, &context));
-    let asynchronous = outcome(cache.async_get_cache(key, &context).await);
-    match expected {
-        Ok(value) => {
-            assert_eq!(sync, Ok(value.clone()));
-            assert_eq!(asynchronous, Ok(value));
-        }
-        Err(prefix) => {
-            assert!(sync.unwrap_err().starts_with(prefix));
-            assert!(asynchronous.unwrap_err().starts_with(prefix));
-        }
-    }
+
+    assert_eq!(cache.get_cache(key, &context), expected);
+    assert_eq!(cache.async_get_cache(key, &context).await, expected);
 }
 
 #[rstest]

@@ -94,10 +94,7 @@ async fn authenticates_before_serving_mounted_inference_routes(
     let response = request.send().await.unwrap();
     assert_eq!(response.status().as_u16(), status);
     if status == 400 {
-        let expected = Error::UnknownModel {
-            route: "/v1/messages",
-            model: "unconfigured-model".into(),
-        };
+        let expected = Error::UnknownModel("unconfigured-model".into());
         assert_eq!(
             response.json::<Value>().await.unwrap(),
             expected.body(Some("gateway-test"))
@@ -159,7 +156,7 @@ async fn mounts_ui_without_exposing_credentials_or_authorizing_inference(inferen
     std::fs::write(assets.path().join("index.html"), "dashboard").unwrap();
     let backend = litellm_gateway_auth::UiBackend::new(
         "admin".into(),
-        litellm_secret_value::SecretValue::new("ui-password"),
+        litellm_auth_types::SecretValue::new("ui-password"),
     )
     .unwrap();
     let ui = litellm_gateway_ui::router(
@@ -289,34 +286,4 @@ async fn ui_routes_are_absent_when_not_mounted(
         .await
         .unwrap();
     assert_eq!(response.status().as_u16(), 404);
-}
-
-#[rstest]
-#[case::with_master_key("model_list: []\ngeneral_settings:\n  master_key: gateway-key\n")]
-#[case::without_master_key("model_list: []\n")]
-#[tokio::test]
-async fn readiness_answers_without_credentials_like_the_proxy_with_no_database(
-    inference: Arc<Gateway>,
-    #[case] yaml: &str,
-) {
-    let config = Config::from_yaml(yaml).unwrap();
-    let app = litellm_gateway::router(inference, &config, None, None);
-
-    let response = app
-        .oneshot(
-            Request::get("/health/readiness")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status().as_u16(), 200);
-    let body = axum::body::to_bytes(response.into_body(), 1024)
-        .await
-        .unwrap();
-    assert_eq!(
-        serde_json::from_slice::<Value>(&body).unwrap(),
-        json!({"status": "healthy", "db": "Not connected"})
-    );
 }

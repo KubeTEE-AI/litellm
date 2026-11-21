@@ -2,10 +2,9 @@
 
 import enum
 from collections.abc import Mapping
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from pydantic import Field
-from typing_extensions import ReadOnly
 
 from .base import GuardrailConfigModel
 
@@ -43,7 +42,7 @@ class PolicyApplicableTo(str, enum.Enum):
 class DynamoAIRequest(TypedDict, total=False):
     """Request structure for DynamoAI /moderation/analyze endpoint"""
 
-    messages: ReadOnly[list[dict[str, object]]]
+    messages: list[dict[str, Any]]
     textType: DynamoTextType | None
     policyIds: list[str]
     modelId: str | None
@@ -59,8 +58,8 @@ class PolicyInfo(TypedDict, total=False):
     description: str
     method: PolicyMethod
     action: Literal["BLOCK", "WARN", "REDACT", "SANITIZE", "NONE"]
-    methodParams: ReadOnly[dict[str, object]]
-    decisionParams: ReadOnly[dict[str, object]]
+    methodParams: dict[str, Any]
+    decisionParams: dict[str, Any]
     applicableTo: PolicyApplicableTo
     created_at: str
     creatorId: str
@@ -77,7 +76,7 @@ class AppliedPolicyDto(TypedDict, total=False):
     """Applied policy details from DynamoAI response"""
 
     policy: PolicyInfo
-    outputs: ReadOnly[dict[str, object] | None]
+    outputs: dict[str, Any] | None
     action: str | None
 
 

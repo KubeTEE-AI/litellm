@@ -4,8 +4,7 @@ import base64
 import json
 import os
 from collections.abc import Mapping
-from types import MappingProxyType
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import TYPE_CHECKING, Any, Final
 
 from opentelemetry.trace import Status, StatusCode
 from typing_extensions import override
@@ -20,7 +19,6 @@ from litellm.integrations.opentelemetry_utils.base_otel_llm_obs_attributes impor
     BaseLLMObsOTELAttributes,
     safe_set_attribute,
 )
-from litellm.litellm_core_utils.core_helpers import has_attributes, require_attributes
 from litellm.litellm_core_utils.safe_json_dumps import safe_dumps
 from litellm.types.integrations.weave_otel import WeaveOtelConfig, WeaveSpanAttributes
 from litellm.types.utils import StandardCallbackDynamicParams
@@ -36,21 +34,6 @@ WEAVE_BASE_URL: Final = "https://trace.wandb.ai"
 WEAVE_OTEL_ENDPOINT: Final = "/otel/v1/traces"
 
 
-_NO_FIELDS: Final[Mapping[str, object]] = MappingProxyType({})
-
-
-class _SupportsGet(Protocol):
-    def get(self, key: str, /) -> object: ...
-
-
-class _SupportsReplace(Protocol):
-    def replace(self, old: str, new: str, /) -> object: ...
-
-
-class _ModelDumpable(Protocol):
-    def model_dump(self) -> object: ...
-
-
 class WeaveLLMObsOTELAttributes(BaseLLMObsOTELAttributes):
     """
     Weave-specific LLM observability OTEL attributes.
@@ -61,15 +44,15 @@ class WeaveLLMObsOTELAttributes(BaseLLMObsOTELAttributes):
 
     @staticmethod
     @override
-    def set_messages(span: Span, kwargs: Mapping[str, object]):
+    def set_messages(span: Span, kwargs: dict[str, Any]):
         """Set input messages as span attributes using OpenInference conventions."""
 
         messages: Final = kwargs.get("messages") or []
-        optional_params: Final = kwargs.get("optional_params") or _NO_FIELDS
+        optional_params: Final = kwargs.get("optional_params") or {}
 
         prompt: Final = {"messages": messages}
-        functions: Final = require_attributes(optional_params, _SupportsGet, "get").get("functions")
-        tools: Final = require_attributes(optional_params, _SupportsGet, "get").get("tools")
+        functions: Final = optional_params.get("functions")
+        tools: Final = optional_params.get("tools")
         if functions is not None:
             prompt["functions"] = functions
         if tools is not None:
@@ -77,7 +60,7 @@ class WeaveLLMObsOTELAttributes(BaseLLMObsOTELAttributes):
         safe_set_attribute(span, OpenInferenceSpanAttributes.INPUT_VALUE, json.dumps(prompt))
 
 
-def _set_weave_specific_attributes(span: Span, kwargs: Mapping[str, object], response_obj: object):
+def _set_weave_specific_attributes(span: Span, kwargs: Mapping[str, Any], response_obj: Any):
     """
     Sets Weave-specific metadata attributes onto the OTEL span.
 
@@ -86,27 +69,25 @@ def _set_weave_specific_attributes(span: Span, kwargs: Mapping[str, object], res
     """
 
     # Extract all needed data upfront
-    litellm_params: Final = kwargs.get("litellm_params") or _NO_FIELDS
+    litellm_params: Final = kwargs.get("litellm_params") or {}
     # optional_params = kwargs.get("optional_params") or {}
-    metadata: Final = kwargs.get("metadata") or _NO_FIELDS
+    metadata: Final = kwargs.get("metadata") or {}
     model: Final = kwargs.get("model") or ""
-    custom_llm_provider: Final = (
-        require_attributes(litellm_params, _SupportsGet, "get").get("custom_llm_provider") or ""
-    )
+    custom_llm_provider: Final = litellm_params.get("custom_llm_provider") or ""
 
     # Weave supports a custom display name and will default to the model name if not provided.
-    display_name = require_attributes(metadata, _SupportsGet, "get").get("display_name")
+    display_name = metadata.get("display_name")
     if not display_name and model:
         if custom_llm_provider:
             display_name = f"{custom_llm_provider}/{model}"
         else:
             display_name = model
     if display_name:
-        display_name = require_attributes(display_name, _SupportsReplace, "replace").replace("/", "__")
+        display_name = display_name.replace("/", "__")
         safe_set_attribute(span, WeaveSpanAttributes.DISPLAY_NAME.value, display_name)
 
     # Weave threads are OpenInference sessions.
-    if (session_id := require_attributes(metadata, _SupportsGet, "get").get("session_id")) is not None:
+    if (session_id := metadata.get("session_id")) is not None:
         if isinstance(session_id, (list, dict)):
             session_id = safe_dumps(session_id)
         safe_set_attribute(span, WeaveSpanAttributes.THREAD_ID.value, session_id)
@@ -116,7 +97,7 @@ def _set_weave_specific_attributes(span: Span, kwargs: Mapping[str, object], res
     # but we override them here to better match Weave's expectations
     if response_obj:
         output_dict = None
-        if has_attributes(response_obj, _ModelDumpable, "model_dump"):
+        if hasattr(response_obj, "model_dump"):
             output_dict = response_obj.model_dump()
         elif hasattr(response_obj, "get"):
             output_dict = response_obj

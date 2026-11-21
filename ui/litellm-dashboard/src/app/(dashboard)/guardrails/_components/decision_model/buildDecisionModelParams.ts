@@ -1,6 +1,3 @@
-import type { TFunction } from "i18next";
-import i18n from "@/i18n/i18n";
-
 export interface DecisionModelCheckDraft {
   id: string;
   name: string;
@@ -30,16 +27,13 @@ export function duplicateDecisionCheckNames(checks: readonly DecisionModelCheckD
   return new Set(names.filter((name, index) => names.indexOf(name) !== index));
 }
 
-export function decisionChecksProblem(
-  checks: readonly DecisionModelCheckDraft[],
-  t: TFunction = i18n.t.bind(i18n),
-): string | null {
+export function decisionChecksProblem(checks: readonly DecisionModelCheckDraft[]): string | null {
   const trimmed = trimDecisionChecks(checks);
-  if (trimmed.length === 0) return t("guardrails.decisionModel.problems.noQuestions");
+  if (trimmed.length === 0) return "Add at least one question";
   if (trimmed.some((check) => !check.name || !check.instructions)) {
-    return t("guardrails.decisionModel.problems.incompleteQuestion");
+    return "Give every question a name and a question, or remove it";
   }
-  if (duplicateDecisionCheckNames(checks).size > 0) return t("guardrails.decisionModel.problems.duplicateNames");
+  if (duplicateDecisionCheckNames(checks).size > 0) return "Each question needs a different name";
   return null;
 }
 

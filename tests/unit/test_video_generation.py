@@ -17,7 +17,6 @@ from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from litellm.llms.custom_httpx.llm_http_handler import BaseLLMHTTPHandler
 from litellm.llms.gemini.videos.transformation import GeminiVideoConfig
 from litellm.llms.openai.videos.transformation import OpenAIVideoConfig
-from litellm.proxy._types import UserAPIKeyAuth
 from litellm.types.videos.main import VideoObject, VideoResponse
 from litellm.videos import main as videos_main
 from litellm.videos.main import (
@@ -26,7 +25,6 @@ from litellm.videos.main import (
     video_generation,
     video_status,
 )
-from tests.unit.proxy.router_entry_point_stubs import route_entry_points_to_stubs
 
 
 class TestVideoGeneration:
@@ -1607,7 +1605,7 @@ class TestVideoEndpointsProxyLitellmParams:
         encoded_video_id = mock_video_generation_response.id
 
         # Mock the router instance
-        mock_router_instance = route_entry_points_to_stubs(MagicMock())
+        mock_router_instance = MagicMock()
         mock_router_instance.resolve_model_name_from_model_id.return_value = (
             "vertex-ai-sora-2"
         )
@@ -1676,7 +1674,7 @@ class TestVideoEndpointsProxyLitellmParams:
         encoded_video_id = mock_video_generation_response.id
 
         # Mock the router instance
-        mock_router_instance = route_entry_points_to_stubs(MagicMock())
+        mock_router_instance = MagicMock()
         mock_router_instance.resolve_model_name_from_model_id.return_value = (
             "vertex-ai-sora-2"
         )
@@ -1745,7 +1743,7 @@ class TestVideoEndpointsProxyLitellmParams:
         encoded_video_id = mock_video_generation_response.id
 
         # Mock the router instance
-        mock_router_instance = route_entry_points_to_stubs(MagicMock())
+        mock_router_instance = MagicMock()
         mock_router_instance.resolve_model_name_from_model_id.return_value = (
             "vertex-ai-sora-2"
         )
@@ -2233,7 +2231,7 @@ def video_proxy_test_client():
 
     app = FastAPI()
     app.include_router(video_router)
-    app.dependency_overrides[user_api_key_auth] = lambda: UserAPIKeyAuth(api_key="sk-9876")
+    app.dependency_overrides[user_api_key_auth] = lambda: MagicMock()
     return TestClient(app)
 
 
@@ -2340,7 +2338,7 @@ def test_video_get_character_accepts_encoded_character_id(video_proxy_test_clien
         provider="vertex_ai",
         model_id="veo-2.0-generate-001",
     )
-    mock_router = route_entry_points_to_stubs(MagicMock())
+    mock_router = MagicMock()
     mock_router.resolve_model_name_from_model_id.return_value = "vertex-ai-sora-2"
 
     with patch("litellm.proxy.proxy_server.llm_router", mock_router):
@@ -2497,7 +2495,7 @@ def test_edit_and_extension_route_with_encoded_video_ids(
     if endpoint.endswith("extensions"):
         payload["seconds"] = "4"
 
-    mock_router = route_entry_points_to_stubs(MagicMock())
+    mock_router = MagicMock()
     mock_router.resolve_model_name_from_model_id.return_value = "vertex-ai-sora-2"
 
     with patch("litellm.proxy.proxy_server.llm_router", mock_router):

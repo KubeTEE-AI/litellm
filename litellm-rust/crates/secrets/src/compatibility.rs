@@ -3,10 +3,9 @@ use litellm_python_compat::{Value, literal::literal_eval};
 use litellm_secrets_types::PythonSecretRead;
 
 use crate::{
-    Error, KeyManagementSettings, KeyManagementSystem, Secret, SecretManager,
+    Error, KeyManagementSettings, KeyManagementSystem, Secret, SecretManager, SecretValue,
     get_secret_from_manager,
 };
-use litellm_secret_value::SecretValue;
 
 pub async fn get_secret_from_python_manager(
     manager: &SecretManager,
@@ -41,9 +40,11 @@ pub async fn get_secret_from_python_manager(
     };
     match result {
         #[cfg(feature = "google")]
-        Err(Error::Google(error)) if error.is_not_found() => Err(Error::ManagedSecretMissing),
+        Err(Error::Google(litellm_secrets_google::Error::Status(404))) => {
+            Err(Error::ManagedSecretMissing)
+        }
         #[cfg(feature = "azure")]
-        Err(Error::Azure(error)) if error.is_missing_value() => Ok(None),
+        Err(Error::Azure(litellm_secrets_azure::Error::MissingValue)) => Ok(None),
         Ok(None)
             if matches!(manager, SecretManager::External(_))
                 && manager.system() == KeyManagementSystem::AzureKeyVault =>

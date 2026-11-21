@@ -1,12 +1,9 @@
-use std::time::SystemTime;
+use std::{collections::BTreeMap, time::SystemTime};
 
-use litellm_auth_aws::{Credentials, SigningScope, aws_signature_headers, sign_headers};
+use litellm_auth_aws::{Credentials, aws_signature_headers, sign_post};
 use rstest::rstest;
 use time::{PrimitiveDateTime, format_description};
-use wiremock::{
-    Request,
-    http::{HeaderMap, HeaderName},
-};
+use wiremock::Request;
 
 use super::*;
 
@@ -45,26 +42,21 @@ fn expected_authorization(url: &str, sent: &Request) -> String {
             .unwrap()
             .assume_utc()
             .into();
-    let headers: HeaderMap = ["content-type", "x-amz-target"]
+    let headers: BTreeMap<String, String> = ["content-type", "x-amz-target"]
         .into_iter()
-        .map(|name| (HeaderName::from_static(name), sent.headers[name].clone()))
+        .map(|name| (name.to_string(), sent.header(name).unwrap().to_string()))
         .collect();
-    sign_headers(
-        "POST",
+    sign_post(
         url,
         &sent.body,
         &aws_signature_headers(&headers),
-        SigningScope {
-            region: "eu-west-1",
-            service: "textract",
-            credentials: &Credentials::new(ACCESS_KEY_ID, SECRET_ACCESS_KEY, None, None, "test"),
-            time: signed_at,
-        },
+        "eu-west-1",
+        "textract",
+        &Credentials::new(ACCESS_KEY_ID, SECRET_ACCESS_KEY, None, None, "test"),
+        signed_at,
     )
-    .unwrap()["authorization"]
-        .to_str()
-        .unwrap()
-        .to_string()
+    .unwrap()["Authorization"]
+        .clone()
 }
 
 /// The recorded URL names wiremock's host, not the address the client signed for.
@@ -191,15 +183,12 @@ async fn a_multi_page_rejection_reaches_the_caller_with_the_single_page_limit(#[
         .await
         .unwrap_err();
 
-    let message = litellm_error::Report::new(&error).to_string();
-    assert!(error.is_request());
-    assert_eq!(error.http_status_code(), Some(400));
+    let Error::Provider { status, body, .. } = error else {
+        panic!("expected a provider error, got {error:?}");
+    };
+    assert_eq!(status, 400);
     assert!(
-        message.contains("Request has unsupported document format"),
-        "{message}"
-    );
-    assert!(
-        message.contains("multi-page documents are not supported"),
-        "{message}"
+        body.contains("multi-page documents are not supported"),
+        "{body}"
     );
 }

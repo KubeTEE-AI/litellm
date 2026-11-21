@@ -2,7 +2,6 @@
 
 import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { useTranslation } from "react-i18next";
 import remarkGfm from "remark-gfm";
 import { CircleAlert, Info, TriangleAlert, X } from "lucide-react";
 import { Alert, AlertAction, AlertDescription } from "@/components/shared/Alert";
@@ -37,7 +36,6 @@ interface UserBannerProps {
 }
 
 export const UserBanner: React.FC<UserBannerProps> = ({ accessToken }) => {
-  const { t } = useTranslation();
   const { data: banner } = useUserBanner(accessToken);
   const [dismissedSignature, setDismissedSignature] = useState<string | null>(() =>
     typeof window === "undefined" ? null : localStorage.getItem(DISMISS_STORAGE_KEY),
@@ -64,7 +62,7 @@ export const UserBanner: React.FC<UserBannerProps> = ({ accessToken }) => {
         <UserBannerMarkdown message={banner.message} />
       </AlertDescription>
       <AlertAction>
-        <Button variant="ghost" size="icon-sm" aria-label={t("userBanner.dismiss")} onClick={handleDismiss}>
+        <Button variant="ghost" size="icon-sm" aria-label="Dismiss banner" onClick={handleDismiss}>
           <X />
         </Button>
       </AlertAction>

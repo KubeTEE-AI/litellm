@@ -83,8 +83,7 @@ class GuardrailsAI(CustomGuardrail):
             timeout=self.timeout,
         )
         verbose_proxy_logger.debug("guardrails_ai response: %s", response)
-        decoded_response: Final[GuardrailsAIResponse] = response.json()
-        _json_response: Final = GuardrailsAIResponse(**decoded_response)
+        _json_response: Final = GuardrailsAIResponse(**response.json())
         if _json_response.get("validationPassed") is False:
             raise HTTPException(
                 status_code=400,
@@ -131,8 +130,7 @@ class GuardrailsAI(CustomGuardrail):
                 },
             )
 
-        decoded_response: Final[GuardrailsAIResponsePreCall] = response.json()
-        _json_response: Final = GuardrailsAIResponsePreCall(**decoded_response)
+        _json_response: Final = GuardrailsAIResponsePreCall(**response.json())
         response = _json_response.get("outputs", [])[0].get("data", [])[0]
         return response
 

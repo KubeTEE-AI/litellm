@@ -1,5 +1,5 @@
 use super::NativeGateway;
-use crate::{ConnectError, Context, Error, GatewayFuture, ServerInfo};
+use crate::{Context, Error, GatewayFuture, ServerInfo};
 use rmcp::{Peer, RoleClient};
 use std::sync::Arc;
 
@@ -39,12 +39,14 @@ pub trait ServerResolver: Send + Sync + 'static {
 pub struct Registry(Arc<[Server]>);
 
 impl Registry {
-    pub fn new(servers: impl Into<Arc<[Server]>>) -> Result<Self, ConnectError> {
+    pub fn new(servers: impl Into<Arc<[Server]>>) -> Result<Self, Error> {
         let servers = servers.into();
         for (index, server) in servers.iter().enumerate() {
             let identifiers = [&server.info.server_id, &server.info.server_name];
             if identifiers.iter().any(|value| value.is_empty()) || server.prefix().is_empty() {
-                return Err(ConnectError::EmptyIdentifier);
+                return Err(Error::Configuration(
+                    "MCP server identifiers must not be empty".into(),
+                ));
             }
             if servers[..index].iter().any(|previous| {
                 previous.prefix() == server.prefix()
@@ -55,7 +57,9 @@ impl Registry {
                         .as_deref()
                         .is_some_and(|alias| previous.matches(alias))
             }) {
-                return Err(ConnectError::DuplicateIdentifier);
+                return Err(Error::Configuration(
+                    "MCP server identifiers and prefixes must be unique".into(),
+                ));
             }
         }
         Ok(Self(servers))
@@ -75,7 +79,11 @@ impl NativeGateway {
             .parts
             .headers
             .get("x-mcp-servers")
-            .map(|value| value.to_str().map_err(Error::InvalidServersHeader))
+            .map(|value| {
+                value
+                    .to_str()
+                    .map_err(|_| Error::InvalidRequest("Invalid x-mcp-servers header".into()))
+            })
             .transpose()?;
         let scope = context.server.as_deref().or(header);
         let Some(scope) = scope else {

@@ -1,6 +1,5 @@
 import React, { useId, useRef } from "react";
 import { Paperclip } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -15,7 +14,6 @@ interface ChatImageUploadProps {
 }
 
 const ChatImageUpload: React.FC<ChatImageUploadProps> = ({ chatUploadedImage, onImageUpload, disabled = false }) => {
-  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
 
@@ -29,7 +27,7 @@ const ChatImageUpload: React.FC<ChatImageUploadProps> = ({ chatUploadedImage, on
     if (!file) {
       return;
     }
-    const result = validateChatAttachment(file, t);
+    const result = validateChatAttachment(file);
     if (!result.ok) {
       toast.error(result.error);
       return;
@@ -57,7 +55,7 @@ const ChatImageUpload: React.FC<ChatImageUploadProps> = ({ chatUploadedImage, on
               variant="ghost"
               size="icon-sm"
               disabled={disabled}
-              aria-label={t("playground.chatUi.chatImageUpload.attach")}
+              aria-label="Attach image or PDF"
               className="text-muted-foreground hover:text-foreground"
               onClick={() => inputRef.current?.click()}
             />
@@ -65,7 +63,7 @@ const ChatImageUpload: React.FC<ChatImageUploadProps> = ({ chatUploadedImage, on
         >
           <Paperclip className="size-4" />
         </TooltipTrigger>
-        <TooltipContent>{t("playground.chatUi.chatImageUpload.attach")}</TooltipContent>
+        <TooltipContent>Attach image or PDF</TooltipContent>
       </Tooltip>
     </>
   );

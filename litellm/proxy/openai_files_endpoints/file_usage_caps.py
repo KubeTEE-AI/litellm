@@ -16,7 +16,6 @@ from litellm.constants import (
     MAX_FILE_DOWNLOADS_PER_MINUTE_KEY,
 )
 from litellm.proxy._types import ProxyException, UserAPIKeyAuth
-from litellm.redis.stores.rate_limits import RATE_LIMITS_TARGET
 
 if TYPE_CHECKING:
     from litellm.proxy.utils import InternalUsageCache
@@ -150,7 +149,7 @@ async def _increment_all_or_none(
     return exceeded
 
 
-@with_service_target(RATE_LIMITS_TARGET)
+@with_service_target("rate_limits")
 async def consume_file_usage(
     cache: "InternalUsageCache",
     limits: tuple[ScopedFileUsageLimit, ...],

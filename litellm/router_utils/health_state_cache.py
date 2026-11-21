@@ -6,17 +6,16 @@ and exposes it for router candidate filtering.
 """
 
 import time
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final
 
-from pydantic import TypeAdapter
 from typing_extensions import TypedDict
 
 from litellm import verbose_logger
 from litellm._internal_context import with_service_target
 from litellm.caching.caching import DualCache
 from litellm.caching.redis_cache import RedisCircuitBreakerOpenError
-from litellm.constants import HEALTH_CHECKS_TARGET
+
+HEALTH_CHECKS_TARGET: Final = "health_checks"
 
 if TYPE_CHECKING:
     from opentelemetry.trace import Span as _Span
@@ -24,9 +23,6 @@ if TYPE_CHECKING:
     Span = _Span
 else:
     Span = Any
-
-
-_CACHED_HEALTH_SNAPSHOT: Final = TypeAdapter(object)
 
 
 class DeploymentHealthStateValue(TypedDict):
@@ -83,7 +79,7 @@ class DeploymentHealthCache:
             merged: Final = {
                 model_id: state
                 for model_id, state in {**existing, **states}.items()
-                if isinstance(state, dict) and (now - _timestamp_of(state)) < expiry_seconds  # pyright: ignore[reportUnknownArgumentType]  # a cached record
+                if isinstance(state, dict) and (now - state.get("timestamp", 0)) < expiry_seconds
             }
             self.cache.set_cache(
                 key=self.CACHE_KEY,
@@ -96,7 +92,7 @@ class DeploymentHealthCache:
                 str(e),
             )
 
-    def _extract_unhealthy_ids(self, raw: object) -> set[str]:
+    def _extract_unhealthy_ids(self, raw: Any) -> set[str]:
         """Given raw cache value, return set of non-stale unhealthy deployment IDs."""
         if not raw or not isinstance(raw, dict):
             return set()
@@ -106,14 +102,14 @@ class DeploymentHealthCache:
             for model_id, state in raw.items()
             if isinstance(state, dict)
             and not state.get("is_healthy", True)
-            and (now - _timestamp_of(state)) < self.staleness_threshold  # pyright: ignore[reportUnknownArgumentType]  # a cached record
+            and (now - state.get("timestamp", 0)) < self.staleness_threshold
         }
 
     @with_service_target(HEALTH_CHECKS_TARGET)
     async def async_get_unhealthy_deployment_ids(self, parent_otel_span: Span | None = None) -> set[str]:
         """Return set of deployment IDs currently marked unhealthy and not stale."""
         try:
-            raw: Final = _CACHED_HEALTH_SNAPSHOT.validate_python(await self.cache.async_get_cache(key=self.CACHE_KEY))
+            raw: Final = await self.cache.async_get_cache(key=self.CACHE_KEY)
             return self._extract_unhealthy_ids(raw)
         except Exception as e:
             verbose_logger.debug(
@@ -126,7 +122,7 @@ class DeploymentHealthCache:
     def get_unhealthy_deployment_ids(self, parent_otel_span: Span | None = None) -> set[str]:
         """Sync version: return set of deployment IDs currently marked unhealthy and not stale."""
         try:
-            raw: Final = _CACHED_HEALTH_SNAPSHOT.validate_python(self.cache.get_cache(key=self.CACHE_KEY))
+            raw: Final = self.cache.get_cache(key=self.CACHE_KEY)
             return self._extract_unhealthy_ids(raw)
         except Exception as e:
             verbose_logger.debug(
@@ -134,10 +130,3 @@ class DeploymentHealthCache:
                 str(e),
             )
             return set()
-
-
-def _timestamp_of(state: Mapping[str, object]) -> float:
-    """A health record's timestamp; one that is no number reads as 0 (stale), so a bad record
-    drops out alone instead of turning health routing off for every deployment."""
-    timestamp: Final = state.get("timestamp", 0)
-    return float(timestamp) if isinstance(timestamp, int | float) and not isinstance(timestamp, bool) else 0.0

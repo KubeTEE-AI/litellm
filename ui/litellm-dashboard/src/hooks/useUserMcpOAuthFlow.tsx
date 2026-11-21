@@ -13,7 +13,6 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import {
   buildMcpOAuthAuthorizeUrl,
   exchangeMcpOAuthToken,
@@ -80,7 +79,6 @@ export const useUserMcpOAuthFlow = ({
   clientId: preClientId,
   onSuccess,
 }: UseUserMcpOAuthFlowOptions): UseUserMcpOAuthFlowResult => {
-  const { t } = useTranslation();
   const [status, setStatus] = useState<UserMcpOAuthStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const processingRef = useRef(false);
@@ -183,7 +181,7 @@ export const useUserMcpOAuthFlow = ({
       const raw = getStorage(FLOW_STATE_KEY);
       flowState = raw ? JSON.parse(raw) : null;
     } catch (_) {
-      setError(t("mcpOAuthFlow.resumeFailed"));
+      setError("Failed to resume OAuth flow. Please retry.");
       setStatus("error");
       processingRef.current = false;
       clearStorage(FLOW_STATE_KEY);
@@ -226,7 +224,7 @@ export const useUserMcpOAuthFlow = ({
 
       setStatus("success");
       setError(null);
-      toast.success(t("mcpOAuthFlow.connected"));
+      toast.success("Connected successfully");
       onSuccess();
     } catch (err) {
       const msg = extractErrorMessage(err);
@@ -239,7 +237,7 @@ export const useUserMcpOAuthFlow = ({
         processingRef.current = false;
       }, 1000);
     }
-  }, [accessToken, serverId, onSuccess, t]);
+  }, [accessToken, serverId, onSuccess]);
 
   useEffect(() => {
     resumeOAuthFlow();

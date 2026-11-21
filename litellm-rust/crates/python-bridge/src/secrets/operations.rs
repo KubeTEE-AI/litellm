@@ -4,8 +4,6 @@ use litellm_secrets::cyberark::AuthenticationRetry;
 use litellm_secrets::{Error, SecretManager};
 use litellm_secrets_types::{PythonSecretRead, SecretOperationContext};
 
-use super::ManagerError;
-
 pub(super) struct PythonReadRequest {
     pub secret_name: String,
     pub primary_secret_name: Option<String>,
@@ -64,24 +62,21 @@ pub(super) async fn read_python_provider(
 
 #[derive(Debug)]
 pub(super) enum PythonMutationError {
-    Manager(ManagerError),
+    Unsupported,
     Vault(Box<super::vault::Failure>),
     CyberarkWrite {
         name: String,
         failure: Box<litellm_secrets::cyberark::WriteFailure>,
     },
-}
-
-impl From<ManagerError> for PythonMutationError {
-    fn from(error: ManagerError) -> Self {
-        Self::Manager(error)
-    }
+    CurrentMissing(String),
+    ReplacementMissing(String),
+    ReplacementMismatch,
 }
 
 pub(super) async fn write_python_provider(
     manager: &SecretManager,
     name: &str,
-    value: &litellm_secret_value::SecretValue,
+    value: &litellm_secrets::SecretValue,
 ) -> Result<serde_json::Value, PythonMutationError> {
     match manager {
         SecretManager::Cyberark(client) => {
@@ -94,7 +89,7 @@ pub(super) async fn write_python_provider(
                 })?;
             Ok(write_success(name))
         }
-        _ => Err(ManagerError::MutationUnsupported.into()),
+        _ => Err(PythonMutationError::Unsupported),
     }
 }
 
@@ -120,7 +115,7 @@ pub(super) async fn delete_python_provider(
                 "message": "CyberArk Conjur does not support direct secret deletion. Use policy updates to remove variables.",
             }))
         }
-        _ => Err(ManagerError::MutationUnsupported.into()),
+        _ => Err(PythonMutationError::Unsupported),
     }
 }
 
@@ -128,7 +123,7 @@ pub(super) async fn rotate_python_provider(
     manager: &SecretManager,
     current_name: &str,
     new_name: &str,
-    value: &litellm_secret_value::SecretValue,
+    value: &litellm_secrets::SecretValue,
 ) -> Result<serde_json::Value, PythonMutationError> {
     match manager {
         SecretManager::Cyberark(client) => {
@@ -143,7 +138,7 @@ pub(super) async fn rotate_python_provider(
                 .flatten()
                 .is_none()
             {
-                return Err(ManagerError::CurrentMissing(current_name.to_owned()).into());
+                return Err(PythonMutationError::CurrentMissing(current_name.to_owned()));
             }
             client
                 .write_with_retry(
@@ -162,16 +157,16 @@ pub(super) async fn rotate_python_provider(
                 .await
                 .ok()
                 .flatten()
-                .ok_or_else(|| ManagerError::ReplacementMissing(new_name.to_owned()))?;
+                .ok_or_else(|| PythonMutationError::ReplacementMissing(new_name.to_owned()))?;
             if actual != *value {
-                return Err(ManagerError::ReplacementMismatch.into());
+                return Err(PythonMutationError::ReplacementMismatch);
             }
             if current_name != new_name {
                 client.invalidate_cached_secret(current_name).await;
             }
             Ok(write_success(new_name))
         }
-        _ => Err(ManagerError::MutationUnsupported.into()),
+        _ => Err(PythonMutationError::Unsupported),
     }
 }
 fn write_success(name: &str) -> serde_json::Value {
@@ -186,7 +181,7 @@ pub(super) enum PythonMutationResponse {
 pub(super) async fn write_python_provider_with_context(
     manager: &SecretManager,
     name: &str,
-    value: &litellm_secret_value::SecretValue,
+    value: &litellm_secrets::SecretValue,
     context: &litellm_secrets_types::SecretWriteContext,
 ) -> Result<PythonMutationResponse, PythonMutationError> {
     if let (SecretManager::HashicorpVault(client), SecretOperationContext::Hashicorp(operation)) =
@@ -235,7 +230,7 @@ pub(super) async fn rotate_python_provider_with_context(
     manager: &SecretManager,
     current_name: &str,
     new_name: &str,
-    value: &litellm_secret_value::SecretValue,
+    value: &litellm_secrets::SecretValue,
     context: &SecretOperationContext,
 ) -> Result<PythonMutationResponse, PythonMutationError> {
     if let (SecretManager::HashicorpVault(client), SecretOperationContext::Hashicorp(context)) =

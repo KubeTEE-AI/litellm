@@ -5,7 +5,6 @@ import type { Table } from "@tanstack/react-table";
 import { Check, Columns3 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import i18n from "@/i18n/i18n";
 import { cn } from "@/lib/cva.config";
 
 interface DataTableViewOptionsProps<TData> {
@@ -17,7 +16,7 @@ interface DataTableViewOptionsProps<TData> {
 
 export function DataTableViewOptions<TData>({
   table,
-  label = i18n.t("shared.dataTable.viewOptions.view"),
+  label = "View",
   iconOnly = false,
   className,
 }: DataTableViewOptionsProps<TData>) {

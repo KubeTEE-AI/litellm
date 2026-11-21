@@ -21,27 +21,10 @@ pub(crate) struct RouteOptions {
     pub(crate) timeout: Option<Duration>,
 }
 
-/// A caller argument the bridge cannot use, raised as a `ValueError`.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum ArgumentError {
-    #[error("{0} is required")]
-    Required(&'static str),
-    #[error("{0} must be a dict")]
-    NotADict(&'static str),
-    #[error("header values must be strings")]
-    HeaderValue,
-}
-
-impl From<ArgumentError> for PyErr {
-    fn from(error: ArgumentError) -> Self {
-        PyValueError::new_err(litellm_error::Report::new(&error).to_string())
-    }
-}
-
-fn required_object(name: &'static str, value: Value) -> Result<Map<String, Value>, ArgumentError> {
+fn required_object(name: &'static str, value: Value) -> PyResult<Map<String, Value>> {
     match value {
         Value::Object(values) => Ok(values),
-        _ => Err(ArgumentError::NotADict(name)),
+        _ => Err(PyValueError::new_err(format!("{name} must be a dict"))),
     }
 }
 
@@ -52,7 +35,7 @@ fn optional_object(
     if value.is_none() {
         return Ok(None);
     }
-    Ok(Some(required_object(name, from_py_argument(value)?)?))
+    required_object(name, from_py_argument(value)?).map(Some)
 }
 
 pub(crate) fn optional_timeout(timeout_seconds: Option<f64>) -> Option<Duration> {
@@ -74,11 +57,11 @@ pub(crate) fn python_timeout_seconds(py: Python<'_>, timeout: Py<PyAny>) -> PyRe
 
 pub(crate) fn required_field<'py>(
     fields: &Bound<'py, PyDict>,
-    name: &'static str,
+    name: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
-    Ok(fields
+    fields
         .get_item(name)?
-        .ok_or(ArgumentError::Required(name))?)
+        .ok_or_else(|| PyValueError::new_err(format!("{name} is required")))
 }
 
 pub(crate) fn optional_field<T: DeserializeOwned>(
@@ -188,18 +171,21 @@ pub(crate) fn request_input_sources<'a>(
         .collect())
 }
 
-pub(crate) fn marshal_headers(
-    headers: Option<Value>,
-) -> Result<HashMap<String, String>, ArgumentError> {
-    let headers = match headers {
-        Some(headers) => required_object("headers", headers)?,
-        None => Map::new(),
+pub(crate) fn marshal_headers(headers: Option<Value>) -> PyResult<HashMap<String, String>> {
+    let value = match headers {
+        Some(headers) => headers,
+        None => Value::Object(Map::new()),
+    };
+    let Value::Object(headers) = value else {
+        return Err(PyValueError::new_err("headers must be a dict"));
     };
     headers
         .into_iter()
-        .map(|(name, value)| match value {
-            Value::String(value) => Ok((name, value)),
-            _ => Err(ArgumentError::HeaderValue),
+        .map(|(name, value)| {
+            value
+                .as_str()
+                .map(|value| (name, value.to_string()))
+                .ok_or_else(|| PyValueError::new_err("header values must be strings"))
         })
         .collect()
 }
@@ -409,52 +395,48 @@ module.__getattr__ = fail
         float: Option<f64>,
     }
 
-    #[rstest::rstest]
-    #[case::empty(json!({}))]
-    #[case::explicit_nulls(json!({"integers": null, "float": null}))]
-    #[case::lax_values(json!({
-        "integers": [i64::MIN, i64::MAX, "9007199254740993.0", " +1_000.00 ", true, 3.0],
-        "float": " 1.25 ",
-    }))]
-    #[case::integer_overflow(json!({"integers": [u64::MAX]}))]
-    #[case::imprecise_integer_string(json!({"integers": ["1.0000000000000001"]}))]
-    #[case::fractional_integer(json!({"integers": [2.5]}))]
-    #[case::nan_string(json!({"float": "NaN"}))]
-    #[case::infinity_string(json!({"float": "inf"}))]
-    #[case::overflowing_float_string(json!({"float": "1e999"}))]
-    #[case::boolean_float(json!({"float": true}))]
-    #[case::large_integer_float(json!({"float": u64::MAX}))]
-    fn numeric_adapters_agree_across_json_and_python_boundaries(#[case] input: Value) {
+    #[test]
+    fn numeric_adapters_agree_across_json_and_python_boundaries() {
         Python::initialize();
         Python::attach(|py| {
-            let expected = serde_json::from_value::<Numbers>(input.clone());
-            let python = litellm_host_python::to_py(py, &input).unwrap();
-            let actual = from_py::<Numbers>(python.bind(py));
-            match (expected, actual) {
-                (Ok(expected), Ok(actual)) => {
-                    assert_eq!(actual, expected);
-                    let serialized = litellm_host_python::to_py(py, &actual).unwrap();
-                    assert_eq!(
-                        from_py::<Value>(serialized.bind(py)).unwrap(),
-                        serde_json::to_value(expected).unwrap()
-                    );
+            for input in [
+                json!({}),
+                json!({"integers": null, "float": null}),
+                json!({"integers": [i64::MIN, i64::MAX, "9007199254740993.0", " +1_000.00 ", true, 3.0], "float": " 1.25 "}),
+                json!({"integers": [u64::MAX]}),
+                json!({"integers": ["1.0000000000000001"]}),
+                json!({"integers": [2.5]}),
+                json!({"float": "NaN"}),
+                json!({"float": "inf"}),
+                json!({"float": "1e999"}),
+                json!({"float": true}),
+                json!({"float": u64::MAX}),
+            ] {
+                let expected = serde_json::from_value::<Numbers>(input.clone());
+                let python = litellm_host_python::to_py(py, &input).unwrap();
+                let actual = from_py::<Numbers>(python.bind(py));
+                match (expected, actual) {
+                    (Ok(expected), Ok(actual)) => {
+                        assert_eq!(actual, expected);
+                        let serialized = litellm_host_python::to_py(py, &actual).unwrap();
+                        assert_eq!(
+                            from_py::<Value>(serialized.bind(py)).unwrap(),
+                            serde_json::to_value(expected).unwrap()
+                        );
+                    }
+                    (Err(_), Err(_)) => {}
+                    mismatch => panic!("boundary mismatch for {input}: {mismatch:?}"),
                 }
-                (Err(_), Err(_)) => {}
-                mismatch => panic!("boundary mismatch for {input}: {mismatch:?}"),
             }
-        });
-    }
-
-    #[rstest::rstest]
-    #[case::nan(c"{'float': float('nan')}")]
-    #[case::infinity(c"{'float': float('inf')}")]
-    #[case::infinite_integer(c"{'integers': [float('inf')]}")]
-    #[case::integer_overflow(c"{'integers': [2 ** 100]}")]
-    fn non_finite_and_overflowing_python_numbers_are_rejected(#[case] source: &std::ffi::CStr) {
-        Python::initialize();
-        Python::attach(|py| {
-            let value = py.eval(source, None, None).unwrap();
-            assert!(from_py::<Numbers>(&value).is_err());
+            for source in [
+                c"{'float': float('nan')}",
+                c"{'float': float('inf')}",
+                c"{'integers': [float('inf')]}",
+                c"{'integers': [2 ** 100]}",
+            ] {
+                let value = py.eval(source, None, None).unwrap();
+                assert!(from_py::<Numbers>(&value).is_err());
+            }
         });
     }
 

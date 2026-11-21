@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use litellm_secret_value::SecretValue;
 use litellm_secrets::{SecretManager, SecretManagerState};
-use litellm_secrets_types::{AccessMode, KeyManagementSettings, KeyManagementSystem};
-
+use litellm_secrets_types::{AccessMode, KeyManagementSettings, KeyManagementSystem, SecretValue};
 use pyo3::prelude::*;
 use serde_json::Value;
 
@@ -130,7 +128,9 @@ pub(crate) fn read(py: Python<'_>) -> PyResult<SecretManagerSnapshot> {
         .system
         .is_some_and(|system| system != backend.system())
     {
-        return Err(super::ManagerError::SystemMismatch.into());
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "native secret manager system does not match configuration",
+        ));
     }
     Ok(SecretManagerSnapshot {
         client: SecretManagerClient::Native(Box::new(backend)),

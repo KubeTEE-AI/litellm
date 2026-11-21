@@ -1,3 +1,4 @@
+use litellm_token_counter_tiktoken::{LoadError, UnsupportedTokenizer};
 pub use litellm_token_counter_tiktoken::{TiktokenTokenizer, Vocabulary, encoding_for_model};
 
 use crate::{Error, TextCodec, TokenCounter, Tokenizer};
@@ -22,10 +23,25 @@ impl TextCodec for TiktokenTokenizer {
     }
 
     fn decode(&self, ids: &[u32], _skip_special_tokens: bool) -> Result<String, Error> {
-        TiktokenTokenizer::decode(self, ids).map_err(Error::from)
+        TiktokenTokenizer::decode(self, ids).map_err(|error| Error::Decode(error.to_string()))
     }
 
     fn name(&self) -> &str {
         TiktokenTokenizer::name(self)
+    }
+}
+
+impl From<UnsupportedTokenizer> for Error {
+    fn from(error: UnsupportedTokenizer) -> Self {
+        Self::UnsupportedTokenizer(error.0)
+    }
+}
+
+impl From<LoadError> for Error {
+    fn from(error: LoadError) -> Self {
+        match error {
+            LoadError::Unsupported(error) => error.into(),
+            LoadError::Ranks(source) => Self::Ranks(source.into()),
+        }
     }
 }

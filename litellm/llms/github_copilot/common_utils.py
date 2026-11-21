@@ -46,6 +46,18 @@ class GetAccessTokenError(GithubCopilotError):
     pass
 
 
+class APIKeyExpiredError(GithubCopilotError):
+    pass
+
+
+class RefreshAPIKeyError(GithubCopilotError):
+    pass
+
+
+class GetAPIKeyError(GithubCopilotError):
+    pass
+
+
 def get_copilot_default_headers(
     api_key: str,
 ) -> dict[str, str]:  # mutable-ok: callers merge caller headers into the returned dict

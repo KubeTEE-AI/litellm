@@ -3,7 +3,6 @@ from collections.abc import Mapping, Sequence
 from typing import Final
 
 from httpx import Headers, Response
-from pydantic import TypeAdapter
 
 import litellm
 from litellm.exceptions import UnsupportedParamsError
@@ -11,7 +10,6 @@ from litellm.litellm_core_utils.audio_utils.utils import (
     normalize_transcription_language_to_bcp47,
     process_audio_file,
 )
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.base_llm.audio_transcription.transformation import (
     AudioTranscriptionRequestData,
     BaseAudioTranscriptionConfig,
@@ -22,7 +20,8 @@ from litellm.llms.vertex_ai.audio_transcription.transformation import (
     validate_vertex_transcription_location,
     validate_vertex_transcription_project_id,
 )
-from litellm.llms.vertex_ai.common_utils import VertexAIError, get_vertex_base_url
+from litellm.llms.vertex_ai.common_utils import VertexAIError, get_vertex_base_url, pop_vertex_request_labels
+from litellm.llms.vertex_ai.request_labels import vertex_request_label_fields, without_caller_labels_header
 from litellm.llms.vertex_ai.vertex_llm_base import VertexBase
 from litellm.types.llms.openai import (
     AllMessageValues,
@@ -46,7 +45,6 @@ from litellm.types.utils import (
 
 DEFAULT_GEMINI_TRANSCRIBE_LOCATION: Final = "global"
 AUDIO_MODALITY: Final = "AUDIO"
-_DECODED_JSON: Final = TypeAdapter(object)
 
 
 class VertexGeminiAudioTranscriptionConfig(BaseAudioTranscriptionConfig, VertexBase):
@@ -110,7 +108,7 @@ class VertexGeminiAudioTranscriptionConfig(BaseAudioTranscriptionConfig, VertexB
             custom_llm_provider="vertex_ai",
         )
         return {
-            **headers,
+            **without_caller_labels_header(headers),
             "Authorization": f"Bearer {access_token}",
             "x-goog-user-project": project_id,
             "Content-Type": "application/json",
@@ -132,10 +130,10 @@ class VertexGeminiAudioTranscriptionConfig(BaseAudioTranscriptionConfig, VertexB
         project_id: Final = validate_vertex_transcription_project_id(
             self.safe_get_vertex_ai_project(vertex_params) or self._resolve_project_id_from_credentials(vertex_params)
         )
-        base_url: Final = api_base or get_vertex_base_url(location)
+        base_url: Final = (api_base or get_vertex_base_url(location)).rstrip("/")
         bare_model: Final = model.removeprefix("vertex_ai/")
         model_path: Final = f"projects/{project_id}/locations/{location}/publishers/google/models/{bare_model}"
-        return join_api_base(base_url, f"v1/{model_path}:generateContent")
+        return f"{base_url}/v1/{model_path}:generateContent"
 
     def _resolve_project_id_from_credentials(self, litellm_params: Mapping[str, object]) -> str:
         vertex_params: Final = dict(litellm_params)
@@ -172,14 +170,15 @@ class VertexGeminiAudioTranscriptionConfig(BaseAudioTranscriptionConfig, VertexB
                 audioTranscriptionConfig=_audio_transcription_config(optional_params.get("language"))
             ),
         )
-        return AudioTranscriptionRequestData(data=dict(request_body))
+        labels: Final = pop_vertex_request_labels(None, dict(litellm_params)) if vertex_request_label_fields() else None
+        return AudioTranscriptionRequestData(data={**request_body, "labels": labels} if labels else dict(request_body))
 
     def transform_audio_transcription_response(
         self,
         raw_response: Response,
     ) -> TranscriptionResponse:
         try:
-            response_json: Final = _DECODED_JSON.validate_python(raw_response.json())
+            response_json: Final = raw_response.json()
         except ValueError:
             raise VertexAIError(
                 status_code=raw_response.status_code,

@@ -129,17 +129,6 @@ def _native_vertex_row_usage(
     return calculate_usage(completion_response)
 
 
-def native_vertex_batch_row_model(row: Mapping[str, object], model_name: str | None) -> str | None:
-    response: Final = as_json_object(row.get("response"))
-    model_version: Final = (
-        response.get("model" if is_vertex_anthropic_batch_output_response(response) else "modelVersion")
-        if response is not None
-        else None
-    )
-    deployment_model: Final = model_name if model_name and "*" not in model_name else None
-    return deployment_model or (model_version if isinstance(model_version, str) else model_name)
-
-
 def native_vertex_batch_row_stats(
     row: Mapping[str, object],
     model_name: str | None,
@@ -167,7 +156,11 @@ def native_vertex_batch_row_stats(
     if usage is None:
         return None
     total_tokens: Final = usage.total_tokens or (usage.prompt_tokens + usage.completion_tokens)
-    model: Final = native_vertex_batch_row_model(row, model_name)
+    model_version: Final = response_body.get(
+        "model" if is_vertex_anthropic_batch_output_response(response_body) else "modelVersion"
+    )
+    deployment_model: Final = model_name if model_name and "*" not in model_name else None
+    model: Final = deployment_model or (model_version if isinstance(model_version, str) else model_name)
     if model is None:
         verbose_logger.warning(
             "vertex_ai batch output row could not be costed, so it is billed at $0 and the rest of the batch "
@@ -212,6 +205,7 @@ class VertexAIBatchTransformation:
         request: CreateBatchRequest,
         vertex_project: str | None = None,
         vertex_location: str | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> VertexAIBatchPredictionJob:
         """
         Transforms OpenAI Batch requests to Vertex AI Batch requests
@@ -230,12 +224,15 @@ class VertexAIBatchTransformation:
             predictionsFormat="jsonl",
             gcsDestination=GcsDestination(outputUriPrefix=cls._get_gcs_uri_prefix_from_file(input_file_id)),
         )
-        return VertexAIBatchPredictionJob(
+        job: Final = VertexAIBatchPredictionJob(
             inputConfig=input_config,
             outputConfig=output_config,
             model=model,
             displayName=request_display_name,
         )
+        if not labels:
+            return job
+        return {**job, "labels": dict(labels)}
 
     @classmethod
     def transform_vertex_ai_batch_response_to_openai_batch_response(
@@ -256,7 +253,7 @@ class VertexAIBatchTransformation:
     @classmethod
     def transform_vertex_ai_batch_list_response_to_openai_list_response(
         cls, response: dict[str, Any]
-    ) -> Mapping[str, object]:
+    ) -> dict[str, Any]:
         """
         Transforms Vertex AI batch list response into OpenAI-compatible list response.
         """

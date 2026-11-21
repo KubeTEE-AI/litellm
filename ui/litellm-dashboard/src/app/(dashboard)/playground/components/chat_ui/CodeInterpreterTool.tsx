@@ -3,7 +3,6 @@ import { toast } from "@/lib/toast";
 import { Code, Info, TriangleAlert } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useTranslation } from "react-i18next";
 
 interface CodeInterpreterToolProps {
   accessToken: string;
@@ -35,13 +34,12 @@ const CodeInterpreterTool: React.FC<CodeInterpreterToolProps> = ({
   selectedModel,
   disabled = false,
 }) => {
-  const { t } = useTranslation();
   const isOpenAI = isOpenAIModel(selectedModel);
   const isDisabled = disabled || !isOpenAI;
 
   const handleToggle = (checked: boolean) => {
     if (checked && !isOpenAI) {
-      toast.warning(t("playground.chatUi.codeInterpreterTool.openAIOnlyToast"));
+      toast.warning("Code Interpreter is only available for OpenAI models");
       return;
     }
     onEnabledChange(checked);
@@ -52,12 +50,14 @@ const CodeInterpreterTool: React.FC<CodeInterpreterToolProps> = ({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Code className="size-4 text-info" />
-          <span className="font-medium text-foreground">{t("playground.chatUi.codeInterpreterTool.title")}</span>
+          <span className="font-medium text-foreground">Code Interpreter</span>
           <Tooltip>
-            <TooltipTrigger aria-label={t("playground.chatUi.codeInterpreterTool.about")}>
+            <TooltipTrigger aria-label="About Code Interpreter">
               <Info className="size-3 text-muted-foreground" />
             </TooltipTrigger>
-            <TooltipContent>{t("playground.chatUi.codeInterpreterTool.description")}</TooltipContent>
+            <TooltipContent>
+              Run Python code to generate files, charts, and analyze data. Container is created automatically.
+            </TooltipContent>
           </Tooltip>
         </div>
         <Switch
@@ -65,7 +65,7 @@ const CodeInterpreterTool: React.FC<CodeInterpreterToolProps> = ({
           onCheckedChange={handleToggle}
           disabled={isDisabled}
           size="sm"
-          aria-label={t("playground.chatUi.codeInterpreterTool.enable")}
+          aria-label="Enable Code Interpreter"
         />
       </div>
 
@@ -74,14 +74,14 @@ const CodeInterpreterTool: React.FC<CodeInterpreterToolProps> = ({
           <div className="flex items-start gap-2">
             <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
             <div className="text-xs text-muted-foreground">
-              <span>{t("playground.chatUi.codeInterpreterTool.unsupported")}</span>
+              <span>Code Interpreter is currently only supported for OpenAI models. </span>
               <a
                 href={GITHUB_FEATURE_REQUEST_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-info hover:text-info/80 underline"
               >
-                {t("playground.chatUi.codeInterpreterTool.requestSupport")}
+                Request support for other providers
               </a>
             </div>
           </div>

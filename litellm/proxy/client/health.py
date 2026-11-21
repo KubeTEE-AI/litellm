@@ -1,6 +1,4 @@
-from typing import Final
-
-from litellm.litellm_core_utils.core_helpers import decoded_json_object
+from typing import Any, Final
 
 from .http_client import HTTPClient
 
@@ -21,7 +19,7 @@ class HealthManagementClient:
         """
         self._http = HTTPClient(base_url=base_url, api_key=api_key, timeout=timeout)
 
-    def get_readiness(self) -> object:
+    def get_readiness(self) -> dict[str, Any]:
         """
         Check the readiness of the LiteLLM proxy server.
 
@@ -34,7 +32,7 @@ class HealthManagementClient:
         """
         return self._http.request("GET", "/health/readiness")
 
-    def get_server_version(self) -> object:
+    def get_server_version(self) -> str | None:
         """
         Get the LiteLLM server version from the readiness endpoint.
 
@@ -42,4 +40,4 @@ class HealthManagementClient:
             Optional[str]: The server version if available, otherwise None.
         """
         readiness: Final = self.get_readiness()
-        return decoded_json_object(readiness).get("litellm_version")
+        return readiness.get("litellm_version")

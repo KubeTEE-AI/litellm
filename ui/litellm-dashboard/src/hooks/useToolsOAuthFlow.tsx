@@ -14,7 +14,6 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { buildMcpOAuthAuthorizeUrl, exchangeMcpOAuthToken, registerMcpOAuthClient } from "@/components/networking";
 import { toast } from "@/lib/toast";
 import { extractErrorMessage } from "@/utils/errorUtils";
@@ -72,7 +71,6 @@ export const useToolsOAuthFlow = ({
   gatewayMintsClient,
   onSuccess,
 }: UseToolsOAuthFlowOptions): UseToolsOAuthFlowResult => {
-  const { t } = useTranslation();
   const [status, setStatus] = useState<ToolsOAuthStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const processingRef = useRef(false);
@@ -175,7 +173,7 @@ export const useToolsOAuthFlow = ({
       payload = JSON.parse(storedResult);
       flowState = peeked;
     } catch (_) {
-      setError(t("mcpServers.useToolsOAuthFlow.errors.resumeFailed"));
+      setError("Failed to resume OAuth flow. Please retry.");
       setStatus("error");
       processingRef.current = false;
       clearStorage(FLOW_STATE_KEY);
@@ -220,7 +218,7 @@ export const useToolsOAuthFlow = ({
 
       setStatus("success");
       setError(null);
-      toast.success(t("mcpServers.useToolsOAuthFlow.toasts.connected"));
+      toast.success("Connected successfully");
       onSuccessRef.current(token.access_token);
     } catch (err) {
       const msg = extractErrorMessage(err);
@@ -233,7 +231,7 @@ export const useToolsOAuthFlow = ({
         processingRef.current = false;
       }, 1000);
     }
-  }, [accessToken, serverId, userId, t]);
+  }, [accessToken, serverId, userId]);
 
   useEffect(() => {
     resumeOAuthFlow();

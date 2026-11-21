@@ -17,10 +17,6 @@ const LLM_TOKEN_ENV: &str = "AZURE_AD_TOKEN";
 
 type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-#[derive(Debug, thiserror::Error)]
-#[error("no Azure credential is available for blob storage")]
-struct NoCredential;
-
 pub struct AzureBlobCredential {
     service: AzureAuthService,
     env_lookup: EnvLookup,
@@ -66,8 +62,15 @@ impl TokenCredential for AzureBlobCredential {
                 &lookup,
             )
             .await
-            .map_err(|error| azure_core::Error::new(ErrorKind::Credential, error))?
-            .ok_or_else(|| azure_core::Error::new(ErrorKind::Credential, NoCredential))?;
+            .map_err(|error| {
+                azure_core::Error::with_message(ErrorKind::Credential, error.to_string())
+            })?
+            .ok_or_else(|| {
+                azure_core::Error::with_message(
+                    ErrorKind::Credential,
+                    "no Azure credential is available for blob storage",
+                )
+            })?;
         let (token, expires_on) = match credential.into_value() {
             ResolvedCredential::AccessToken { token, expires_on } => (token, expires_on),
             ResolvedCredential::Static(token) => (token, None),

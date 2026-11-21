@@ -1,8 +1,7 @@
 use litellm_auth::{
     CredentialPlacement, CredentialPlanKind, CredentialRule, ExistingHeaderBehavior,
-    ProviderAuthPolicy, ResolvedCredential,
+    ProviderAuthPolicy, ResolvedCredential, SecretValue,
 };
-use litellm_secret_value::SecretValue;
 
 const RULES: &[CredentialRule] = &[CredentialRule {
     kind: CredentialPlanKind::Static,

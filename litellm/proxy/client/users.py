@@ -2,12 +2,8 @@ from collections.abc import Iterable, Mapping
 from typing import Any, Final
 
 import requests
-from pydantic import ConfigDict, TypeAdapter
 
 from .exceptions import NotFoundError, UnauthorizedError
-
-_JSON_VALUE: Final = TypeAdapter(object, config=ConfigDict(strict=True, hide_input_in_errors=True))
-_JSON_OBJECT: Final = TypeAdapter(dict[str, object], config=ConfigDict(strict=True, hide_input_in_errors=True))
 
 
 class UsersManagementClient:
@@ -43,7 +39,7 @@ class UsersManagementClient:
         if response.status_code == 404:
             raise NotFoundError(response.text)
         response.raise_for_status()
-        return _JSON_OBJECT.validate_python(response.json())
+        return response.json()
 
     def get_user_v2(self, user_id: str | None = None) -> dict[str, object]:
         """Get user info v2 - lightweight, returns only user object (GET /v2/user/info)"""
@@ -55,7 +51,7 @@ class UsersManagementClient:
         if response.status_code == 404:
             raise NotFoundError(response.text)
         response.raise_for_status()
-        return _JSON_OBJECT.validate_python(response.json())
+        return response.json()
 
     def create_user(self, user_data: Mapping[str, object]) -> dict[str, object]:
         """Create a new user (POST /user/new)"""
@@ -64,9 +60,9 @@ class UsersManagementClient:
         if response.status_code == 401:
             raise UnauthorizedError(response.text)
         response.raise_for_status()
-        return _JSON_OBJECT.validate_python(response.json())
+        return response.json()
 
-    def delete_user(self, user_ids: list[str]) -> object:
+    def delete_user(self, user_ids: list[str]) -> dict[str, object]:
         """Delete users (POST /user/delete)"""
         url: Final = f"{self.base_url}/user/delete"
         response: Final = requests.post(
@@ -75,4 +71,4 @@ class UsersManagementClient:
         if response.status_code == 401:
             raise UnauthorizedError(response.text)
         response.raise_for_status()
-        return _JSON_VALUE.validate_python(response.json())
+        return response.json()

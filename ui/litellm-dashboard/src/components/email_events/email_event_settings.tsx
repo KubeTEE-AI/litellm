@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/lib/toast";
@@ -15,7 +14,6 @@ interface EmailEventSettingsProps {
 }
 
 const EmailEventSettings: React.FC<EmailEventSettingsProps> = ({ accessToken }) => {
-  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [eventSettings, setEventSettings] = useState<EmailEventSetting[]>([]);
 
@@ -39,7 +37,7 @@ const EmailEventSettings: React.FC<EmailEventSettingsProps> = ({ accessToken }) 
     }
   };
 
-  const handleEnabledChange = (event: EmailEvent, checked: boolean) => {
+  const handleCheckboxChange = (event: EmailEvent, checked: boolean) => {
     const updatedSettings = eventSettings.map((setting) =>
       setting.event === event ? { ...setting, enabled: checked } : setting,
     );
@@ -51,7 +49,7 @@ const EmailEventSettings: React.FC<EmailEventSettingsProps> = ({ accessToken }) 
 
     try {
       await updateEmailEventSettings(accessToken, { settings: eventSettings });
-      toast.success(t("loggingAndAlerts.emailEvents.toasts.saved"));
+      toast.success("Email event settings updated successfully");
     } catch (error) {
       console.error("Failed to update email event settings:", error);
       toast.fromError(error);
@@ -63,7 +61,7 @@ const EmailEventSettings: React.FC<EmailEventSettingsProps> = ({ accessToken }) 
 
     try {
       await resetEmailEventSettings(accessToken);
-      toast.success(t("loggingAndAlerts.emailEvents.toasts.reset"));
+      toast.success("Email event settings reset to defaults");
       // Refresh settings after reset
       fetchEventSettings();
     } catch (error) {
@@ -74,29 +72,26 @@ const EmailEventSettings: React.FC<EmailEventSettingsProps> = ({ accessToken }) 
 
   // Helper function to get a description for each event type
   const getEventDescription = (event: EmailEvent): string => {
-    if (event === "Model Deprecations") {
-      return t("loggingAndAlerts.emailEvents.descriptions.modelDeprecations");
-    }
     // Convert event name to a sentence with more context
     if (event.includes("Virtual Key Created")) {
-      return t("loggingAndAlerts.emailEvents.descriptions.virtualKeyCreated");
+      return "An email will be sent to the user when a new virtual key is created with their user ID";
     } else if (event.includes("New User Invitation")) {
-      return t("loggingAndAlerts.emailEvents.descriptions.newUserInvitation");
+      return "An email will be sent to the email address of the user when a new user is created";
     } else {
       // Handle any other event type from the API
       const words = event
         .split(/(?=[A-Z])/)
         .join(" ")
         .toLowerCase();
-      return t("loggingAndAlerts.emailEvents.descriptions.generic", { event: words });
+      return `Receive an email notification when ${words}`;
     }
   };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">{t("loggingAndAlerts.emailEvents.title")}</CardTitle>
-        <p className="text-sm text-muted-foreground">{t("loggingAndAlerts.emailEvents.description")}</p>
+        <CardTitle className="text-base">Email Notifications</CardTitle>
+        <p className="text-sm text-muted-foreground">Select which events should trigger email notifications.</p>
       </CardHeader>
 
       <CardContent>
@@ -111,10 +106,9 @@ const EmailEventSettings: React.FC<EmailEventSettingsProps> = ({ accessToken }) 
           <div className="space-y-4">
             {eventSettings.map((setting) => (
               <div key={setting.event} className="flex items-start">
-                <Switch
+                <Checkbox
                   checked={setting.enabled}
-                  onCheckedChange={(checked) => handleEnabledChange(setting.event, checked)}
-                  aria-label={setting.event}
+                  onCheckedChange={(checked) => handleCheckboxChange(setting.event, checked === true)}
                   className="mt-1"
                 />
                 <div className="ml-3">
@@ -128,10 +122,10 @@ const EmailEventSettings: React.FC<EmailEventSettingsProps> = ({ accessToken }) 
 
         <div className="mt-6 flex gap-4">
           <Button onClick={handleSaveSettings} disabled={loading}>
-            {t("loggingAndAlerts.emailEvents.saveChanges")}
+            Save Changes
           </Button>
           <Button variant="secondary" onClick={handleResetSettings} disabled={loading}>
-            {t("loggingAndAlerts.emailEvents.resetToDefaults")}
+            Reset to Defaults
           </Button>
         </div>
       </CardContent>

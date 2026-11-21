@@ -5,7 +5,6 @@ export interface PerSecondCostTier {
 
 export interface ModelInfo {
   id: string;
-  logo_url?: string | null;
   created_at: string;
   updated_at: string;
   created_by: string;

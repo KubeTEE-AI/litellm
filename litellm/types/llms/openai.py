@@ -1,10 +1,9 @@
 import builtins
-import math
-from collections.abc import ItemsView, Iterable, Mapping, Sequence
+from collections.abc import ItemsView, Iterable, Mapping
 from enum import Enum
 from os import PathLike
 from types import MappingProxyType
-from typing import IO, TYPE_CHECKING, Any, Final, Generic, Literal, Optional, TypeAlias, Union
+from typing import IO, Any, Final, Generic, Literal, Optional, TypeAlias, Union
 
 import httpx
 from openai import Omit
@@ -30,6 +29,9 @@ from openai.types.beta.threads.message_content import MessageContent
 from openai.types.beta.threads.run import Run
 from openai.types.chat import ChatCompletionChunk
 from openai.types.chat.chat_completion_audio_param import ChatCompletionAudioParam
+from openai.types.chat.chat_completion_content_part_input_audio_param import (
+    ChatCompletionContentPartInputAudioParam,
+)
 from openai.types.chat.chat_completion_modality import ChatCompletionModality
 from openai.types.chat.chat_completion_prediction_content_param import (
     ChatCompletionPredictionContentParam,
@@ -54,7 +56,6 @@ except (ImportError, AttributeError):
 
 from typing import Annotated
 
-from openai.types.responses.response_compaction_item import ResponseCompactionItem
 from openai.types.responses.response_create_params import (
     Reasoning,
     ResponseIncludable,
@@ -68,10 +69,8 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
-    FieldSerializationInfo,
     NonNegativeInt,
     PrivateAttr,
-    SerializeAsAny,
     SerializerFunctionWrapHandler,
     field_serializer,
     field_validator,
@@ -86,7 +85,6 @@ from typing_extensions import (
     override,
 )
 
-from litellm._logging import verbose_logger
 from litellm.types.llms.base import BaseLiteLLMOpenAIResponseObject, LiteLLMBaseModel
 from litellm.types.responses.main import (
     CustomToolCallOutputItem,
@@ -98,9 +96,6 @@ from litellm.types.responses.main import (
 )
 
 from .base import CachedTokensDetails
-
-if TYPE_CHECKING:
-    from litellm.types.utils import Usage
 
 FileContent = IO[bytes] | bytes | PathLike
 
@@ -125,7 +120,6 @@ class BinaryResponseSummary(TypedDict):
     object: ReadOnly[Literal["binary"]]
     content_type: ReadOnly[str | None]
     num_bytes: ReadOnly[int]
-    usage: NotRequired[ReadOnly[Mapping[str, builtins.object]]]
 
 
 _ResponseT = TypeVar("_ResponseT", bound=httpx.Response | SDKResponse, default=httpx.Response)
@@ -133,7 +127,6 @@ _ResponseT = TypeVar("_ResponseT", bound=httpx.Response | SDKResponse, default=h
 
 class HttpxBinaryResponseContent(_HttpxBinaryResponseContent, Generic[_ResponseT]):
     _hidden_params: dict
-    usage: "Usage | None"
     response: _ResponseT  # pyright: ignore[reportIncompatibleVariableOverride]  # SDK accepts both backends at runtime
 
     @property
@@ -147,7 +140,6 @@ class HttpxBinaryResponseContent(_HttpxBinaryResponseContent, Generic[_ResponseT
     def __init__(self, response: _ResponseT) -> None:
         super().__init__(response)  # pyright: ignore[reportArgumentType]  # SDK accepts both backends at runtime
         self._hidden_params = {}
-        self.usage = None
 
     @property
     def content_type(self) -> str | None:
@@ -155,12 +147,11 @@ class HttpxBinaryResponseContent(_HttpxBinaryResponseContent, Generic[_ResponseT
         return headers.get("content-type")
 
     def logging_summary(self) -> BinaryResponseSummary:
-        summary: Final[BinaryResponseSummary] = {
+        return {
             "object": "binary",
             "content_type": self.content_type,
             "num_bytes": self._num_bytes(),
         }
-        return summary if self.usage is None else {**summary, "usage": self.usage.model_dump()}
 
     def _num_bytes(self) -> int:
         try:
@@ -404,7 +395,7 @@ class OpenAIFileObject(LiteLLMBaseModel):
     filename: str
     """The name of the file."""
 
-    object: Literal["file"] = "file"
+    object: Literal["file"]
     """The object type, which is always `file`."""
 
     purpose: OpenAIFilesPurpose
@@ -441,11 +432,6 @@ class OpenAIFileObject(LiteLLMBaseModel):
     """Set by the LiteLLM proxy on a saved batch output file entry built without provider metadata; stripped from API responses."""
 
     _hidden_params: dict = PrivateAttr(default={"response_cost": 0.0})  # no cost for writing a file
-
-    @field_validator("object", mode="before")
-    @classmethod
-    def _default_missing_object_type(cls, value: _JsonValue) -> _JsonValue:
-        return "file" if value is None else value
 
     @property
     def hidden_params(self) -> dict[str, builtins.object]:  # mutable-ok: API requires mutation
@@ -690,22 +676,12 @@ class ChatCompletionCachedContent(TypedDict):
 
 class PromptCacheBreakpoint(TypedDict):
     mode: ReadOnly[Literal["explicit"]]
-    ttl: NotRequired[ReadOnly[Literal["30m", "12h"]]]
-
-
-class ChatCompletionPromptCacheBreakpoint(TypedDict):
-    mode: ReadOnly[Literal["explicit"]]
-
-
-class AzureResponsesPromptCacheBreakpoint(TypedDict):
-    mode: ReadOnly[Literal["explicit"]]
     ttl: NotRequired[ReadOnly[Literal["30m"]]]
 
 
 class PromptCacheOptions(TypedDict, total=False):
     mode: ReadOnly[Literal["implicit", "explicit"]]
-    ttl: ReadOnly[Literal["30m", "12h"]]
-    comparison_response_id: ReadOnly[str]
+    ttl: ReadOnly[Literal["30m"]]
 
 
 class ChatCompletionThinkingBlock(TypedDict, total=False):
@@ -821,7 +797,6 @@ class ChatCompletionImageUrlObject(TypedDict, total=False):
     url: Required[str]
     detail: str
     format: str
-    video_metadata: ReadOnly[Mapping[str, object]]
 
 
 class ChatCompletionImageObject(TypedDict):
@@ -839,15 +814,8 @@ class ChatCompletionVideoObject(TypedDict):
     video_url: str | ChatCompletionVideoUrlObject
 
 
-class ChatCompletionInputAudio(TypedDict):
-    data: ReadOnly[str]
-    format: ReadOnly[str]
-
-
-class ChatCompletionAudioObject(TypedDict):
-    type: ReadOnly[Literal["input_audio"]]
-    input_audio: ReadOnly[ChatCompletionInputAudio]
-    cache_control: NotRequired[ChatCompletionCachedContent]  # writable-ok: [LIT012] cache hook mutates blocks
+class ChatCompletionAudioObject(ChatCompletionContentPartInputAudioParam):
+    pass
 
 
 class DocumentObject(TypedDict):
@@ -920,8 +888,6 @@ class OpenAIChatCompletionAssistantMessage(TypedDict, total=False):
             | ChatCompletionThinkingBlock
             | ChatCompletionRedactedThinkingBlock
             | ChatCompletionImageObject
-            | ChatCompletionAudioObject
-            | ChatCompletionFileObject
         ]
         | None
     )
@@ -945,11 +911,7 @@ class ChatCompletionToolReferenceObject(TypedDict):
 
 
 ToolMessageContentPart: TypeAlias = (
-    ChatCompletionTextObject
-    | ChatCompletionImageObject
-    | ChatCompletionAudioObject
-    | ChatCompletionFileObject
-    | ChatCompletionToolReferenceObject
+    ChatCompletionTextObject | ChatCompletionImageObject | ChatCompletionToolReferenceObject
 )
 
 
@@ -957,7 +919,6 @@ class ChatCompletionToolMessage(TypedDict):
     role: Literal["tool"]
     content: str | Iterable[ToolMessageContentPart]  # writable-ok: Pydantic warns on ReadOnly TypedDict fields
     tool_call_id: str
-    is_error: NotRequired[bool]  # writable-ok: Pydantic warns on ReadOnly TypedDict fields
 
 
 class ChatCompletionFunctionMessage(TypedDict):
@@ -1248,12 +1209,9 @@ AllEmbeddingInputValues = str | list[str] | list[int] | list[list[int]]
 
 OpenAIAudioTranscriptionOptionalParams = Literal[
     "language",
-    "languages",
-    "keywords",
     "prompt",
     "temperature",
     "response_format",
-    "stream",
     "timestamp_granularities",
     "include",
 ]
@@ -1366,10 +1324,6 @@ class ResponsesAPIStreamOptions(TypedDict, total=False):
     include_obfuscation: bool
 
 
-class ResponsesAPIModeration(TypedDict, total=False):
-    model: Required[ReadOnly[str]]
-
-
 class ResponsesAPIOptionalRequestParams(TypedDict, total=False):
     """TypedDict for Optional parameters supported by the responses API."""
 
@@ -1397,7 +1351,6 @@ class ResponsesAPIOptionalRequestParams(TypedDict, total=False):
     prompt_cache_key: str | None
     prompt_cache_retention: str | None
     prompt_cache_options: ReadOnly[PromptCacheOptions | None]
-    moderation: ReadOnly[ResponsesAPIModeration | None]
     stream_options: ResponsesAPIStreamOptions | None
     top_logprobs: int | None
     partial_images: int | None  # Number of partial images to generate (1-3) for streaming image generation
@@ -1422,23 +1375,10 @@ class OutputTokensDetails(BaseLiteLLMOpenAIResponseObject):
     model_config = {"extra": "allow"}
 
 
-class CacheWriteTokensDetails(BaseLiteLLMOpenAIResponseObject):
-    ttl_30m_tokens: int
-    ttl_12h_tokens: int
-
-    model_config = ConfigDict(extra="allow", frozen=True)
-
-
-def _is_none(value: object) -> bool:
-    return value is None
-
-
 class InputTokensDetails(BaseLiteLLMOpenAIResponseObject):
     audio_tokens: int | None = None
     cached_tokens: int = 0
     cached_tokens_details: CachedTokensDetails | None = None
-    cache_write_tokens: int | None = Field(default=None, exclude_if=_is_none)
-    cache_write_tokens_details: CacheWriteTokensDetails | None = Field(default=None, exclude_if=_is_none)
     image_tokens: int | None = None
     text_tokens: int | None = None
     video_tokens: int | None = None
@@ -1469,11 +1409,9 @@ class ResponseAPIUsage(BaseLiteLLMOpenAIResponseObject):
     @classmethod
     def parse_cost(cls, v: object) -> object:
         """Normalise cost: accept either a float or a dict with a ``total_cost`` key."""
-        cost: Final = v.get("total_cost") if isinstance(v, dict) else v
-        if isinstance(cost, float) and not math.isfinite(cost):
-            verbose_logger.warning("Dropping a non-finite provider usage cost")
-            return None
-        return cost
+        if isinstance(v, dict):
+            return v.get("total_cost")
+        return v
 
     model_config = ConfigDict(extra="allow")
 
@@ -1513,66 +1451,15 @@ One of: completed, failed, in_progress, cancelled, queued, or incomplete.
 """
 
 
-_NULL_DROPPED_REASONING_ITEM_KEYS: Final = frozenset(("status", "content", "encrypted_content"))
-
-
-def _as_json_object(value: object) -> Mapping[str, object] | None:
-    return value if isinstance(value, dict) else None
-
-
-def _as_json_array(value: object) -> Sequence[object] | None:
-    return value if isinstance(value, list) else None
-
-
-def _drops_created_by(value: object, *, drops_set_created_by: bool) -> bool:
-    return value is None or drops_set_created_by
-
-
-def _drops(item_type: object, key: object, value: object, *, drops_set_created_by: bool) -> bool:
-    if key == "created_by":
-        return _drops_created_by(value, drops_set_created_by=drops_set_created_by)
-    return value is None and item_type == "reasoning" and key in _NULL_DROPPED_REASONING_ITEM_KEYS
-
-
-def _without_created_by(entry: object, *, drops_set_created_by: bool) -> object:
-    entry_object: Final = _as_json_object(entry)
-    if entry_object is None:
-        return entry
-    return {
-        k: v
-        for k, v in entry_object.items()
-        if k != "created_by" or not _drops_created_by(v, drops_set_created_by=drops_set_created_by)
-    }
-
-
-def _replayable_output_value(item_type: object, key: object, value: object, *, drops_set_created_by: bool) -> object:
-    entries: Final = _as_json_array(value)
-    if item_type != "shell_call_output" or key != "output" or entries is None:
-        return value
-    return [_without_created_by(entry, drops_set_created_by=drops_set_created_by) for entry in entries]
-
-
-def replayable_responses_item(
-    item: Mapping[str, object], *, drops_set_created_by: bool = False
-) -> Mapping[str, object]:
-    item_type: Final = item.get("type")
-    return {
-        k: _replayable_output_value(item_type, k, v, drops_set_created_by=drops_set_created_by)
-        for k, v in item.items()
-        if not _drops(item_type, k, v, drops_set_created_by=drops_set_created_by)
-    }
-
-
-def replayable_responses_input(value: object, *, drops_set_created_by: bool = False) -> object:
-    items: Final = _as_json_array(value)
-    if items is None:
-        return value
-    return [
-        replayable_responses_item(obj, drops_set_created_by=drops_set_created_by)
-        if (obj := _as_json_object(item)) is not None
-        else item
-        for item in items
-    ]
+_NULL_DROPPED_OUTPUT_ITEM_KEYS: Final = frozenset(
+    (
+        ("reasoning", "status"),
+        ("reasoning", "content"),
+        ("reasoning", "encrypted_content"),
+        ("tool_search_call", "created_by"),
+        ("tool_search_output", "created_by"),
+    )
+)
 
 
 class ResponsesAPIResponse(BaseLiteLLMOpenAIResponseObject):
@@ -1595,7 +1482,6 @@ class ResponsesAPIResponse(BaseLiteLLMOpenAIResponseObject):
             | ResponseFunctionWebSearch
             | CustomToolCallOutputItem
             | OutputToolSearchCall
-            | ResponseCompactionItem
         ]
     )
     parallel_tool_calls: bool | None = None
@@ -1625,7 +1511,7 @@ class ResponsesAPIResponse(BaseLiteLLMOpenAIResponseObject):
 
     @field_validator("reasoning", mode="before")
     @classmethod
-    def validate_reasoning_to_dict(cls, value: Any) -> builtins.object:
+    def validate_reasoning_to_dict(cls, value: Any) -> dict[str, Any] | None:
         """Accept API reasoning dict (including effort 'none'/'xhigh'); always store as dict."""
         if value is None:
             return None
@@ -1647,16 +1533,34 @@ class ResponsesAPIResponse(BaseLiteLLMOpenAIResponseObject):
 
     @field_serializer("output", mode="wrap")
     @classmethod
-    def _serialize_output_as_replayable(
-        cls, value: builtins.object, handler: SerializerFunctionWrapHandler, _info: FieldSerializationInfo
-    ):
+    def _serialize_output_filter_reasoning_nulls(cls, value, handler, _info):
         """
-        Drop the nulls the SDK types default in but providers never send: created_by on every output item
-        (OpenAI rejects it when `output` is replayed as `input`), and status/content/encrypted_content on
-        reasoning items (the OpenAI C# SDK crashes on status=null, issue #16824).
+        Filter null status/content/encrypted_content from reasoning output items.
+
+        Mirrors the request-side filtering in
+        OpenAIResponsesAPIConfig._handle_reasoning_item() which filters these
+        same fields before sending requests to providers.
+
+        Without this, reasoning items include null fields that cause SDK errors
+        (e.g., the OpenAI C# SDK crashes on status=null).
+
+        Issue: https://github.com/BerriAI/litellm/issues/16824
         """
-        serialized: Final[object] = handler(value)
-        return replayable_responses_input(serialized)
+        serialized: Final = handler(value)
+        if not isinstance(serialized, list):
+            return serialized
+        return [
+            (
+                {
+                    k: v
+                    for k, v in item.items()
+                    if v is not None or (item.get("type"), k) not in _NULL_DROPPED_OUTPUT_ITEM_KEYS
+                }
+                if isinstance(item, dict)
+                else item
+            )
+            for item in serialized
+        ]
 
     @property
     def output_text(self) -> str:
@@ -1894,14 +1798,14 @@ class ContentPartAddedEvent(BaseResponsesStreamEvent):
     item_id: str
     output_index: int
     content_index: int
-    part: SerializeAsAny[BaseLiteLLMOpenAIResponseObject]
+    part: BaseLiteLLMOpenAIResponseObject
 
 
 class ContentPartDonePartOutputText(BaseLiteLLMOpenAIResponseObject):
     type: Literal["output_text"]
     text: str
     annotations: list[BaseLiteLLMOpenAIResponseObject]
-    logprobs: list[OpenAIChatCompletionLogprobsContent] | None = None
+    logprobs: list[OpenAIChatCompletionLogprobsContent] | None
 
 
 class ContentPartDonePartRefusal(BaseLiteLLMOpenAIResponseObject):
@@ -2549,17 +2453,6 @@ class OpenAIRealtimeResponseUsage(TypedDict):
     output_token_details: NotRequired[ReadOnly[OpenAIRealtimeUsageTokenDetails]]
 
 
-class OpenAIRealtimeTranslationDurationUsage(TypedDict):
-    type: ReadOnly[Literal["duration"]]
-    output_seconds: NotRequired[ReadOnly[float]]
-    input_seconds: NotRequired[ReadOnly[float]]
-
-
-class OpenAIRealtimeTranslationClosedEvent(TypedDict):
-    type: ReadOnly[Literal["session.closed"]]
-    usage: ReadOnly[OpenAIRealtimeTranslationDurationUsage]
-
-
 class OpenAIRealtimeEventTypes(Enum):
     SESSION_CREATED = "session.created"
     # Beta delta event names
@@ -2603,7 +2496,6 @@ OpenAIRealtimeEvents = (
     | OpenAIRealtimeInputAudioTranscriptionCompleted
     | OpenAIRealtimeTranscriptionSessionCreated
     | OpenAIRealtimeErrorEvent
-    | OpenAIRealtimeTranslationClosedEvent
 )
 
 OpenAIRealtimeStreamList = list[OpenAIRealtimeEvents]

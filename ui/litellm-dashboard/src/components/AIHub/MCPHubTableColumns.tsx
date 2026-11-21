@@ -2,7 +2,6 @@
 
 import { ColumnDef } from "@tanstack/react-table";
 import { Copy, Info, MoreHorizontal } from "lucide-react";
-import { useTranslation } from "react-i18next";
 
 import { DataTableSortHeader } from "@/components/shared/DataTable";
 import { MCP_REACHABLE_DESCRIPTION } from "@/components/mcp_tools/types";
@@ -16,7 +15,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/cva.config";
-import i18n from "@/i18n/i18n";
 import { copyToClipboard } from "@/utils/dataUtils";
 
 export interface MCPServerData {
@@ -62,11 +60,10 @@ interface MCPHubRowActionsProps {
 }
 
 function MCPHubRowActions({ server, onServerClick }: MCPHubRowActionsProps) {
-  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={t("aiHub.mcpHubColumns.rowActions.openActions")}
+        aria-label="Open MCP server actions"
         data-testid={`mcp-hub-actions-${server.server_id}`}
         className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "text-muted-foreground")}
       >
@@ -75,14 +72,14 @@ function MCPHubRowActions({ server, onServerClick }: MCPHubRowActionsProps) {
       <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuItem data-testid="mcp-hub-action-details" onClick={() => onServerClick(server)}>
           <Info />
-          {t("aiHub.mcpHubColumns.rowActions.viewDetails")}
+          View details
         </DropdownMenuItem>
         <DropdownMenuItem
           data-testid="mcp-hub-action-copy"
-          onClick={() => void copyToClipboard(server.server_name, t("aiHub.mcpHubColumns.rowActions.nameCopied"))}
+          onClick={() => void copyToClipboard(server.server_name, "Server name copied")}
         >
           <Copy />
-          {t("aiHub.mcpHubColumns.rowActions.copyName")}
+          Copy server name
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -97,8 +94,8 @@ export const getMCPHubTableColumns = ({ onServerClick }: MCPHubTableColumnsDeps)
   {
     id: "server_name",
     accessorKey: "server_name",
-    meta: { title: i18n.t("aiHub.mcpHubColumns.serverName") },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.mcpHubColumns.serverName")} />,
+    meta: { title: "Server Name" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Server Name" />,
     size: 200,
     enableSorting: true,
     sortingFn: "alphanumeric",
@@ -109,8 +106,8 @@ export const getMCPHubTableColumns = ({ onServerClick }: MCPHubTableColumnsDeps)
   {
     id: "description",
     accessorKey: "description",
-    meta: { title: i18n.t("aiHub.mcpHubColumns.description"), className: "hidden md:table-cell" },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.mcpHubColumns.description")} />,
+    meta: { title: "Description", className: "hidden md:table-cell" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Description" />,
     size: 240,
     enableSorting: true,
     sortingFn: "alphanumeric",
@@ -123,8 +120,8 @@ export const getMCPHubTableColumns = ({ onServerClick }: MCPHubTableColumnsDeps)
   {
     id: "transport",
     accessorKey: "transport",
-    meta: { title: i18n.t("aiHub.mcpHubColumns.transport"), skeleton: "badge", className: "hidden md:table-cell" },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.mcpHubColumns.transport")} />,
+    meta: { title: "Transport", skeleton: "badge", className: "hidden md:table-cell" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Transport" />,
     size: 110,
     enableSorting: true,
     sortingFn: "alphanumeric",
@@ -137,8 +134,8 @@ export const getMCPHubTableColumns = ({ onServerClick }: MCPHubTableColumnsDeps)
   {
     id: "auth_type",
     accessorKey: "auth_type",
-    meta: { title: i18n.t("aiHub.mcpHubColumns.authType"), skeleton: "badge", className: "hidden md:table-cell" },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.mcpHubColumns.authType")} />,
+    meta: { title: "Auth Type", skeleton: "badge", className: "hidden md:table-cell" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Auth Type" />,
     size: 110,
     enableSorting: true,
     sortingFn: "alphanumeric",
@@ -149,23 +146,23 @@ export const getMCPHubTableColumns = ({ onServerClick }: MCPHubTableColumnsDeps)
   {
     id: "status",
     accessorKey: "status",
-    meta: { title: i18n.t("aiHub.mcpHubColumns.status"), skeleton: "badge" },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.mcpHubColumns.status")} />,
+    meta: { title: "Status", skeleton: "badge" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Status" />,
     size: 110,
     enableSorting: true,
     sortingFn: "alphanumeric",
     cell: ({ row }) => (
       <StatusBadge
         tone={STATUS_TONES[row.original.status] || "neutral"}
-        label={row.original.status || i18n.t("aiHub.mcpHubColumns.statusUnknown")}
-        tooltip={row.original.status === "reachable" ? i18n.t(MCP_REACHABLE_DESCRIPTION) : undefined}
+        label={row.original.status || "unknown"}
+        tooltip={row.original.status === "reachable" ? MCP_REACHABLE_DESCRIPTION : undefined}
       />
     ),
   },
   {
     id: "allowed_tools",
-    meta: { title: i18n.t("aiHub.mcpHubColumns.tools"), skeleton: "chips", className: "hidden lg:table-cell" },
-    header: i18n.t("aiHub.mcpHubColumns.tools"),
+    meta: { title: "Tools", skeleton: "chips", className: "hidden lg:table-cell" },
+    header: "Tools",
     size: 180,
     enableSorting: false,
     cell: ({ row }) => {
@@ -173,9 +170,7 @@ export const getMCPHubTableColumns = ({ onServerClick }: MCPHubTableColumnsDeps)
       return (
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium">
-            {tools.length > 0
-              ? i18n.t("aiHub.mcpHubColumns.toolCount", { count: tools.length })
-              : i18n.t("aiHub.mcpHubColumns.allTools")}
+            {tools.length > 0 ? `${tools.length} tool${tools.length !== 1 ? "s" : ""}` : "All tools"}
           </span>
           {tools.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -194,8 +189,8 @@ export const getMCPHubTableColumns = ({ onServerClick }: MCPHubTableColumnsDeps)
   {
     id: "created_by",
     accessorKey: "created_by",
-    meta: { title: i18n.t("aiHub.mcpHubColumns.createdBy"), className: "hidden xl:table-cell" },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.mcpHubColumns.createdBy")} />,
+    meta: { title: "Created By", className: "hidden xl:table-cell" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Created By" />,
     size: 140,
     enableSorting: true,
     sortingFn: "alphanumeric",
@@ -208,8 +203,8 @@ export const getMCPHubTableColumns = ({ onServerClick }: MCPHubTableColumnsDeps)
   {
     id: "is_public",
     accessorFn: (row) => row.mcp_info?.is_public === true,
-    meta: { title: i18n.t("aiHub.mcpHubColumns.hubListing"), skeleton: "badge", className: "hidden md:table-cell" },
-    header: ({ column }) => <DataTableSortHeader column={column} title={i18n.t("aiHub.mcpHubColumns.hubListing")} />,
+    meta: { title: "Hub listing", skeleton: "badge", className: "hidden md:table-cell" },
+    header: ({ column }) => <DataTableSortHeader column={column} title="Hub listing" />,
     size: 100,
     enableSorting: true,
     sortingFn: (rowA, rowB) => {
@@ -219,18 +214,13 @@ export const getMCPHubTableColumns = ({ onServerClick }: MCPHubTableColumnsDeps)
     },
     cell: ({ row }) => {
       const isPublic = row.original.mcp_info?.is_public === true;
-      return (
-        <StatusBadge
-          tone={isPublic ? "success" : "neutral"}
-          label={isPublic ? i18n.t("aiHub.mcpHubColumns.listed") : i18n.t("aiHub.mcpHubColumns.unlisted")}
-        />
-      );
+      return <StatusBadge tone={isPublic ? "success" : "neutral"} label={isPublic ? "Listed" : "Unlisted"} />;
     },
   },
   {
     id: "actions",
     meta: { className: "text-right", headerClassName: "text-right" },
-    header: () => <span className="sr-only">{i18n.t("aiHub.mcpHubColumns.actions")}</span>,
+    header: () => <span className="sr-only">Actions</span>,
     size: 64,
     enableSorting: false,
     enableHiding: false,

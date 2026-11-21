@@ -2,7 +2,6 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
 
-from litellm.litellm_core_utils.url_utils import join_api_base
 from litellm.llms.bedrock.base_aws_llm import BaseAWSLLM
 from litellm.llms.bedrock.common_utils import MANTLE_MESSAGES_PATH
 from litellm.llms.bedrock.messages.mantle_transformation import AmazonMantleMessagesConfig
@@ -34,7 +33,7 @@ def build_mantle_native_messages_url(api_base: str | None, litellm_params: Mappi
         configured,
     )
     host: Final = f"https://bedrock-mantle.{region}.api.aws" if MANTLE_HOST_RE.match(stripped) else stripped
-    return join_api_base(host, MANTLE_MESSAGES_PATH)
+    return f"{host}{MANTLE_MESSAGES_PATH}"
 
 
 class BedrockMantleAnthropicMessagesConfig(BedrockMantleAuthMixin, AmazonMantleMessagesConfig):

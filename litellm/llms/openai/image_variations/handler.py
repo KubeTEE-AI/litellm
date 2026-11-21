@@ -14,7 +14,7 @@ from litellm.utils import ProviderConfigManager
 
 from ...base_llm.image_variations.transformation import BaseImageVariationConfig
 from ...custom_httpx.llm_http_handler import LiteLLMLoggingObj
-from ..common_utils import OpenAIError, upstream_error_response
+from ..common_utils import OpenAIError
 from ..workload_identity import build_async_openai_client, build_openai_client
 
 
@@ -129,12 +129,7 @@ class OpenAIImageVariationsHandler:
             error_response: Final[object] = getattr(e, "response", None)
             if error_headers is None and error_response:
                 error_headers = getattr(error_response, "headers", None)
-            raise OpenAIError(
-                status_code=status_code,
-                message=error_text,
-                response=upstream_error_response(e),
-                headers=error_headers,
-            )
+            raise OpenAIError(status_code=status_code, message=error_text, headers=error_headers)
 
     def image_variations(
         self,
@@ -156,7 +151,7 @@ class OpenAIImageVariationsHandler:
     ) -> ImageResponse:
         try:
             provider_config: Final = ProviderConfigManager.get_provider_image_variation_config(
-                model=model or "",
+                model=model or "",  # openai defaults to dall-e-2
                 provider=LlmProviders.OPENAI,
             )
 
@@ -250,9 +245,4 @@ class OpenAIImageVariationsHandler:
             error_response: Final[object] = getattr(e, "response", None)
             if error_headers is None and error_response:
                 error_headers = getattr(error_response, "headers", None)
-            raise OpenAIError(
-                status_code=status_code,
-                message=error_text,
-                response=upstream_error_response(e),
-                headers=error_headers,
-            )
+            raise OpenAIError(status_code=status_code, message=error_text, headers=error_headers)

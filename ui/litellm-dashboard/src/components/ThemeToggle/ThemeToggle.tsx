@@ -3,17 +3,13 @@
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import React from "react";
-import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 
-const oppositeTheme = (isDark: boolean) => (isDark ? "light" : "dark");
-
 const ThemeToggle: React.FC = () => {
-  const { t } = useTranslation();
   const { setTheme, resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const label = isDark ? t("themeToggle.switchToLight") : t("themeToggle.switchToDark");
+  const label = isDark ? "Switch to light mode" : "Switch to dark mode";
 
   return (
     <Button
@@ -22,7 +18,7 @@ const ThemeToggle: React.FC = () => {
       aria-label={label}
       title={label}
       className="text-muted-foreground"
-      onClick={() => setTheme(oppositeTheme(isDark))}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
     >
       {isDark ? <Moon /> : <Sun />}
     </Button>
