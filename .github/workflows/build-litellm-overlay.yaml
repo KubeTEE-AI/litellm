@@ -299,15 +299,55 @@ jobs:
           ]))
           '
 
-      - name: Verify upstream base with its published Cosign key
+      - name: Verify upstream base with BerriAI's signed release identity
         env:
           UPSTREAM_IMAGE: ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST}
         run: |
-          curl -fsSL --proto '=https' \
-            https://raw.githubusercontent.com/BerriAI/litellm/e82a3c646908ba0a6ee0beddc4310d7a6cac4065/cosign.pub \
-            -o /tmp/berriai-litellm-cosign.pub
-          cosign verify --key /tmp/berriai-litellm-cosign.pub \
-            ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST}
+          # BerriAI switched to Sigstore keyless signing on 2026-11-15:
+          # https://github.com/BerriAI/litellm/discussions/48242
+          # The central project-releaser workflow dispatches the scoped LiteLLM
+          # release app. Verify that exact certificate and Rekor bundle against
+          # the immutable v1.110.0 image index, not a platform-only copy.
+          cosign verify \
+            --certificate-identity 'https://github.com/BerriAI/project-releaser/.github/workflows/release.yml@refs/heads/main' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            "${UPSTREAM_IMAGE}"
+          python3 - "${DEFAULT_BASE_TAG}" "${DEFAULT_BASE_DIGEST}" <<'PY'
+          import json, sys, urllib.request
+          repository = 'berriai/litellm-database'
+          with urllib.request.urlopen(f'https://ghcr.io/token?service=ghcr.io&scope=repository:{repository}:pull') as response:
+              token = json.load(response)['token']
+          request = urllib.request.Request(
+              f'https://ghcr.io/v2/{repository}/manifests/{sys.argv[1]}',
+              headers={'Authorization': f'Bearer {token}',
+                       'Accept': 'application/vnd.oci.image.index.v1+json'},
+              method='HEAD')
+          with urllib.request.urlopen(request) as response:
+              actual = response.headers['Docker-Content-Digest']
+          assert actual == sys.argv[2], (actual, sys.argv[2])
+          print(f'Release tag points to the signed multi-architecture index: {actual}')
+          PY
+          cosign verify \
+            --certificate-identity 'https://github.com/BerriAI/project-releaser/.github/workflows/release.yml@refs/heads/main' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            "${UPSTREAM_IMAGE}" \
+            | tee /tmp/kubetee-upstream-release-verification.json
+          python3 - <<'PY'
+          import json
+          with open('/tmp/kubetee-upstream-release-verification.json') as f:
+              proof = json.load(f)
+          expected = {
+              'docker-manifest-digest': 'sha256:f52042e5144a4bb452c8d5232aa894117e1500164e3c6d4dfa088d79eefaa632',
+              'docker-reference': 'ghcr.io/berriai/litellm-database',
+          }
+          for signature in proof:
+              image = signature['critical']['image']
+              assert image == expected, image
+              assert signature['critical']['identity']['docker-reference'] == expected['docker-reference']
+              assert signature['optional']['githubWorkflowSha'] == '8218089882391cfabe306b8ee3a97b3211d848b6'
+              assert signature['optional']['githubWorkflowRepository'] == 'BerriAI/project-releaser'
+          print('Verified exact v1.110.0 index and upstream release workflow identity.')
+          PY
 
       - name: Verify native aiohttp transport compatibility
         run: |
