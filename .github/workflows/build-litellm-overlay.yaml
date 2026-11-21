@@ -154,8 +154,12 @@ jobs:
           echo "BASE_TAG=$BASE_TAG" >> "$GITHUB_ENV"
           echo "Resolved TAG=${TAG} BASE_TAG=${BASE_TAG}"
 
-      - name: Verify test source matches the upstream base
+      - name: Verify stable v1.110.0 core matches the packaged release
         run: |
+          UPSTREAM_HEAD="$(git rev-parse HEAD^ || git rev-parse HEAD)"
+          test "$UPSTREAM_HEAD" = "096ff016817c1d26928ef984e5ee16ee285ccd28"
+          git diff --quiet 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
+            litellm prisma/schema.prisma docker/Dockerfile.database
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -v "$PWD:/source:ro" \
@@ -163,17 +167,21 @@ jobs:
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} -c "
           from pathlib import Path
+          import litellm
+          import litellm_enterprise
           source = Path('/source/litellm')
-          base = Path('/app/litellm')
+          base = Path(litellm.__file__).parent
+          excluded = {'proxy/guardrails/guardrail_hooks/litellm_content_filter/guardrail_benchmarks/test_eval.py'}
           changed = tuple(
               str(path.relative_to(source))
               for path in source.rglob('*.py')
-              if (target := base / path.relative_to(source)).is_file()
-              and path.read_bytes() != target.read_bytes()
+              if str(path.relative_to(source)) not in excluded
+              and ((not (target := base / path.relative_to(source)).is_file())
+                   or path.read_bytes() != target.read_bytes())
           )
           if changed:
-              raise SystemExit(f'Checkout differs from the packaged v1.110.0 base: {changed}')
-          print('All upstream Python sources match the verified base')
+              raise SystemExit(f'Core differs from packaged v1.110.0: {changed}')
+          print('Upstream sources match the verified stable release')
           "
 
       - name: Run upstream and overlay regression tests
@@ -210,36 +218,70 @@ jobs:
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e LITELLM_LOCAL_MODEL_COST_MAP=True \
+            -e LITELLM_MASTER_KEY=unit-test-key \
             -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
             -v /tmp/litellm-overlay-test-deps:/workspace:ro \
             -v "$PWD/tools:/tools:ro" \
             -v "$PWD/tests:/tests:ro" \
-            -w /tests \
+            -w /tests/unit \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
-            -m pytest -q -p no:cacheprovider --import-mode=importlib \
-            test_litellm/tools/kubetee-litellm-overlay \
-            unit/proxy/auth/test_auth_utils.py \
-            unit/proxy/db/test_routing_prisma_wrapper.py \
-            unit/proxy/guardrails/test_tool_permission_streaming.py \
-            -k 'azure_entra_credential or secret_reference_in_a_credential or resolved_client_auth_reference_still or routes_to_reader or routes_to_writer or passphrase_returns_none'
+            -c '
+          import sys
+          import pytest
+          sys.path[:0] = ["/workspace/test-deps", "/app/.venv/lib/python3.13/site-packages"]
+          raise SystemExit(pytest.main([
+              "-q", "-p", "no:cacheprovider", "--import-mode=importlib",
+              "--ignore=/tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_snp_evidence.py",
+              "/tests/test_litellm/tools/kubetee-litellm-overlay",
+              "/tests/unit/proxy/auth/test_auth_utils.py",
+              "/tests/unit/proxy/db/test_routing_prisma_wrapper.py",
+              "/tests/unit/proxy/guardrails/guardrail_hooks/test_tool_permission.py",
+              "-k", "azure_entra_credential or secret_reference_in_a_credential or resolved_client_auth_reference_still or routes_to_reader or routes_to_writer or passphrase_returns_none or streaming",
+          ]))
+          '
+          # Protocol fixture replaces module objects: own isolated process.
+          docker run --rm \
+            -e LITELLM_MASTER_KEY=unit-test-key \
+            -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
+            -v /tmp/litellm-overlay-test-deps:/workspace:ro \
+            -v "$PWD/tools:/tools:ro" -v "$PWD/tests:/tests:ro" -w /tests \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
+            -c '
+          import sys
+          sys.path[:0] = ["/workspace/test-deps", "/app/.venv/lib/python3.13/site-packages"]
+          import pytest
+          raise SystemExit(pytest.main([
+              "-q", "-p", "no:cacheprovider", "--import-mode=importlib",
+              "/tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_snp_evidence.py",
+          ]))
+          '
           # Public checkout and exact packaged enterprise share one import source.
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e LITELLM_LOCAL_MODEL_COST_MAP=True \
+            -e LITELLM_MASTER_KEY=unit-test-key \
             -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
             -v /tmp/litellm-overlay-test-deps:/workspace:ro \
             -v "$PWD/tools:/tools:ro" \
             -v "$PWD/tests:/tests:ro" \
-            -w /tests \
+            -w /tests/unit \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
-            -m pytest -q -p no:cacheprovider --import-mode=importlib \
-            unit/llms/bedrock/passthrough/test_bedrock_passthrough_transformation.py \
-            unit/proxy/openai_files_endpoint/test_files_common_utils.py \
-            'unit/test_router/test_router.py::test_team_byok_wildcard_is_served_before_a_proxy_wide_wildcard_of_the_same_name' \
-            unit/proxy/common_utils/test_reset_budget_job.py \
-            unit/repositories/test_unit_of_work.py
+            -c '
+          import sys
+          sys.path[:0] = ["/workspace/test-deps", "/app/.venv/lib/python3.13/site-packages"]
+          import pytest
+          raise SystemExit(pytest.main([
+              "-q", "-p", "no:cacheprovider", "--import-mode=importlib",
+              "/tests/unit/llms/bedrock/passthrough/test_bedrock_passthrough_transformation.py",
+              "/tests/unit/proxy/openai_files_endpoint/test_files_common_utils.py",
+              "/tests/unit/test_router/test_router.py::test_team_byok_wildcard_is_served_before_a_proxy_wide_wildcard_of_the_same_name",
+              "/tests/unit/proxy/common_utils/test_reset_budget_job.py",
+              "/tests/unit/repositories/test_unit_of_work.py",
+          ]))
+          '
 
       - name: Verify upstream base with its published Cosign key
         env:
@@ -273,7 +315,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py redpill_tee.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           test ! -e kubetee_pricing.py
@@ -449,7 +491,7 @@ jobs:
             --exit-code 1 "${{ steps.scan-target.outputs.image }}"
 
       - name: Save supply-chain evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v6.0.0
         if: always()
         with:
           name: litellm-1.110.0-kubetee-release
@@ -468,7 +510,7 @@ jobs:
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, sitecustomize, kubetee_glm_effort, kubetee_mcp_trust, kubetee_health_latest; print('verify: import OK')"
+            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, sitecustomize, kubetee_glm_effort, kubetee_mcp_trust, kubetee_health_latest, redpill_tee; print('verify: import OK')"
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
             -c "

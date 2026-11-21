@@ -90,6 +90,7 @@ def test_custom_provider_map_base_video_config_serves_create_status_and_content(
         status: Final = owned.gateway.request("GET", f"/v1/videos/{video_id}")
         assert status.status_code == 200, status.text
         assert status.json()["status"] == "completed", status.text
+        assert status.json()["id"] == video_id, status.text
 
         content: Final = owned.gateway.request("GET", f"/v1/videos/{video_id}/content")
         assert content.status_code == 200, content.text

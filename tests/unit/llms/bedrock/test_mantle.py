@@ -7,7 +7,6 @@ association via `aws_bedrock_project_id`.
 """
 
 import json
-from typing import Final
 from unittest.mock import patch
 
 import httpx
@@ -18,7 +17,6 @@ from litellm.llms.bedrock.chat.mantle.transformation import AmazonMantleConfig
 from litellm.llms.bedrock.messages.mantle_transformation import (
     AmazonMantleMessagesConfig,
 )
-from litellm.llms.bedrock_mantle.chat.claude_transformation import BedrockMantleClaudeChatConfig
 
 # AWS names this header for Mantle workspaces on the Anthropic Messages API, checked 2026-10-02:
 # https://docs.aws.amazon.com/bedrock/latest/userguide/workspaces.html
@@ -390,62 +388,6 @@ def test_mantle_messages_validate_environment_without_project_id():
         litellm_params={},
     )
     assert _MANTLE_WORKSPACE_HEADER not in headers
-
-
-_MANTLE_CONFIGS: Final = pytest.mark.parametrize(
-    "config", [AmazonMantleConfig(), BedrockMantleClaudeChatConfig()], ids=["bedrock_mantle_route", "mantle_provider"]
-)
-_MANTLE_MODEL: Final = "anthropic.claude-opus-4-8"
-_CLOSED_RESPONSE_FORMAT: Final = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "out",
-        "schema": {"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]},
-    },
-}
-_OPEN_RESPONSE_FORMAT: Final = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "out",
-        "schema": {"type": "object", "properties": {"counts": {"type": "object", "additionalProperties": True}}},
-    },
-}
-_LOOKUP_TOOL: Final = {
-    "type": "function",
-    "function": {"name": "lookup", "parameters": {"type": "object", "properties": {"id": {"type": "string"}}}},
-}
-
-
-@_MANTLE_CONFIGS
-def test_mantle_opt_in_model_keeps_the_json_tool_when_thinking_is_requested(set_native_structured_output, config):
-    set_native_structured_output(_MANTLE_MODEL, "bedrock")
-
-    result: Final = config.map_openai_params(
-        non_default_params={"response_format": _CLOSED_RESPONSE_FORMAT, "thinking": {"type": "adaptive"}},
-        optional_params={},
-        model=_MANTLE_MODEL,
-        drop_params=False,
-    )
-
-    assert "output_format" not in result
-    assert [tool["name"] for tool in result["tools"]] == ["json_tool_call"]
-
-
-@_MANTLE_CONFIGS
-def test_mantle_model_native_on_every_request_stays_native_beside_the_callers_tools(
-    set_native_structured_output, config
-):
-    set_native_structured_output(_MANTLE_MODEL, "legacy")
-
-    result: Final = config.map_openai_params(
-        non_default_params={"response_format": _OPEN_RESPONSE_FORMAT, "tools": [_LOOKUP_TOOL]},
-        optional_params={},
-        model=_MANTLE_MODEL,
-        drop_params=False,
-    )
-
-    assert "output_format" in result
-    assert [tool["name"] for tool in result["tools"]] == ["lookup"]
 
 
 def test_mantle_completion_sends_workspace_header_and_clean_body():
@@ -854,3 +796,26 @@ async def test_mantle_anthropic_messages_streaming_sends_stream_and_passes_throu
     assert "event: message_start" in text
     assert '"text": "pong"' in text
     assert "event: message_stop" in text
+
+
+@pytest.mark.usefixtures("local_beta_headers_config")
+def test_mantle_messages_drops_compaction_without_its_beta():
+    """
+    The bedrock_mantle beta map has no compact-2026-09-04, so the beta is filtered
+    out on this route. ``compaction`` must go with it, or the body carries a field
+    that Bedrock refuses without the beta.
+    """
+    from litellm.types.router import GenericLiteLLMParams
+
+    config = AmazonMantleMessagesConfig()
+    headers: dict[str, str] = {}
+    request = config.transform_anthropic_messages_request(
+        model="mantle/anthropic.claude-mythos-preview",
+        messages=[{"role": "user", "content": "Hello"}],
+        anthropic_messages_optional_request_params={"max_tokens": 100, "compaction": {"type": "summarize"}},
+        litellm_params=GenericLiteLLMParams(),
+        headers=headers,
+    )
+
+    assert "compaction" not in request
+    assert "compact-2026-09-04" not in headers.get("anthropic-beta", "")

@@ -177,6 +177,59 @@ def apply_redpill_tee_trust() -> bool:
             return config
         guarded_config._redpill_guard = True
         proxy.ProxyConfig.get_config = guarded_config
+
+    # v1.110.0 DB writes: wrap the upstream auth seam and persistence helpers,
+    # never replace the core management endpoint implementation.
+    from litellm.proxy.common_utils.encrypt_decrypt_utils import decrypt_value_helper
+    from litellm.proxy.common_utils.credential_hydration import submitted_litellm_params
+    from litellm.proxy.management_endpoints import model_management_endpoints as management
+    from litellm.proxy.management_endpoints.model_management_endpoints import ModelManagementAuthChecks
+
+    def decrypt(value: Any, key: str) -> Any:
+        return decrypt_value_helper(value=value, key=key, exception_type="proxy", return_original_value=True) if isinstance(value, str) else value
+
+    original_write_check = ModelManagementAuthChecks.can_user_make_model_call
+    if not getattr(original_write_check, "_redpill_guard", False):
+        async def checked_write(model_params: Any, *args: Any, incoming_params: Any = None, **kwargs: Any) -> Any:
+            patch = submitted_litellm_params(incoming_params) if hasattr(incoming_params, "model_dump") else dict(incoming_params or {})
+            stored = dict(effective_params(model_params.litellm_params))
+            info = dict(effective_params(model_params.model_info))
+            patch_row = kwargs.get("incoming_model_params")
+            patch_info = dict(effective_params(getattr(patch_row, "model_info", None)))
+            for field in ("access_groups", "allow_fail_open", "upstream_tracking"):
+                value = getattr(model_params.litellm_params, field, None)
+                if value is not None:
+                    info[field] = value
+            if "model" in patch:
+                patch["model"] = decrypt(patch["model"], "model")
+            stored["model"] = decrypt(stored.get("model"), "model")
+            validate_redpill_deployment({**stored, **patch, "model_info": {**info, **patch_info}})
+            return await original_write_check(model_params, *args, incoming_params=patch, **kwargs)
+        checked_write._redpill_guard = True
+        ModelManagementAuthChecks.can_user_make_model_call = checked_write
+
+    original_add = management.add_model_to_db
+    if not getattr(original_add, "_redpill_guard", False):
+        async def checked_add(model_params: Any, *args: Any, **kwargs: Any) -> Any:
+            validate_redpill_deployment(model_params.litellm_params, model_params.model_info)
+            return await original_add(model_params, *args, **kwargs)
+        checked_add._redpill_guard = True
+        management.add_model_to_db = checked_add
+
+    original_update = management.update_db_model
+    if not getattr(original_update, "_redpill_guard", False):
+        def checked_update(db_model: Any, updated_patch: Any, *args: Any, **kwargs: Any) -> Any:
+            stored = {key: decrypt(value, key) for key, value in effective_params(db_model.litellm_params).items()}
+            patch = {key: decrypt(value, key) for key, value in effective_params(updated_patch.litellm_params).items()}
+            info = {**effective_params(db_model.model_info), **effective_params(updated_patch.model_info)}
+            validate_redpill_deployment({**stored, **patch}, info)
+            if updated_patch.litellm_params is not None:
+                for key, value in updated_patch.litellm_params.model_dump(exclude_unset=True).items():
+                    if isinstance(value, str) and (plain := decrypt_value_helper(value=value, key=key)) is not None:
+                        setattr(updated_patch.litellm_params, key, plain)
+            return original_update(db_model, updated_patch, *args, **kwargs)
+        checked_update._redpill_guard = True
+        management.update_db_model = checked_update
     return True
 
 

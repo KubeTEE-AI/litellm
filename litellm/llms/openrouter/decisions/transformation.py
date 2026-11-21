@@ -1,4 +1,6 @@
-from litellm.llms.base_llm.decisions.transformation import BaseDecisionsConfig, usage_reported_cost
+from typing import Final
+
+from litellm.llms.base_llm.decisions.transformation import BaseDecisionsConfig
 from litellm.types.decisions import DecisionsIRResponse
 
 
@@ -11,4 +13,7 @@ class OpenRouterDecisionsConfig(BaseDecisionsConfig):
         return "https://openrouter.ai/api"
 
     def provider_reported_cost(self, response: DecisionsIRResponse) -> float | None:
-        return usage_reported_cost(response)
+        cost: Final = response.usage.extra.get("cost") if response.usage is not None else None
+        if not isinstance(cost, (int, float)):
+            return None
+        return float(cost)

@@ -23,6 +23,8 @@ from integration._support.process import OwnedProxy, graceful_stop_seconds, owne
 from integration._support.wire import Reply, Request, Wire, wire_server
 from pydantic import JsonValue, TypeAdapter
 
+pytestmark: Final = pytest.mark.shares_worker_state
+
 MARKER: Final = re.compile(rb"traceresp-[0-9a-f]{32}")
 TRACERESPONSE: Final = re.compile(r"00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})")
 SAMPLED: Final = 0x01
@@ -547,7 +549,7 @@ def _error_invalid_body(rig: Rig) -> httpx.Response:
     return rig.post("/key/generate", {"models": "not-a-list"})
 
 
-def _error_unhandled(rig: Rig) -> httpx.Response:
+def _error_non_object_body(rig: Rig) -> httpx.Response:
     return rig.proxy.client.post(
         "/v1/chat/completions",
         content=b"[1]",
@@ -560,7 +562,7 @@ ERRORS: Final[Mapping[str, tuple[int, Callable[[Rig], httpx.Response]]]] = Mappi
         "bad_key": (401, _error_bad_key),
         "unknown_model": (400, _error_unknown_model),
         "invalid_body": (422, _error_invalid_body),
-        "unhandled": (500, _error_unhandled),
+        "non_object_body": (400, _error_non_object_body),
     }
 )
 

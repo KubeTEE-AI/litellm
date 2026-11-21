@@ -23,6 +23,9 @@ OVERLAY = Path(__file__).resolve().parents[4] / "tools" / "kubetee-litellm-overl
 FIXTURE = Path(__file__).with_name("fixtures") / "kubetee" / "snp-evidence.json"
 ROUTES = {}
 
+# This protocol fixture replaces LiteLLM modules; it must run in isolation.
+pytestmark = pytest.mark.kubetee_isolated_protocol_fixture
+
 
 def load():
     for name in ("kubetee_binding", "kubetee_ear"):

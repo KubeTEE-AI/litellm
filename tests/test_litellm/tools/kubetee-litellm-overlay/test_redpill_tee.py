@@ -193,8 +193,9 @@ def test_get_params_without_model_info_preserves_an_untouched_router_result():
     assert result["model_info"] is None
 
 
-def test_router_upsert_rejects_non_tee_row_before_replacing_live_row():
+def test_router_upsert_rejects_non_tee_row_before_replacing_live_row(monkeypatch):
     from litellm.router import Router
+    monkeypatch.setenv("REDPILL_API_KEY", "resolved-secret")
     redpill_tee.apply_redpill_tee_trust()
     router = Router(model_list=[])
     router.upsert_deployment(redpill_deployment())
@@ -281,6 +282,7 @@ def test_second_put_accepts_decrypted_pointer_from_stored_row(encrypt):
 @pytest.mark.asyncio
 async def test_router_qwen_request_uses_public_name_and_web_pki(monkeypatch):
     import httpx
+    monkeypatch.setenv("REDPILL_API_KEY", "resolved-secret")
 
     from litellm.router import Router
     redpill_tee.apply_redpill_tee_trust()
@@ -334,7 +336,9 @@ async def test_router_preserves_native_qwen_streaming(monkeypatch):
         assert "SSLKEYLOGFILE" not in request.headers
         return httpx.Response(200, text=(
             'data: {"id":"s","object":"chat.completion.chunk","created":1,'
-            '"model":"qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"role":"assistant","content":"TEE"}}]}\n\ndata: [DONE]\n\n'
+            '"model":"qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"role":"assistant","content":"TEE"}}]}\n\n'
+            'data: {"id":"s","object":"chat.completion.chunk","created":1,'
+            '"model":"qwen/qwen3.8-27b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
         ))
 
     original_build = redpill_tee.build_redpill_tee_client

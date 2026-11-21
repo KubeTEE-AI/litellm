@@ -1,6 +1,9 @@
+import os
+import sys
 from unittest.mock import MagicMock, patch
 
 from openai._legacy_response import LegacyAPIResponse
+from pydantic import BaseModel
 
 from litellm.llms.volcengine.chat.transformation import (
     VolcEngineChatConfig as VolcEngineConfig,

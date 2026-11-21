@@ -1,4 +1,3 @@
-from collections.abc import Mapping
 from typing import Final, cast
 
 from httpx import Headers, Response
@@ -23,8 +22,7 @@ from litellm.types.utils import (
 from litellm.utils import count_characters, is_base64_encoded
 
 from ...base_llm.embedding.transformation import BaseEmbeddingConfig
-from ..common_utils import VertexAIError, pop_vertex_request_labels
-from ..request_labels import vertex_request_label_fields
+from ..common_utils import VertexAIError
 
 
 class VertexAIMultimodalEmbeddingConfig(BaseEmbeddingConfig):
@@ -171,14 +169,8 @@ class VertexAIMultimodalEmbeddingConfig(BaseEmbeddingConfig):
         input: AllEmbeddingInputValues,
         optional_params: dict,
         headers: dict,
-        litellm_params: Mapping[str, object] | None = None,
-    ) -> dict[str, object]:
+    ) -> dict:
         optional_params = optional_params or {}
-        labels: Final = (
-            pop_vertex_request_labels(optional_params, dict(litellm_params or {}))
-            if vertex_request_label_fields()
-            else None
-        )
 
         request_data: Final = VertexMultimodalEmbeddingRequest(instances=[])
 
@@ -200,7 +192,7 @@ class VertexAIMultimodalEmbeddingConfig(BaseEmbeddingConfig):
         if "outputDimensionality" in optional_params:
             request_data["parameters"] = {"dimension": optional_params["outputDimensionality"]}
 
-        return {**request_data, "labels": labels} if labels else {**request_data}
+        return cast(dict, request_data)
 
     def transform_embedding_response(
         self,
@@ -216,7 +208,7 @@ class VertexAIMultimodalEmbeddingConfig(BaseEmbeddingConfig):
         if raw_response.status_code != 200:
             raise Exception(f"Error: {raw_response.status_code} {raw_response.text}")
 
-        _json_response: Final = raw_response.json()
+        _json_response: Final[MultimodalPredictions] = raw_response.json()
         if "predictions" not in _json_response:
             raise InternalServerError(
                 message=f"embedding response does not contain 'predictions', got {_json_response}",

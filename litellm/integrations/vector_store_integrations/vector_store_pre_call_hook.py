@@ -35,7 +35,6 @@ from litellm.types.vector_stores import (
     VectorStoreSearchResponse,
     VectorStoreSearchResult,
 )
-from litellm.vector_stores.search_query import store_search_params
 
 if TYPE_CHECKING:
     from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
@@ -328,7 +327,7 @@ class VectorStorePreCallHook(CustomLogger):
                     "query": query,
                     "custom_llm_provider": custom_llm_provider,
                     "metadata": request_metadata,
-                    **store_search_params(litellm_params_for_vector_store),
+                    **litellm_params_for_vector_store,
                 },
             )
         except Exception as search_error:

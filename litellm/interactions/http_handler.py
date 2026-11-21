@@ -161,9 +161,8 @@ class InteractionsHTTPHandler(_BaseHTTPHandler):
             headers=headers,
         )
 
-        request_fields: Final = interactions_api_config.transform_top_level_request_fields(extra_body, litellm_params)
-        if request_fields:
-            data.update(request_fields)
+        if extra_body:
+            data.update(extra_body)
 
         # Logging
         logging_obj.pre_call(
@@ -257,9 +256,8 @@ class InteractionsHTTPHandler(_BaseHTTPHandler):
             headers=headers,
         )
 
-        request_fields: Final = interactions_api_config.transform_top_level_request_fields(extra_body, litellm_params)
-        if request_fields:
-            data.update(request_fields)
+        if extra_body:
+            data.update(extra_body)
 
         # Logging
         logging_obj.pre_call(
