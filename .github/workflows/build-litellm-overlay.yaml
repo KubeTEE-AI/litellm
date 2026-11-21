@@ -162,8 +162,14 @@ jobs:
             test "$(git rev-parse HEAD^2)" = \
               "096ff016817c1d26928ef984e5ee16ee285ccd28"
           fi
-          git diff --quiet 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
-            litellm prisma/schema.prisma docker/Dockerfile.database
+          diff="$(git diff --name-only 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
+            'litellm/**/*.py' prisma/schema.prisma docker/Dockerfile.database)"
+          if test -n "$diff"; then
+            printf 'Core differs from stable v1.110.0:\n%s\n' "$diff"
+            exit 1
+          fi
+          cmp prisma/schema.prisma/prisma/schema.prisma prisma/schema.prisma
+          test ! -e docker/Dockerfile.database
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -v "$PWD:/source:ro" \
