@@ -15,8 +15,9 @@ collides with the v1 statement binding carried by the per-request quote.
 So ``appraisal.ear_token`` is minted **once per boot** over that RCAR
 binding and serves purely as the platform appraisal:
 
-- it appraises THIS TD's MRTD/RTMR0-3/MRCONFIGID and its initdata
+- it appraises this guest's launch measurement and initdata
   (``role`` + ``agent_policy_claims``) — fixed for the boot's lifetime;
+  Trustee continues supporting TDX for external guests independently;
 - it does **not** bind the per-request nonce. That is the v1 statement's
   job (``bindings.report_data_statement`` in REPORTDATA, spec §5 item 2).
   The two mechanisms are complementary: spec §5 item 4 ("Appraisal")
@@ -29,7 +30,8 @@ is the hashed ``tee-pubkey``) — under the attestation-gated signer design
 that is the east-west identity key whose signed certificate gates backend
 access, so the appraisal is linked to the key that carries authorization.
 
-Wire facts (pinned against the vendored Trustee, CoCo-trustee @ v0.22.0):
+Wire facts (pinned against unmodified CoCo Trustee v0.23.0, retrieved at
+commit 564a3ba51eaedd4734e88e1883a905dd780ee45b):
 
 - ``Attestation`` is kebab-case at the top level (``runtime-data``,
   ``tee-evidence``, ``init-data``) while ``CompositeEvidence`` is
@@ -166,7 +168,7 @@ def load_initdata() -> dict[str, Any] | None:
 
 
 def initdata_sha384() -> str | None:
-    """``MRCONFIGID`` source: SHA-384 over the exact initdata TOML bytes."""
+    """SHA-384 of the exact InitData TOML (TDX MRCONFIGID source)."""
     text = load_initdata_text()
     if text is None:
         return None
@@ -240,9 +242,10 @@ def agent_policy_claims(rego_text: str) -> Any | None:
 def vm_config() -> dict[str, Any] | None:
     """``evidence.vm_config`` — the composition anchor a verifier diffs.
 
-    Self-reported content is fine here: the verifier recomputes
-    ``SHA-384(initdata)`` over these files and requires the quote's
-    MRCONFIGID to match (spec §5 item 3), so a lie fails the quote check.
+    This is self-reported composition, not an appraisal. On TDX the verifier
+    compares SHA-384(initdata) with MRCONFIGID (spec §5 item 3); on SNP it
+    must use the actual runtime's HOST_DATA digest semantics and independently
+    derived values. Neither path accepts serving text alone as measurement proof.
     """
     initdata = load_initdata()
     if initdata is None:
@@ -261,6 +264,16 @@ def vm_config() -> dict[str, Any] | None:
     sha = initdata_sha384()
     if sha is not None:
         out["initdata_sha384"] = sha
+        # Kata 4.4 runtime-rs supplies SHA-384 truncated to 32 bytes as
+        # sev-snp-guest host-data. Do not confuse it with SNP's SHA-256
+        # CCAAcertificateDigest policy claim or report_data binding.
+        from kubetee_attestation import TEE_TYPE
+        out["runtime_class"] = os.environ.get("KUBETEE_RUNTIME_CLASS", {
+            "tdx": "kata-qemu-tdx-runtime-rs", "snp": "kata-qemu-snp-runtime-rs"
+        }[TEE_TYPE])
+        if TEE_TYPE == "snp":
+            out["host_data"] = hashlib.sha384(text.encode("utf-8")).digest()[:32].hex()
+            out["host_data_semantics"] = "kata4initdataSha384Truncated32"
     return out
 
 
@@ -360,11 +373,12 @@ async def mint_boot_ear(tee_pubkey: dict[str, str]) -> BootEar:
     key object.
     """
     import httpx
+    from kubetee_attestation import TEE_TYPE, _hardware_evidence
 
     async with httpx.AsyncClient(timeout=30.0) as http:
         auth = await http.post(
             f"{KBS_BASE}/kbs/v0/auth",
-            json={"version": KBS_PROTOCOL_VERSION, "tee": "tdx", "extra-params": ""},
+            json={"version": KBS_PROTOCOL_VERSION, "tee": TEE_TYPE, "extra-params": ""},
         )
         auth.raise_for_status()
         challenge = auth.json()
@@ -373,7 +387,8 @@ async def mint_boot_ear(tee_pubkey: dict[str, str]) -> BootEar:
 
         runtime_data = rcar_runtime_data_json(nonce, tee_pubkey)
         report_data = rcar_report_data(runtime_data)
-        evidence = await _aa_evidence(report_data)
+        raw_evidence = await _aa_evidence(report_data)
+        evidence = _hardware_evidence(raw_evidence, report_data)
 
         # kbs-types wire: Attestation is kebab-case at the top level,
         # CompositeEvidence snake_case inside (pinned above).
@@ -399,10 +414,11 @@ async def mint_boot_ear(tee_pubkey: dict[str, str]) -> BootEar:
 
 
 async def _aa_evidence(report_data: bytes) -> dict[str, Any]:
-    """Mint a TDX quote whose REPORTDATA is ``report_data`` (64 bytes)."""
+    """Mint native AMD SEV-SNP report_data evidence for this gateway."""
     import httpx
 
-    url = f"{CDH_BASE}/aa/evidence?runtime_data={_b64u(report_data)}&encoding=base64"
+    from urllib.parse import urlencode
+    url = f"{CDH_BASE}/aa/evidence?{urlencode({'runtime_data': _b64u(report_data), 'encoding': 'base64'})}"
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(url)
         resp.raise_for_status()
