@@ -245,6 +245,7 @@ jobs:
           sys.path[:0] = ["/workspace/test-deps", "/app/.venv/lib/python3.13/site-packages"]
           raise SystemExit(pytest.main([
               "-q", "-p", "no:cacheprovider", "--import-mode=importlib",
+              "-o", "asyncio_mode=auto",
               "--ignore=/tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_snp_evidence.py",
               "/tests/test_litellm/tools/kubetee-litellm-overlay",
               "/tests/unit/proxy/auth/test_auth_utils.py",
@@ -267,6 +268,7 @@ jobs:
           import pytest
           raise SystemExit(pytest.main([
               "-q", "-p", "no:cacheprovider", "--import-mode=importlib",
+              "-o", "asyncio_mode=auto",
               "/tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_snp_evidence.py",
           ]))
           '
@@ -288,6 +290,7 @@ jobs:
           import pytest
           raise SystemExit(pytest.main([
               "-q", "-p", "no:cacheprovider", "--import-mode=importlib",
+              "-o", "asyncio_mode=auto",
               "/tests/unit/llms/bedrock/passthrough/test_bedrock_passthrough_transformation.py",
               "/tests/unit/proxy/openai_files_endpoint/test_files_common_utils.py",
               "/tests/unit/test_router/test_router.py::test_team_byok_wildcard_is_served_before_a_proxy_wide_wildcard_of_the_same_name",
@@ -500,7 +503,7 @@ jobs:
             IMAGE_SOURCE="docker"
           fi
           trivy image --image-src "${IMAGE_SOURCE}" --scanners vuln --severity HIGH,CRITICAL \
-            --ignore-unfixed --format json --output /tmp/kubetee-11083-trivy.json \
+            --ignore-unfixed --format json --output /tmp/kubetee-11000-trivy.json \
             --exit-code 1 "${{ steps.scan-target.outputs.image }}"
 
       - name: Save supply-chain evidence
@@ -511,7 +514,7 @@ jobs:
           path: |
             /tmp/kubetee-image-metadata.json
             /tmp/kubetee-overlay-provenance.json
-            /tmp/kubetee-11083-trivy.json
+            /tmp/kubetee-11000-trivy.json
           if-no-files-found: error
           retention-days: 90
 
