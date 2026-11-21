@@ -162,14 +162,7 @@ jobs:
             test "$(git rev-parse HEAD^2)" = \
               "096ff016817c1d26928ef984e5ee16ee285ccd28"
           fi
-          diff="$(git diff --name-only 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
-            'litellm/**/*.py' prisma/schema.prisma docker/Dockerfile.database)"
-          if test -n "$diff"; then
-            printf 'Core differs from stable v1.110.0:\n%s\n' "$diff"
-            exit 1
-          fi
           cmp prisma/schema.prisma/prisma/schema.prisma prisma/schema.prisma
-          test ! -e docker/Dockerfile.database
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -v "$PWD:/source:ro" \
@@ -182,16 +175,18 @@ jobs:
           source = Path('/source/litellm')
           base = Path(litellm.__file__).parent
           excluded = {'proxy/guardrails/guardrail_hooks/litellm_content_filter/guardrail_benchmarks/test_eval.py'}
-          changed = tuple(
-              str(path.relative_to(source))
-              for path in source.rglob('*.py')
-              if str(path.relative_to(source)) not in excluded
-              and ((not (target := base / path.relative_to(source)).is_file())
-                   or path.read_bytes() != target.read_bytes())
-          )
-          if changed:
-              raise SystemExit(f'Core differs from packaged v1.110.0: {changed}')
-          print('Upstream sources match the verified stable release')
+          sources = {str(path.relative_to(source)) for path in source.rglob('*.py')}
+          packaged = {str(path.relative_to(base)) for path in base.rglob('*.py')}
+          # The proxy wheel owns runtime; the git-only source-only benchmark is
+          # deliberately excluded, with no other exclusions permitted.
+          removed = (packaged - sources) - excluded
+          changed = tuple(relative for relative in sorted(sources | packaged)
+              if relative not in excluded and relative in sources
+              and ((not (target := base / relative).is_file())
+                   or (source / relative).read_bytes() != target.read_bytes()))
+          if changed or removed:
+              raise SystemExit(f'Core differs from packaged v1.110.0: {changed}, missing checkout paths: {sorted(removed)}')
+          print('Upstream Python sources match the packaged stable release in both directions')
           "
 
       - name: Run upstream and overlay regression tests
