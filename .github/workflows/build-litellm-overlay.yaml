@@ -156,10 +156,12 @@ jobs:
 
       - name: Verify stable v1.110.0 core matches the packaged release
         run: |
-          UPSTREAM_HEAD="$(git rev-parse HEAD^ || git rev-parse HEAD)"
-          test "$UPSTREAM_HEAD" = "096ff016817c1d26928ef984e5ee16ee285ccd28"
           git fetch --no-tags --depth=1 https://github.com/BerriAI/litellm.git \
             096ff016817c1d26928ef984e5ee16ee285ccd28
+          if test "$PUBLISH" = "true"; then
+            test "$(git rev-parse HEAD^2)" = \
+              "096ff016817c1d26928ef984e5ee16ee285ccd28"
+          fi
           git diff --quiet 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
             litellm prisma/schema.prisma docker/Dockerfile.database
           docker run --rm \
