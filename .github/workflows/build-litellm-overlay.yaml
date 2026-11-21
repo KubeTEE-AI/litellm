@@ -163,29 +163,14 @@ jobs:
               "096ff016817c1d26928ef984e5ee16ee285ccd28"
           fi
           test -z "$(git diff --name-only 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
-            docker/Dockerfile.database)"
+            litellm litellm-proxy-extras enterprise docker schema.prisma)"
+          test -z "$(git diff --name-only HEAD -- \
+            litellm litellm-proxy-extras enterprise docker schema.prisma)"
+          test -z "$(git ls-files --others --exclude-standard -- \
+            litellm litellm-proxy-extras enterprise docker schema.prisma)"
           cmp schema.prisma litellm/proxy/schema.prisma
           cmp schema.prisma litellm-proxy-extras/litellm_proxy_extras/schema.prisma
-          test -z "$(git diff --name-only 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
-            schema.prisma litellm/proxy/schema.prisma \
-            litellm-proxy-extras/litellm_proxy_extras/schema.prisma)"
-          source_diff="$(git diff --name-status 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
-            'litellm/**/*.py' ':!litellm/proxy/_experimental/**' \
-            ':!litellm/llms/anthropic/pass_through/**')"
-          if printf '%s\n' "$source_diff" | grep -v '^A[[:space:]]'; then
-            printf 'Core source modifications outside packaging worktrees are forbidden:\n%s\n' "$source_diff"
-            exit 1
-          fi
-          if test -n "$source_diff"; then
-            printf 'Runtime additions must match the signed packaged release exactly:\n%s\n' "$source_diff"
-          fi
-          # Added source paths come from the v1.110.0 release merge, rather than
-          # the older unrelated-history import. They must also be present clean
-          # in the checkout (test-deps/dirty worktrees cannot mask one).
-          test -z "$(git ls-files --others --exclude-standard -- \
-            litellm schema.prisma litellm-proxy-extras enterprise docker)"
-          test -z "$(git diff --name-only HEAD -- \
-            litellm schema.prisma litellm-proxy-extras enterprise docker)"
+          printf 'Runtime core and Prisma schema are byte-identical to upstream v1.110.0.\n'
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -v "$PWD:/source:ro" \
@@ -200,16 +185,16 @@ jobs:
           excluded = {'proxy/guardrails/guardrail_hooks/litellm_content_filter/guardrail_benchmarks/test_eval.py'}
           sources = {str(path.relative_to(source)) for path in source.rglob('*.py')}
           packaged = {str(path.relative_to(base)) for path in base.rglob('*.py')}
-          # The proxy wheel owns runtime; the git-only source-only benchmark is
-          # deliberately excluded, with no other exclusions permitted.
+          # The release tree itself is checked above. Wheel packaging omits
+          # source-only benchmark files, so require no missing packaged modules
+          # and byte identity of every module shared with the git source tree.
           removed = (packaged - sources) - excluded
-          changed = tuple(relative for relative in sorted(sources | packaged)
-              if relative not in excluded and relative in sources
-              and ((not (target := base / relative).is_file())
-                   or (source / relative).read_bytes() != target.read_bytes()))
+          changed = tuple(relative for relative in sorted(sources & packaged)
+              if relative not in excluded
+              and (source / relative).read_bytes() != (base / relative).read_bytes())
           if changed or removed:
               raise SystemExit(f'Core differs from packaged v1.110.0: {changed}, missing checkout paths: {sorted(removed)}')
-          print('Upstream Python sources match the packaged stable release in both directions')
+          print('Upstream source and every packaged Python module match the stable release')
           "
 
       - name: Run upstream and overlay regression tests
