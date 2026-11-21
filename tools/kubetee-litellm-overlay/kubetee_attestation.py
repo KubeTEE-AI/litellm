@@ -1,4 +1,4 @@
-# KubeTEE client-facing attestation for the LiteLLM gateway (CPU TDX guest).
+# KubeTEE client-facing AMD SEV-SNP attestation for the public gateway.
 #
 # Baked into the litellm-database overlay image (site-packages), loaded as a
 # custom callback:
@@ -10,18 +10,18 @@
 # GET /v1/attestation?nonce=<64 hex> returns the v1 bundle:
 #
 #   {spec_version, tee_type, nonce, report_data_input, pod, quote, cc_eventlog,
-#    keyset, bindings, tls_possession,                <- legacy top level
-#    evidence: {quote, quote_report_data, event_log, vm_config},
+#    keyset, bindings, tls_possession, quote=null, cc_eventlog=null,
+#    evidence: {snp: {schema, attestation_report, cert_chain}, vm_config},
 #    appraisal: {ear_token, ar4si}}
 #
-# The legacy top-level fields stay for the dual-read window: gm-miner's
-# shipped AttestationPayload (evidence.rs) parses quote / cc_eventlog /
-# tls_possession at the top level with strict serde and drops unknown fields,
-# so the v1 shape is ADDITIVE until that window closes. `report_data_input`
+# TDX top-level fields are retained for explicit protocol evolution only:
+# on SNP they are null, and legacy quote-only clients cannot verify it.
+# A client supporting SNP must branch on the typed evidence.snp schema.
+# `report_data_input`
 # names the active construction on every response.
 #
 # Inline evidence (opt-in): X-KubeTEE-Nonce on /v1/chat/completions puts
-# X-KubeTEE-Attestation-Quote + the same binding/possession headers on the
+# X-KubeTEE-Attestation-SNP + the same binding/possession headers on the
 # SAME response, binding proof to the serving replica.
 #
 # The binding — kubetee.attestation.v1 (spec section 4)
@@ -31,17 +31,10 @@
 #
 #   {"keyset_digest":"sha256:<hex>","nonce":"<64-hex>","purpose":"kubetee.attestation.v1"}
 #
-# This is the v1 construction — NOT the wire default yet. Until the gm-miner
-# switch PR (taostat/gm-miner, kubetee_verify) is accepted upstream AND
-# gm-miner is redeployed, the quote stays bound to the legacy SHA512(nonce)
-# construction the deployed verifier checks, and the response carries NO
-# keyset/bindings (binding claims appear only with the v1 binding — the
-# verifier fails mixed shapes closed). `report_data_input` names the active
-# construction on every response ("sha512(nonce)" default). Flip with
-# KUBETEE_ATTESTATION_V1=1 after the switch: the v1 statement then binds the
-# quote (travels verbatim as bindings.report_data_statement — no
-# reconstruction ambiguity), keyset_digest covers the served keyset, and the
-# v1 bundle (evidence/appraisal) rides along.
+# TDX REPORTDATA or SNP report_data. `report_data_input` names the
+# construction on every response. SNP places its native structured evidence
+# under `evidence.snp`; its AMD report is never a TDX quote. Both endpoints
+# reject a TDX quote, wrong-platform evidence, or an invalid signed binding.
 #
 # TLS possession (both surfaces)
 # ---------------------------------------------------------------------------
@@ -58,7 +51,7 @@
 # ---------------------------------------------------------------------------
 # `appraisal.ear_token` is a Trustee EAR minted ONCE PER BOOT over the RCAR
 # binding (its own hash — see kubetee_ear.py for why it is not the v1
-# statement). It appraises this TD's measurements + initdata; the per-request
+# statement). It appraises this SNP guest's measurements + initdata; the per-request
 # nonce binding is the v1 statement's job. `appraisal.ar4si` exposes the
 # trustworthiness vector plus the partner claim mapping so adapters never
 # parse the JWT by hand. Absent (field omitted) when Trustee is unreachable —
@@ -77,27 +70,27 @@
 # Auth: LiteLLM attaches user_api_key_auth to routes it knows; a custom
 # app.add_api_route endpoint does NOT get the auth dependency by default —
 # it is public on the guest network. The endpoint discloses no secrets
-# (nonce + TDX quote of THIS guest only).
+# (nonce + SNP evidence of THIS guest only).
 
 import base64
+import binascii
 import hashlib
+import json
 import os
 import re
 import socket
 from typing import Any
+from urllib.parse import urlencode
 
 import kubetee_binding
+import kubetee_ear
 from litellm.integrations.custom_logger import CustomLogger
 
 SPEC_VERSION = "kubetee.attestation.v1"
-TEE_TYPE = "tdx"
-RUNTIME_CLASS = "kata-qemu-tdx-runtime-rs"
 
-# Construction switch (see header): legacy SHA512(nonce) is the wire default
-# while the deployed gm-miner verifies it; KUBETEE_ATTESTATION_V1=1 flips the
-# quote binding to the v1 statement AFTER the gm-miner switch PR is accepted
-# and redeployed. The response shape follows the switch atomically: v1
-# (keyset/bindings/evidence/appraisal) or the exact legacy shape.
+# Construction switch: this gateway uses KUBETEE_ATTESTATION_V1=1 for the
+# published v1 statement. Legacy SHA512(nonce) remains available only for an
+# explicitly configured older consumer, with matching response metadata.
 V1_MODE = os.environ.get("KUBETEE_ATTESTATION_V1", "").strip().lower() in ("1", "true", "yes", "on")
 REPORT_DATA_INPUT = "kubetee.attestation.v1" if V1_MODE else kubetee_binding.LEGACY_REPORT_DATA_INPUT
 
@@ -144,7 +137,7 @@ def _tls_possession_proof(nonce: str) -> dict | None:
 
     The client verifies the signature against the leaf certificate from ITS
     OWN TLS session (llm.kubetee.ai terminates inside this guest). A valid
-    signature proves the TDX guest that minted the attestation payload also
+    signature proves the guest that minted the attestation payload also
     holds the private key of the cert the client is connected to — binding
     the quote to the exact serving pod, not just "some gateway replica".
 
@@ -235,20 +228,209 @@ def _binding_bundle(
 
 
 async def _aa_get_evidence(runtime_data_b64url: str) -> dict:
-    """Call in-guest /aa/evidence; parse the TdxEvidence JSON envelope.
-
-    Returns {"quote": <b64 str>, "cc_eventlog": <b64 str|None>} or raises.
-    The AA returns JSON bytes (content-type is octet-stream, cosmetic).
-    """
+    """Return native CoCo {attestation_report, cert_chain} evidence."""
     import httpx
-
-    url = f"{_AA_BASE}/aa/evidence?runtime_data={runtime_data_b64url}&encoding=base64"
+    url = f"{_AA_BASE}/aa/evidence?{urlencode({'runtime_data': runtime_data_b64url, 'encoding': 'base64'})}"
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(url)
         resp.raise_for_status()
-        import json as _json
+        return json.loads(resp.content)
 
-        return _json.loads(resp.content)
+
+# Gateway-only SNP producer; neither function nor configuration changes KBS.
+
+class EvidenceError(RuntimeError):
+    """The guest returned missing, malformed, or wrong-platform evidence."""
+
+
+_TEE_RUNTIMES = {"tdx": "kata-qemu-tdx-runtime-rs", "snp": "kata-qemu-snp-runtime-rs"}
+
+
+def _tee_type() -> str:
+    """Select measured guest hardware; TDX remains the legacy default."""
+    value = os.environ.get("KUBETEE_TEE", "tdx").strip().lower()
+    # Explicit SNP spelling only. "sev"/"sev-es" are not an SNP fallback.
+    value = "snp" if value == "sev-snp" else value
+    if value not in _TEE_RUNTIMES:
+        raise EvidenceError(f"unsupported KUBETEE_TEE: {value!r}")
+    runtime = os.environ.get("KUBETEE_RUNTIME_CLASS", _TEE_RUNTIMES[value])
+    if runtime != _TEE_RUNTIMES[value]:
+        raise EvidenceError(f"KUBETEE_RUNTIME_CLASS conflicts with selected {value} platform")
+    return value
+
+
+TEE_TYPE = _tee_type()
+RUNTIME_CLASS = os.environ.get("KUBETEE_RUNTIME_CLASS", _TEE_RUNTIMES[TEE_TYPE])
+
+
+def _b64_bytes(value: Any, name: str) -> bytes:
+    if isinstance(value, str):
+        if not re.fullmatch(r"[A-Za-z0-9+/=_-]+", value):
+            raise EvidenceError(f"SNP {name} is not valid base64")
+    else:
+        raise EvidenceError(f"SNP {name} is missing or malformed")
+    if not value:
+        raise EvidenceError(f"SNP {name} is missing or malformed")
+    try:
+        return base64.b64decode(value.replace("-", "+").replace("_", "/") + "=" * (-len(value) % 4), validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise EvidenceError(f"SNP {name} is not valid base64") from exc
+
+
+def _snp_bytes(value: Any, name: str, size: int | None = None) -> bytes:
+    """Decode CoCo's JSON u8 arrays; accept b64 only for alternate encodings."""
+    if isinstance(value, list):
+        if any(isinstance(b, bool) or not isinstance(b, int) or not 0 <= b <= 255 for b in value):
+            raise EvidenceError(f"SNP {name} contains a non-byte value")
+        raw = bytes(value)
+    else:
+        raw = _b64_bytes(value, name)
+    if size is not None and len(raw) != size:
+        raise EvidenceError(f"SNP {name} must be {size} bytes")
+    return raw
+
+
+def _snp_evidence(report: Any, cert_chain: Any, report_data: bytes) -> dict[str, Any]:
+    """Pass CoCo's structured SnpEvidence; check binding and buffer shapes.
+
+    Keep CoCo's structured AttestationReport rather than treating it as a
+    TDX quote or inventing a Python serializer for all version-dependent fields.
+    The optional certificate table is DER bytes, normally with at least VCEK;
+    AMD root/flash-resident certificate absence is not forged here.
+    """
+    if not isinstance(report, dict):
+        raise EvidenceError("SNP attestation_report must be the native CoCo structured JSON object; raw strings are not supported")
+    version = report.get("version", 3)
+    if isinstance(version, bool) or not isinstance(version, int) or not 3 <= version <= 5:
+        raise EvidenceError(f"unsupported SNP report version: {version!r}")
+    if isinstance(report.get("vmpl"), bool) or report.get("vmpl", 0) != 0:
+        raise EvidenceError("SNP VMPL0 is required")
+    for field in ("current_tcb", "reported_tcb"):
+        value = report.get(field)
+        # Optional processor-generation fields (e.g. Venice's absent boot SVNs)
+        # are null in CoCo JSON; required tee/snp are numeric u8 values.
+        if not isinstance(value, dict) or any(
+            isinstance(value.get(k), bool) or not isinstance(value.get(k), int) or not 0 <= value[k] <= 255
+            for k in ("snp", "tee")
+        ):
+            raise EvidenceError(f"SNP {field} must carry numeric snp/tee fields")
+    if report.get("sig_algo", 1) != 1:
+        raise EvidenceError("SNP report must use ECDSA P-384")
+    if _snp_bytes(report.get("report_data"), "report_data", 64) != report_data:
+        raise EvidenceError("SNP signed report_data does not match the served binding")
+    for name, size in (("measurement", 48), ("host_data", 32), ("family_id", 16), ("image_id", 16)):
+        _snp_bytes(report.get(name), name, size)
+    sig = report.get("signature")
+    if not isinstance(sig, dict):
+        raise EvidenceError("SNP signature must be an object containing r and s")
+    for name in ("r", "s"):
+        _snp_bytes(sig.get(name), f"signature.{name}", 72)
+    if cert_chain is None:
+        cert_chain = []
+    if not isinstance(cert_chain, list):
+        raise EvidenceError("SNP cert_chain must be a list")
+    if len(cert_chain) > 64:
+        raise EvidenceError("SNP certificate table exceeds protocol bounds")
+    if len(json.dumps(report, separators=(",", ":"))) > 64 * 1024:
+        raise EvidenceError("SNP structured report exceeds protocol bounds")
+    for entry in cert_chain:
+        # CoCo's Linux ABI may label certificate entries OTHER; labels do not
+        # authenticate the VCEK/ASK/ARK chain.
+        if not isinstance(entry, dict) or not isinstance(entry.get("cert_type"), str):
+            raise EvidenceError("SNP cert_chain entries must have a cert_type string")
+        if not _snp_bytes(entry.get("data"), "certificate DER"):
+            raise EvidenceError("SNP certificate is empty")
+    # This is the protocol discriminator consumed by gm-miner, not a claim of
+    # AMD trust. The latter is established only by VCEK/report verification.
+    return {
+        "schema": "kubetee.snp-evidence/1",
+        "attestation_report": report,
+        "cert_chain": cert_chain,
+    }
+
+
+def _hardware_evidence(evidence: Any, report_data: bytes) -> dict[str, Any]:
+    """Return the selected platform's native signed evidence, fail closed."""
+    if not isinstance(evidence, dict):
+        raise EvidenceError("AA did not return an evidence object")
+    if evidence.get("error"):
+        raise EvidenceError(f"AA evidence unavailable: {evidence['error']}")
+    if TEE_TYPE == "snp":
+        # The documented CoCo SNP AA response is itself an evidence object,
+        # unlike the Intel wrapper's `quote` field. Accept only the explicit
+        # `snp` wrapper as an alternate, never Intel native evidence.
+        if set(evidence) == {"snp"} and isinstance(evidence["snp"], dict):
+            evidence = evidence["snp"]
+        if evidence.get("quote") is not None:
+            raise EvidenceError("TDX quote supplied for an SNP guest")
+        report = evidence.get("attestation_report")
+        if report is None:
+            raise EvidenceError("SNP evidence unavailable: attestation_report is absent")
+        return _snp_evidence(report, evidence.get("cert_chain"), report_data)
+    if evidence.get("attestation_report") is not None:
+        raise EvidenceError("SNP evidence supplied for a TDX guest")
+    # Preserve the proven TDX arm unchanged; only its platform discriminator
+    # becomes dynamic. SNP hardware verification is tested independently.
+    if not isinstance(evidence.get("quote"), str) or not evidence["quote"]:
+        raise EvidenceError("TDX quote unavailable")
+    return {"quote": evidence["quote"], "cc_eventlog": evidence.get("cc_eventlog")}
+
+
+def _report_data_from_payload(payload: dict[str, Any], nonce: str) -> bytes:
+    """Extract the hardware-bound input from the v1 response, not labels."""
+    if not isinstance(payload.get("bindings"), dict):
+        raise EvidenceError("v1 payload has no keyset/nonce binding statement")
+    statement = payload["bindings"].get("report_data_statement")
+    if not isinstance(statement, str):
+        raise EvidenceError("v1 report_data_statement is absent")
+    return kubetee_binding.report_data(statement)
+
+
+def _attestation_headers(payload: dict[str, Any], nonce: str) -> dict[str, str]:
+    """Same evidence as /v1/attestation, expressed as inline HTTP headers."""
+    tee = payload["tee"]
+    out = {
+        "X-KubeTEE-Nonce": nonce,
+        "X-KubeTEE-Attestation-Tee": tee,
+        "X-KubeTEE-Runtime-Class": payload["runtime_class"],
+        "X-KubeTEE-Report-Data-Input": payload["report_data_input"],
+        "X-KubeTEE-Attestation-Report-Data": base64.b64encode(
+            _report_data_from_payload(payload, nonce) if payload["report_data_input"] == kubetee_binding.PURPOSE
+            else kubetee_binding.legacy_report_data(nonce)
+        ).decode("ascii"),
+    }
+    if tee == "snp":
+        # AMD is a separate schema, not bytes in the Intel quote header.
+        snp_evidence = (payload.get("evidence") or {}).get("snp")
+        if not isinstance(snp_evidence, dict):
+            raise EvidenceError("SNP payload lacks typed native evidence")
+        # Base64url preserves exact native CoCo JSON through HTTP encoders.
+        encoded = json.dumps(snp_evidence, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        if len(encoded) > 24 * 1024:
+            raise EvidenceError("SNP evidence exceeds inline transport budget; use /v1/attestation")
+        out["X-KubeTEE-Attestation-SNP"] = base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("=")
+        out["X-KubeTEE-Attestation-SNP-Encoding"] = "base64url-json"
+    elif tee == "tdx":
+        out["X-KubeTEE-Attestation-Quote"] = payload["quote"]
+        if payload.get("cc_eventlog"):
+            if isinstance(payload["cc_eventlog"], list):
+                out["X-KubeTEE-Attestation-Event-Log"] = json.dumps(payload["cc_eventlog"], separators=(",", ":"))
+            else:
+                out["X-KubeTEE-Attestation-Event-Log"] = payload["cc_eventlog"]
+    else:
+        raise EvidenceError(f"unsupported evidence platform: {tee}")
+    if V1_MODE:
+        bindings = payload["bindings"]
+        out["X-KubeTEE-Binding-Statement"] = bindings["report_data_statement"]
+        out["X-KubeTEE-Binding-Keyset-Digest"] = bindings["keyset_digest"]
+    tls_proof = payload.get("tls_possession")
+    if tls_proof:
+        out["X-KubeTEE-TLS-Signature"] = tls_proof["tls_signature"]
+        out["X-KubeTEE-TLS-Signature-Alg"] = tls_proof["tls_signature_alg"]
+        out["X-KubeTEE-TLS-Signature-Input"] = tls_proof["tls_signature_input"]
+        if tls_proof.get("tls_cert_sha256"):
+            out["X-KubeTEE-TLS-Cert-SHA256"] = tls_proof["tls_cert_sha256"]
+    return out
 
 
 def _binding_for_nonce(nonce: str) -> tuple[dict, kubetee_binding.Binding]:
@@ -265,65 +447,51 @@ def _binding_for_nonce(nonce: str) -> tuple[dict, kubetee_binding.Binding]:
 
 
 async def get_attestation_payload(nonce: str | None) -> dict | None:
-    """Mint a fresh TDX quote with the active construction bound into REPORTDATA.
-
-    Returns the JSON payload served by /v1/attestation — the exact legacy
-    shape (the deployed gm-miner's contract) by default, or the v1 bundle
-    under KUBETEE_ATTESTATION_V1=1 — or None if the nonce is malformed.
-    Raises on AA failure (caller maps to 502).
-    """
+    """Mint fresh AMD SEV-SNP evidence for this gateway request."""
     raw_nonce = _validate_nonce(nonce)
     if raw_nonce is None:
         return None
-
     if V1_MODE:
         keyset, binding = _binding_for_nonce(raw_nonce)
         report_data = binding.report_data
     else:
         keyset = binding = None
         report_data = kubetee_binding.legacy_report_data(raw_nonce)
-    report_data_b64url = (
-        base64.urlsafe_b64encode(report_data).decode("ascii").rstrip("=")
-    )
-    evidence = await _aa_get_evidence(report_data_b64url)
-
+    runtime_data = base64.urlsafe_b64encode(report_data).decode("ascii").rstrip("=")
+    raw_evidence = await _aa_get_evidence(runtime_data)
+    platform_evidence = _hardware_evidence(raw_evidence, report_data)
     payload: dict[str, Any] = {
-        "nonce": raw_nonce,
-        "report_data_input": REPORT_DATA_INPUT,
-        "quote": evidence.get("quote"),
-        "cc_eventlog": evidence.get("cc_eventlog"),
-        "tee": TEE_TYPE,
-        "runtime_class": RUNTIME_CLASS,
+        "nonce": raw_nonce, "report_data_input": REPORT_DATA_INPUT,
+        "quote": platform_evidence["quote"] if TEE_TYPE == "tdx" else None,
+        "cc_eventlog": platform_evidence.get("cc_eventlog") if TEE_TYPE == "tdx" else None,
+        "tee": TEE_TYPE, "runtime_class": RUNTIME_CLASS,
     }
     tls_proof = _tls_possession_proof(raw_nonce)
     if tls_proof is not None:
         payload["tls_possession"] = tls_proof
-    pod = _pod_name()
-    if pod:
+    if pod := _pod_name():
         payload["pod"] = pod
-
     if V1_MODE:
-        payload["spec_version"] = SPEC_VERSION
-        payload["tee_type"] = TEE_TYPE
-        payload["keyset"] = keyset
-        payload["bindings"] = {
-            "version": binding.version,
-            "report_data_statement": binding.statement,
-            "keyset_digest": binding.keyset_digest,
-        }
-        # --- v1 spec bundle ---
-        import kubetee_ear
-
-        payload["evidence"] = {
-            "quote": evidence.get("quote"),
-            "quote_report_data": base64.b64encode(report_data).decode("ascii"),
-            "event_log": evidence.get("cc_eventlog"),
-            "vm_config": kubetee_ear.vm_config(),
-        }
+        payload.update({
+            "spec_version": SPEC_VERSION, "tee_type": TEE_TYPE, "keyset": keyset,
+            "bindings": {"version": binding.version,
+                "report_data_statement": binding.statement,
+                "keyset_digest": binding.keyset_digest},
+            "evidence": {
+                "quote": payload["quote"],
+                "quote_report_data": base64.b64encode(report_data).decode("ascii"),
+                "event_log": payload["cc_eventlog"], "vm_config": kubetee_ear.vm_config(),
+            },
+        })
+        if TEE_TYPE == "snp":
+            payload["evidence"]["snp"] = {"schema": "kubetee.snp-evidence/1", **platform_evidence}
         appraisal = kubetee_ear.appraisal(kubetee_ear.load_cached_ear())
         if appraisal is not None:
             payload["appraisal"] = appraisal
+    elif TEE_TYPE == "snp":
+        payload["evidence"] = {"snp": {"schema": "kubetee.snp-evidence/1", **platform_evidence}, "quote_report_data": base64.b64encode(report_data).decode("ascii")}
     return payload
+
 
 
 def _backend_identity_headers(
@@ -441,7 +609,7 @@ class KubeTEEAttestationLogger(CustomLogger):
         request_headers: dict[str, str] | None = None,
         litellm_call_info: dict[str, str] | None = None,
     ) -> dict[str, str] | None:
-        """Opt-in inline TDX evidence on chat responses.
+        """Opt-in inline AMD SEV-SNP evidence on chat responses.
 
         Fires when the client sent X-KubeTEE-Nonce on the request. Returns
         X-KubeTEE-* headers that LiteLLM merges into the HTTP response.
@@ -459,43 +627,13 @@ class KubeTEEAttestationLogger(CustomLogger):
         if raw_nonce is None:
             return None  # opt-in header absent — no-op
 
-        if V1_MODE:
-            try:
-                _keyset, binding = _binding_for_nonce(raw_nonce)
-            except Exception as e:
-                return {"X-KubeTEE-Attestation-Error": f"binding unavailable: {e}"}
-            report_data = binding.report_data
-        else:
-            binding = None
-            report_data = kubetee_binding.legacy_report_data(raw_nonce)
-        report_data_b64url = (
-            base64.urlsafe_b64encode(report_data).decode("ascii").rstrip("=")
-        )
         try:
-            evidence = await _aa_get_evidence(report_data_b64url)
-            quote = evidence.get("quote")
+            payload = await get_attestation_payload(raw_nonce)
+            if payload is None:
+                return {"X-KubeTEE-Attestation-Error": "invalid nonce (need 64 hex)"}
+            out = _attestation_headers(payload, raw_nonce)
         except Exception as e:
-            return {"X-KubeTEE-Attestation-Error": f"quote unavailable: {e}"}
-
-        if not quote:
-            return {"X-KubeTEE-Attestation-Error": "empty quote"}
-
-        out = {
-            "X-KubeTEE-Nonce": raw_nonce,
-            "X-KubeTEE-Attestation-Quote": quote,
-            "X-KubeTEE-Attestation-Tee": TEE_TYPE,
-            "X-KubeTEE-Report-Data-Input": REPORT_DATA_INPUT,
-        }
-        if V1_MODE:
-            out["X-KubeTEE-Binding-Statement"] = binding.statement
-            out["X-KubeTEE-Binding-Keyset-Digest"] = binding.keyset_digest
-        tls_proof = _tls_possession_proof(raw_nonce)
-        if tls_proof is not None:
-            out["X-KubeTEE-TLS-Signature"] = tls_proof["tls_signature"]
-            out["X-KubeTEE-TLS-Signature-Alg"] = tls_proof["tls_signature_alg"]
-            out["X-KubeTEE-TLS-Signature-Input"] = tls_proof["tls_signature_input"]
-            if tls_proof.get("tls_cert_sha256"):
-                out["X-KubeTEE-TLS-Cert-SHA256"] = tls_proof["tls_cert_sha256"]
+            return {"X-KubeTEE-Attestation-Error": f"attestation evidence unavailable: {e}"}
         out.update(_backend_identity_headers(data, litellm_call_info))
         return out
 
