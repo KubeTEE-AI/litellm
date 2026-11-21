@@ -202,7 +202,7 @@ jobs:
           test ! -d /tmp/litellm-overlay-test-deps/test-deps/litellm
           test ! -d /tmp/litellm-overlay-test-deps/test-deps/litellm_enterprise
           # Assert the packaged public and enterprise APIs are one coherent base.
-          docker run --rm -v "$PWD:/tests:ro" \
+          docker run --rm -v "$PWD/tests:/tests:ro" \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} -c \
             'from pathlib import Path; import litellm._internal_context as context; assert Path(context.__file__).resolve().is_relative_to(Path("/app/.venv")), context.__file__; from litellm._internal_context import internal_sub_call; from litellm_enterprise.proxy.hooks.managed_files import _PROXY_LiteLLMManagedFiles; print(Path(context.__file__).resolve())'
@@ -212,15 +212,16 @@ jobs:
             -e LITELLM_LOCAL_MODEL_COST_MAP=True \
             -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
             -v /tmp/litellm-overlay-test-deps:/workspace:ro \
-            -v "$PWD:/tests:ro" \
+            -v "$PWD/tools:/tools:ro" \
+            -v "$PWD/tests:/tests:ro" \
             -w /tests \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
             -m pytest -q -p no:cacheprovider --import-mode=importlib \
-            tests/test_litellm/tools/kubetee-litellm-overlay \
-            tests/unit/proxy/auth/test_auth_utils.py \
-            tests/unit/proxy/db/test_routing_prisma_wrapper.py \
-            tests/unit/proxy/guardrails/test_tool_permission_streaming.py \
+            test_litellm/tools/kubetee-litellm-overlay \
+            unit/proxy/auth/test_auth_utils.py \
+            unit/proxy/db/test_routing_prisma_wrapper.py \
+            unit/proxy/guardrails/test_tool_permission_streaming.py \
             -k 'azure_entra_credential or secret_reference_in_a_credential or resolved_client_auth_reference_still or routes_to_reader or routes_to_writer or passphrase_returns_none'
           # Public checkout and exact packaged enterprise share one import source.
           docker run --rm \
@@ -228,16 +229,17 @@ jobs:
             -e LITELLM_LOCAL_MODEL_COST_MAP=True \
             -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
             -v /tmp/litellm-overlay-test-deps:/workspace:ro \
-            -v "$PWD:/tests:ro" \
+            -v "$PWD/tools:/tools:ro" \
+            -v "$PWD/tests:/tests:ro" \
             -w /tests \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
             -m pytest -q -p no:cacheprovider --import-mode=importlib \
-            tests/unit/llms/bedrock/passthrough/test_bedrock_passthrough_transformation.py \
-            tests/unit/proxy/openai_files_endpoint/test_files_common_utils.py \
-            'tests/unit/test_router/test_router.py::test_team_byok_wildcard_is_served_before_a_proxy_wide_wildcard_of_the_same_name' \
-            tests/unit/proxy/common_utils/test_reset_budget_job.py \
-            tests/unit/repositories/test_unit_of_work.py
+            unit/llms/bedrock/passthrough/test_bedrock_passthrough_transformation.py \
+            unit/proxy/openai_files_endpoint/test_files_common_utils.py \
+            'unit/test_router/test_router.py::test_team_byok_wildcard_is_served_before_a_proxy_wide_wildcard_of_the_same_name' \
+            unit/proxy/common_utils/test_reset_budget_job.py \
+            unit/repositories/test_unit_of_work.py
 
       - name: Verify upstream base with its published Cosign key
         env:
