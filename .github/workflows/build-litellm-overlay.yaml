@@ -301,7 +301,7 @@ jobs:
 
       - name: Verify upstream base with BerriAI's signed release identity
         env:
-          UPSTREAM_IMAGE: ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST}
+              UPSTREAM_IMAGE: ghcr.io/berriai/litellm-database@${{ env.DEFAULT_BASE_DIGEST }}
         run: |
           # BerriAI switched to Sigstore keyless signing on 2026-11-15:
           # https://github.com/BerriAI/litellm/discussions/48242
