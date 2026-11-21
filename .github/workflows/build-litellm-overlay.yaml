@@ -158,13 +158,9 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 https://github.com/BerriAI/litellm.git \
             096ff016817c1d26928ef984e5ee16ee285ccd28
-          # Squash is kubetee-prod's permitted linear integration, so the
-          # upstream base is a direct ancestor rather than necessarily HEAD^2.
-          # Exact content comparisons below do not assume a merge topology.
-          if test "$PUBLISH" = "true"; then
-            git merge-base --is-ancestor \
-              096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD
-          fi
+          # Protected squash integration drops the original merge parents.
+          # Pin the immutable upstream commit and require exact source/package
+          # identity below; do not infer provenance from ancestry/topology.
           test -z "$(git diff --name-only 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
               litellm litellm-proxy-extras enterprise docker ui litellm-rust \
               schema.prisma Dockerfile pyproject.toml Cargo.toml tests/unit \
