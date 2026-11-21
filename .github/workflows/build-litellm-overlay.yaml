@@ -162,7 +162,29 @@ jobs:
             test "$(git rev-parse HEAD^2)" = \
               "096ff016817c1d26928ef984e5ee16ee285ccd28"
           fi
-          cmp prisma/schema.prisma/prisma/schema.prisma prisma/schema.prisma
+          test ! -e docker/Dockerfile.database
+          cmp schema.prisma litellm/proxy/schema.prisma
+          cmp schema.prisma litellm-proxy-extras/litellm_proxy_extras/schema.prisma
+          test -z "$(git diff --name-only 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
+            schema.prisma litellm/proxy/schema.prisma \
+            litellm-proxy-extras/litellm_proxy_extras/schema.prisma)"
+          source_diff="$(git diff --name-status 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
+            'litellm/**/*.py' ':!litellm/proxy/_experimental/**' \
+            ':!litellm/llms/anthropic/pass_through/**')"
+          if printf '%s\n' "$source_diff" | grep -v '^A[[:space:]]'; then
+            printf 'Core source modifications outside packaging worktrees are forbidden:\n%s\n' "$source_diff"
+            exit 1
+          fi
+          if test -n "$source_diff"; then
+            printf 'Runtime additions must match the signed packaged release exactly:\n%s\n' "$source_diff"
+          fi
+          # Added source paths come from the v1.110.0 release merge, rather than
+          # the older unrelated-history import. They must also be present clean
+          # in the checkout (test-deps/dirty worktrees cannot mask one).
+          test -z "$(git ls-files --others --exclude-standard -- \
+            litellm schema.prisma litellm-proxy-extras enterprise docker)"
+          test -z "$(git diff --name-only HEAD -- \
+            litellm schema.prisma litellm-proxy-extras enterprise docker)"
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -v "$PWD:/source:ro" \
