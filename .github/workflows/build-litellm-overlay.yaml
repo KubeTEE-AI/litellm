@@ -201,15 +201,23 @@ jobs:
           ! grep -q '^litellm-enterprise' /tmp/litellm-test-requirements.txt
           test ! -d /tmp/litellm-overlay-test-deps/test-deps/litellm
           test ! -d /tmp/litellm-overlay-test-deps/test-deps/litellm_enterprise
+          # Assert the packaged public and enterprise APIs are one coherent base.
+          docker run --rm -v "$PWD:/tests:ro" \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} -c \
+            'from pathlib import Path; import litellm._internal_context as context; assert Path(context.__file__).resolve().is_relative_to(Path("/app/.venv")), context.__file__; from litellm._internal_context import internal_sub_call; from litellm_enterprise.proxy.hooks.managed_files import _PROXY_LiteLLMManagedFiles; print(Path(context.__file__).resolve())'
+          docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e LITELLM_LOCAL_MODEL_COST_MAP=True \
-            -e PYTHONPATH=/workspace/test-deps \
+            -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
             -v /tmp/litellm-overlay-test-deps:/workspace:ro \
-            -v "$PWD:/source:ro" \
-            -w /source \
+            # The packaged enterprise API can extend the public source. Keep
+            # tests separate so Python imports one complete installed runtime.
+            -v "$PWD:/tests:ro" \
+            -w /tests \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
-            -m pytest -q -p no:cacheprovider \
+            -m pytest -q -p no:cacheprovider --import-mode=importlib \
             tests/test_litellm/tools/kubetee-litellm-overlay \
             tests/unit/proxy/auth/test_auth_utils.py \
             tests/unit/proxy/db/test_routing_prisma_wrapper.py \
@@ -218,13 +226,15 @@ jobs:
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e LITELLM_LOCAL_MODEL_COST_MAP=True \
-            -e PYTHONPATH=/workspace/test-deps \
+            -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
             -v /tmp/litellm-overlay-test-deps:/workspace:ro \
-            -v "$PWD:/source:ro" \
-            -w /source \
+            # The packaged enterprise API can extend the public source. Keep
+            # tests separate so Python imports one complete installed runtime.
+            -v "$PWD:/tests:ro" \
+            -w /tests \
             --entrypoint /app/.venv/bin/python \
             ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
-            -m pytest -q -p no:cacheprovider \
+            -m pytest -q -p no:cacheprovider --import-mode=importlib \
             tests/unit/llms/bedrock/passthrough/test_bedrock_passthrough_transformation.py \
             tests/unit/proxy/openai_files_endpoint/test_files_common_utils.py \
             'tests/unit/test_router/test_router.py::test_team_byok_wildcard_is_served_before_a_proxy_wide_wildcard_of_the_same_name' \
