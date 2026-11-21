@@ -336,16 +336,14 @@ jobs:
           import json
           with open('/tmp/kubetee-upstream-release-verification.json') as f:
               proof = json.load(f)
-          expected = {
-              'docker-manifest-digest': 'sha256:f52042e5144a4bb452c8d5232aa894117e1500164e3c6d4dfa088d79eefaa632',
-              'docker-reference': 'ghcr.io/berriai/litellm-database',
-          }
-          for signature in proof:
-              image = signature['critical']['image']
-              assert image == expected, image
-              assert signature['critical']['identity']['docker-reference'] == expected['docker-reference']
-              assert signature['optional']['githubWorkflowSha'] == '8218089882391cfabe306b8ee3a97b3211d848b6'
-              assert signature['optional']['githubWorkflowRepository'] == 'BerriAI/project-releaser'
+              expected_digest = 'sha256:f52042e5144a4bb452c8d5232aa894117e1500164e3c6d4dfa088d79eefaa632'
+              expected_repository = 'ghcr.io/berriai/litellm-database'
+              for signature in proof:
+                  image = signature['critical']['image']
+                  assert image['docker-manifest-digest'] == expected_digest, image
+                  assert signature['critical']['identity']['docker-reference'] == expected_repository
+                  assert signature['optional']['githubWorkflowSha'] == '8218089882391cfabe306b8ee3a97b3211d848b6'
+                  assert signature['optional']['githubWorkflowRepository'] == 'BerriAI/project-releaser'
           print('Verified exact v1.110.0 index and upstream release workflow identity.')
           PY
 
