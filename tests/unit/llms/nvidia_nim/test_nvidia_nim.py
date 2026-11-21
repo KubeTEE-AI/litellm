@@ -1,6 +1,6 @@
 import json
 from typing import Final
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -8,7 +8,7 @@ from openai.types import CreateEmbeddingResponse, Embedding
 from openai.types.create_embedding_response import Usage as EmbeddingUsage
 
 import litellm
-from litellm import completion
+from litellm import ModelResponse, completion
 from tests.capturing_transport import CapturingTransport
 
 

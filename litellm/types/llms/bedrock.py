@@ -9,7 +9,7 @@ from typing_extensions import NotRequired, ReadOnly, Required, TypedDict, overri
 
 from litellm.types.llms.base import LiteLLMBaseModel
 
-from .openai import ChatCompletionImageUrlObject, ChatCompletionToolCallChunk
+from .openai import ChatCompletionToolCallChunk
 
 
 class CachePointBlock(TypedDict, total=False):
@@ -22,18 +22,8 @@ class SystemContentBlock(TypedDict, total=False):
     cachePoint: CachePointBlock
 
 
-class S3Location(TypedDict):
-    uri: ReadOnly[str]
-    bucketOwner: NotRequired[ReadOnly[str]]
-
-
-class SourceBlock(TypedDict, total=False):
-    bytes: ReadOnly[str | None]  # base 64 encoded string
-    s3Location: ReadOnly[S3Location]
-
-
-class S3MediaImageUrlObject(ChatCompletionImageUrlObject, total=False):
-    bucket_owner: ReadOnly[object]
+class SourceBlock(TypedDict):
+    bytes: str | None  # base 64 encoded string
 
 
 BedrockImageTypes = Literal["png", "jpeg", "gif", "webp"]
@@ -78,7 +68,6 @@ class SearchResultBlock(TypedDict, total=False):
 class ToolResultContentBlock(TypedDict, total=False):
     image: ImageBlock
     document: DocumentBlock
-    video: ReadOnly[VideoBlock]
     searchResult: SearchResultBlock
     json: dict
     text: str
@@ -255,7 +244,7 @@ class ConverseTokenUsageBlock(TypedDict, total=False):
 
 
 class ServiceTierBlock(TypedDict):
-    type: Literal["priority", "default", "flex", "reserved"]
+    type: Literal["priority", "default", "flex"]
 
 
 class ConverseResponseBlock(TypedDict, total=False):
@@ -1267,6 +1256,13 @@ class BedrockInvokeAnthropicMessagesRequest(TypedDict, total=False):
     # supported subset and strips the field entirely when nothing remains, so
     # other edit types (e.g. `clear_thinking_20251015`) never reach Bedrock.
     context_management: dict
+
+    # `compaction` ({"type": "summarize", "instructions"?: str}) is the
+    # `compact-2026-09-04` beta: one summarization call that returns a single
+    # signed compaction block. Bedrock rejects it together with
+    # `context_management`. Ref:
+    # https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html
+    compaction: ReadOnly[Mapping[str, object]]
 
 
 class BedrockBatchRecordKind(Enum):

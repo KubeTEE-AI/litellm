@@ -1,9 +1,7 @@
 import json
-from collections.abc import Mapping
 from typing import Final, Literal
 
 import httpx
-from pydantic import TypeAdapter
 
 import litellm
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
@@ -21,7 +19,6 @@ from litellm.types.utils import EmbeddingResponse
 from .transformation import VertexAIMultimodalEmbeddingConfig
 
 vertex_multimodal_embedding_handler: Final = VertexAIMultimodalEmbeddingConfig()
-_LITELLM_PARAMS: Final = TypeAdapter(Mapping[str, object])
 
 
 class VertexMultimodalEmbedding(VertexLLM):
@@ -87,7 +84,7 @@ class VertexMultimodalEmbedding(VertexLLM):
             sync_handler = client
 
         request_data: Final = vertex_multimodal_embedding_handler.transform_embedding_request(
-            model, input, optional_params, headers, _LITELLM_PARAMS.validate_python(litellm_params)
+            model, input, optional_params, headers
         )
 
         headers = vertex_multimodal_embedding_handler.validate_environment(

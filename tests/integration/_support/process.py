@@ -68,7 +68,7 @@ def boots_private_state(
     remove_environment: tuple[str, ...],
     inherited: Mapping[str, str],
 ) -> bool:
-    chosen: Final = state or OwnedState(inherited.get(OWNED_STATE_VARIABLE, OwnedState.SHARED_WITH_WORKER.value))
+    chosen: Final = state or OwnedState(inherited.get(OWNED_STATE_VARIABLE, OwnedState.PRIVATE.value))
     return chosen is OwnedState.PRIVATE and "DATABASE_URL" not in overrides and "DATABASE_URL" not in remove_environment
 
 
@@ -458,14 +458,14 @@ def owned_proxy(
 
 @contextmanager
 def isolated_gateway(directory: Path, environment: "pytest.MonkeyPatch") -> Iterator[Gateway]:
-    with gateway_from_environment() as shared, scratch_database() as database:
-        environment.setenv("DATABASE_URL", database)
-        environment.setenv("INTEGRATION_PROXY_DATABASE_URL", database)
+    with gateway_from_environment() as shared, owned_proxy(shared, directory, {}, state=OwnedState.PRIVATE) as owned:
+        assert owned.database_url is not None
+        environment.setenv("DATABASE_URL", owned.database_url)
+        environment.setenv("INTEGRATION_PROXY_DATABASE_URL", owned.database_url)
         environment.delenv("INTEGRATION_PROXY_READ_REPLICA_URL", raising=False)
         environment.delenv("DATABASE_URL_READ_REPLICA", raising=False)
-        with owned_proxy(shared, directory, {}) as owned:
-            owned.post("/config/update", {"router_settings": {"num_retries": 0}})
-            yield owned
+        owned.post("/config/update", {"router_settings": {"num_retries": 0}})
+        yield owned
 
 
 def _stop(process: subprocess.Popen[bytes]) -> None:
@@ -893,7 +893,7 @@ def owned_proxy_process(
                 limits=GATEWAY_LIMITS,
             ) as client:
                 yield OwnedProxy(
-                    Gateway(client, gateway.key, gateway.upstream_url, owned.database_url),
+                    Gateway(client, gateway.key, gateway.upstream_url, owned.database_url, workers),
                     process,
                     launch.log,
                     healthcheck,
@@ -987,6 +987,7 @@ def refused_boot_log(
     overrides: Mapping[str, str],
     *,
     config: Path | None = None,
+    extra_arguments: tuple[str, ...] = (),
 ) -> str:
     """Start the proxy and return its log once it exits non-zero instead of becoming ready."""
     root: Final = _proxy_root()
@@ -1004,6 +1005,7 @@ def refused_boot_log(
         "--num_workers",
         "1",
         *DB_PUSH,
+        *extra_arguments,
     )
     launch: Final = _launch(command, root, environment, output)
     try:
