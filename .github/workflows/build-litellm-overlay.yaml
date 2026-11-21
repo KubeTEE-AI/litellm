@@ -186,7 +186,7 @@ jobs:
           docker rm kubetee-test-uv
           /tmp/kubetee-test-uv export --format requirements.txt \
             --no-emit-project --frozen --group dev --group e2e-dev \
-            --no-hashes > /tmp/litellm-test-requirements.txt
+            --no-hashes | grep -v -E '^litellm(-enterprise|-proxy-extras)([ =@]|$)' > /tmp/litellm-test-requirements.txt
           docker run --rm \
             -v /tmp/kubetee-test-uv:/usr/local/bin/uv:ro \
             -v /tmp/litellm-test-requirements.txt:/tmp/requirements.txt:ro \
@@ -196,7 +196,11 @@ jobs:
             pip install --quiet --target /workspace/test-deps \
               --python /app/.venv/bin/python \
               --requirement /tmp/requirements.txt
-          docker run --rm \
+          # Do not shadow the base's litellm or enterprise runtime with the
+          # test-deps directory; only its tools and test helpers are added.
+          ! grep -q '^litellm-enterprise' /tmp/litellm-test-requirements.txt
+          test ! -d /tmp/litellm-overlay-test-deps/test-deps/litellm
+          test ! -d /tmp/litellm-overlay-test-deps/test-deps/litellm_enterprise
             -e PYTHONDONTWRITEBYTECODE=1 \
             -e LITELLM_LOCAL_MODEL_COST_MAP=True \
             -e PYTHONPATH=/workspace/test-deps \
