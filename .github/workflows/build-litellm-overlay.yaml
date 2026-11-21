@@ -162,7 +162,8 @@ jobs:
             test "$(git rev-parse HEAD^2)" = \
               "096ff016817c1d26928ef984e5ee16ee285ccd28"
           fi
-          test ! -e docker/Dockerfile.database
+          test -z "$(git diff --name-only 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
+            docker/Dockerfile.database)"
           cmp schema.prisma litellm/proxy/schema.prisma
           cmp schema.prisma litellm-proxy-extras/litellm_proxy_extras/schema.prisma
           test -z "$(git diff --name-only 096ff016817c1d26928ef984e5ee16ee285ccd28 HEAD -- \
