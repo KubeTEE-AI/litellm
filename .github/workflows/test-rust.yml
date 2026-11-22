@@ -30,7 +30,8 @@ on:
       - ".github/workflows/test-rust.yml"
   pull_request:
     branches:
-      - "*"
+      - main
+      - "litellm_**"
     paths:
       - "litellm-rust/**"
       - "litellm/rust_bridge/**"
@@ -150,7 +151,7 @@ jobs:
       - name: Test secret manager feature combinations
         run: |
           cargo test -p litellm-auth-gcp --locked --no-default-features
-          for features in '' aws google hashicorp azure cyberark aws,google aws,azure aws,google,azure aws,google,cyberark aws,google,azure,cyberark aws,google,hashicorp,azure,cyberark; do
+          for features in '' aws google hashicorp azure cyberark aws,google aws,azure google,azure aws,google,azure aws,google,cyberark aws,google,azure,cyberark aws,google,hashicorp,azure,cyberark; do
             cargo test -p litellm-secrets --locked --no-default-features --features "$features"
           done
 
@@ -186,30 +187,8 @@ jobs:
 
       - run: python tests/unit/rust_bridge/native_route_wheel_test.py dist/*.whl
 
-      # Validate the already-built wheel once. Repeating `make test-rust-extension`
-      # would needlessly compile a second full wheel before running the same tests.
-      - name: Install the built wheel in an isolated test environment
-        run: |
-          echo "VENV=${RUNNER_TEMP}/litellm-rust-test-venv" >> "${GITHUB_ENV}"
-          uv venv "${VENV}" --python 3.12
-          uv sync --frozen --no-install-project --all-groups --all-extras
-          uv pip install --python "${VENV}/bin/python" --no-deps dist/*.whl
-
-      - run: >-
-          "${VENV}/bin/python" -I -m mypy.stubtest --mypy-config-file
-          tests/unit/rust_bridge/stubtest.ini litellm.rust_bridge._native
-
-      # v1.110.2 retains `cache/v2/test_cache.py` after BerriAI #50005 removed
-      # the experimental `litellm._v2` facade and `litellm/_v2/__init__.py`.
-      # `_v2.Cache` per specification exposes host objects living in `sys.modules`.
-      # Keep the normal cache suite, excluding only the deleted `_v2` facade test.
-      - name: Run Rust route tests with the built extension
-        env:
-          LITELLM_LOCAL_MODEL_COST_MAP: "True"
-        run: >-
-          "${VENV}/bin/python" -I -m pytest
-          --import-mode=importlib -m requires_rust_extension
-          --ignore=tests/test_litellm_rust/cache/v2 tests/test_litellm_rust
+      - name: Run pytest tests/test_litellm_rust with the compiled extension
+        run: make test-rust-extension
 
       - run: >-
           uv build --wheel --out-dir panic-dist
