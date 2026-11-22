@@ -19,8 +19,8 @@
 # Tags: <upstream>-kubetee.N (e.g. 1.108.9-kubetee.1). Never reuse a tag.
 # BASE_DIGEST is the cosign-verified upstream multi-architecture index.
 # The AMD64 build resolves and records the matching child image digest.
-ARG BASE_TAG=1.110.0
-ARG BASE_DIGEST=sha256:f52042e5144a4bb452c8d5232aa894117e1500164e3c6d4dfa088d79eefaa632
+ARG BASE_TAG=1.110.2
+ARG BASE_DIGEST=sha256:3b239acc68e601c436e5feeec7ca0f01a41cd5dffe50975142b7fa7155c1b2ff
 FROM ghcr.io/berriai/litellm-database@${BASE_DIGEST}
 
 # kubetee_route_guard.py: blocks GET /v1/videos (global-store enumeration).
