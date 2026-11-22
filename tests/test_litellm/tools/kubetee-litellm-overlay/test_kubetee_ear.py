@@ -22,6 +22,7 @@ import base64
 import hashlib
 import importlib.util
 import sys
+import types
 from pathlib import Path
 from typing import Any, Final
 
@@ -120,6 +121,22 @@ def _load_key(pem: bytes):
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
     return load_pem_private_key(pem, password=None)
+
+
+def test_snp_vm_config_hashes_the_measured_initdata(tmp_path, monkeypatch):
+    text = 'algorithm = "sha384"\nversion = "0.1.0"\n\n[data]\nrole = "litellm"\n'
+    path = tmp_path / "initdata.toml"
+    path.write_text(text)
+    monkeypatch.setattr(ke, "INITDATA_TOML_PATH", str(path))
+    monkeypatch.delenv(ke.INITDATA_B64_ENV, raising=False)
+    monkeypatch.setitem(sys.modules, "kubetee_attestation", types.SimpleNamespace(TEE_TYPE="snp"))
+
+    config = ke.vm_config()
+    assert config is not None
+    assert config["host_data"] == hashlib.sha384(text.encode()).digest()[:32].hex()
+    assert config["host_data_semantics"] == "kata4initdataSha384Truncated32"
+    assert config["initdata_sha384"] == hashlib.sha384(text.encode()).hexdigest()
+    assert config["runtime_class"] == "kata-qemu-snp-runtime-rs"
 
 
 # --- tee_pubkey_of: both kbs-types arms ------------------------------------

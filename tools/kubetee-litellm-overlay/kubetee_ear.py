@@ -272,6 +272,9 @@ def vm_config() -> dict[str, Any] | None:
             "tdx": "kata-qemu-tdx-runtime-rs", "snp": "kata-qemu-snp-runtime-rs"
         }[TEE_TYPE])
         if TEE_TYPE == "snp":
+            text = load_initdata_text()
+            if text is None:
+                return out
             out["host_data"] = hashlib.sha384(text.encode("utf-8")).digest()[:32].hex()
             out["host_data_semantics"] = "kata4initdataSha384Truncated32"
     return out
