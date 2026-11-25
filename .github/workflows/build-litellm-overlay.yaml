@@ -97,6 +97,8 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-22.04
+    outputs:
+      image_ref: ${{ steps.record.outputs.image_ref }}
     permissions:
       contents: read
       packages: write
@@ -533,11 +535,13 @@ jobs:
           echo "Built ${REGISTRY}/${IMAGE_NAME}:${TAG} (PUBLISH=${PUBLISH})"
 
       - name: Record and sign immutable digest
+        id: record
         if: ${{ env.PUBLISH == 'true' }}
         run: |
           IMAGE_DIGEST=$(python3 -c 'import json; print(json.load(open("/tmp/kubetee-image-metadata.json"))["containerimage.digest"])')
           echo "IMAGE_REF=${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}" >> "$GITHUB_ENV"
           echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+          echo "image_ref=${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}" >> "$GITHUB_OUTPUT"
           cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
           python3 - <<'PY' > /tmp/kubetee-overlay-provenance.json
           import json, os
@@ -617,3 +621,24 @@ jobs:
               print(m, f.stat().st_size, 'bytes')
           "
           echo "image ${REGISTRY}/${IMAGE_NAME}:${TAG} verified"
+
+  # === KubeTEE attestation automation (measure -> sign -> publish) ===
+  # Chains the shared publisher in KubeTEE-AI/kubetee-website so every new LiteLLM
+  # gateway image is measured, signed and published automatically -- the SNP reference
+  # backing the client-facing GET https://llm.kubetee.ai/v1/attestation goes live on
+  # deploy, so clients can validate immediately. Skipped (not failed) until the
+  # attestation secrets/vars are set.
+  measure-sign-publish:
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/kubetee-prod' && vars.SNP_GUEST_HOST != '' }}
+    needs: [build-and-push]
+    uses: KubeTEE-AI/kubetee-website/.github/workflows/measure-sign-publish.yml@main
+    with:
+      image_ref: ${{ needs.build-and-push.outputs.image_ref }}
+      tee: snp
+      model: litellm-gateway
+      guest_host: ${{ vars.SNP_GUEST_HOST }}
+      evidence_path: /v1/attestation
+      json_name: tee-measurements.json
+    secrets:
+      TEE_MEASUREMENTS_SIGNING_KEY: ${{ secrets.TEE_MEASUREMENTS_SIGNING_KEY }}
+      WEBSITE_REPO_TOKEN: ${{ secrets.WEBSITE_REPO_TOKEN }}
