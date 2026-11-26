@@ -72,14 +72,17 @@
 # it is public on the guest network. The endpoint discloses no secrets
 # (nonce + SNP evidence of THIS guest only).
 
+import asyncio
 import base64
 import binascii
+import datetime
 import hashlib
 import json
 import os
 import re
 import socket
-from typing import Any
+import time
+from typing import Any, Final
 from urllib.parse import urlencode
 
 import kubetee_binding
@@ -235,6 +238,823 @@ async def _aa_get_evidence(runtime_data_b64url: str) -> dict:
         resp = await client.get(url)
         resp.raise_for_status()
         return json.loads(resp.content)
+
+
+# ---------------------------------------------------------------------------
+# Backend evidence cache — shared across keys, never per key
+# ---------------------------------------------------------------------------
+# The backend (sglang) guest mints its own evidence at most once per epoch and
+# this module RELAYS it. The cache is keyed by backend endpoint (a serving
+# pod's api_base) and shared by EVERY API key on the gateway: a warm lookup is
+# a dict read with no I/O and no key material involved. A cold or expired
+# entry costs exactly ONE fetch under a per-endpoint asyncio.Lock (single
+# flight: N concurrent first requests mint one quote, not N). Nothing here
+# reads `user_api_key_dict`, and no key gets its own quote.
+#
+# The serving rule is the user's, literally: **serve the last quote if it is
+# under `KUBETEE_BACKEND_QUOTE_TTL_S` old (default 300 s = 5 min)**. Past that
+# we refetch; if the refetch fails we do NOT serve the stale quote — we fall
+# back to the boot-time boundary label and say so
+# (`X-KubeTEE-Backend-Evidence-Error`). Fail closed: never fabricate evidence
+# and never present a quote as fresh outside its epoch.
+#
+# The per-request caller binding (a signature over
+# sha256(quote)||sha256(nonce)||epoch_id made with the BACKEND's key) cannot be
+# produced here — LiteLLM does not hold the backend's key. It rides along from
+# the backend with the quote (see `_normalize_backend_evidence`), minted once
+# per epoch alongside it.
+_BACKEND_QUOTE_TTL_S: Final[float] = float(
+    os.environ.get("KUBETEE_BACKEND_QUOTE_TTL_S", "300")
+)
+_BACKEND_ATTEST_PATH: Final[str] = os.environ.get(
+    "KUBETEE_BACKEND_ATTEST_PATH", "/kubetee/evidence"
+)
+_BACKEND_ROLE: Final[str] = os.environ.get("KUBETEE_BACKEND_ROLE", "nim-terminator")
+_BACKEND_QUOTE_MAX: Final[int] = int(os.environ.get("KUBETEE_BACKEND_QUOTE_MAX", "32"))
+_BACKEND_EVIDENCE_MAX_HEADER_CHARS: Final[int] = int(
+    os.environ.get("KUBETEE_BACKEND_EVIDENCE_MAX_HEADER_CHARS", "24000")
+)
+
+# --- Reference registry (the CLIENT-FACING allowlist) -----------------------
+# The backend's live TDX registers are matched against the SIGNED reference
+# registry `kubetee.ai/.well-known/tee-measurements-registry.json`
+# (schema `kubetee.tee-measurements-registry/1`), NOT against one pinned set.
+# A record that matches ANY active record is approved; every record carries its
+# own `valid_until` (90-day horizon) so a record outside its window is treated
+# as deprecated and the matcher moves to the next — matching the client-facing
+# `policy.match = any-active-record` contract in CLIENT-FACING-ATTESTATION.md.
+# The registry is Ed25519-signed (RFC 8785 over the doc minus `signature`); the
+# pinned PUBLIC key lives here (public keys are not secrets). With the default
+# verification PUBLIC key unset, the registry is still matched but the
+# signature is not checked.
+_REGISTRY_URL: Final[str] = os.environ.get(
+    "KUBETEE_REGISTRY_URL",
+    "https://kubetee.ai/.well-known/tee-measurements-registry.json",
+)
+_REGISTRY_PUBLIC_KEY_B64: Final[str] = os.environ.get("KUBETEE_REGISTRY_PUBLIC_KEY", "")
+_REGISTRY_CACHE_TTL_S: Final[float] = float(os.environ.get("KUBETEE_REGISTRY_CACHE_TTL_S", "300"))
+_REGISTRY_TIMEOUT_S: Final[float] = float(os.environ.get("KUBETEE_REGISTRY_TIMEOUT_S", "15"))
+_RECORD_FIELDS: Final[tuple[str, ...]] = (
+    "mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3", "mrconfigid",
+)
+
+_registry_cache: dict[str, Any] | None = None
+_registry_cache_monotonic: float = 0.0
+
+_backend_quotes: dict[str, dict[str, Any]] = {}
+_backend_quote_locks: dict[str, asyncio.Lock] = {}
+_backend_quote_stats: dict[str, int] = {"hit": 0, "miss": 0, "fetch_error": 0}
+
+
+def _eastwest_client_material() -> tuple[str, str] | None:
+    """(client_cert_path, ca_path) for strict east-west mTLS, or None.
+
+    Layout owned by kubetee_eastwest.fetch_eastwest(): `client.pem` is the
+    concatenated cert+key, `ca.pem` is the east-west trust anchor. Present in
+    the gateway's container-local scratch (`/run/kubetee-eastwest`) — not the
+    host-shared `/certs`. Absent material means we cannot prove our identity
+    to the backend's strict mTLS listener, so we return None and the fetch
+    fails closed rather than downgrading to plaintext.
+    """
+    import kubetee_eastwest
+
+    directory = kubetee_eastwest.EASTWEST_DIR
+    cert = os.path.join(directory, "client.pem")
+    ca = os.path.join(directory, "ca.pem")
+    if os.path.exists(cert) and os.path.exists(ca):
+        return cert, ca
+    return None
+
+
+def _backend_attest_url(api_base: str) -> str:
+    """The backend's evidence endpoint.
+
+    Deliberately NOT `/v1/attestation` — that path is the **gateway's** evidence
+    surface (`_mount_attestation_route`) and stays gateway-only. The backend
+    serves its own role-scoped route on its strict-mTLS listener, here
+    The backend serves its role-scoped route at the **root** of its strict-mTLS
+    listener, NOT under `/v1` (which the guest's /v1 router reserves for the
+    OpenAI surface). `api_base` ends in `/v1`, so the `/v1` segment is STRIPPED
+    before appending `_BACKEND_ATTEST_PATH` — otherwise we request
+    `<api_base>/v1/kubetee/evidence`, which 404s (verified live 2026-11-25:
+    `/kubetee/evidence` -> HTTP 200, `/v1/kubetee/evidence` -> HTTP 404). An
+    `api_base` without a trailing `/v1` is used as-is.
+    """
+    base = api_base.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[: -len("/v1")]
+    return base + _BACKEND_ATTEST_PATH
+
+
+def _normalize_backend_evidence(raw: Any, api_base: str) -> dict[str, Any] | None:
+    """Project the backend's evidence onto a self-describing envelope.
+
+    The client does not know (and must not have to guess) whether the backend
+    is TDX or SNP, so this normalizes BOTH into one envelope whose `schema`,
+    `tee` and `role` fields discriminate. A TDX backend yields
+    `schema: kubetee.tdx-evidence/1` with a `quote`; an SNP backend yields
+    `schema: kubetee.snp-evidence/1` with native `snp`. The role is always
+    `nim-terminator`, which is what distinguishes this from the gateway's own
+    evidence — a TEE name alone cannot.
+
+    The backend's mint-time signature over the quote is carried through
+    verbatim (`signature`) — this module relays it and never re-signs, because
+    it does not hold the backend's key.
+    """
+    if not isinstance(raw, dict):
+        return None
+    evidence = raw.get("evidence") if isinstance(raw.get("evidence"), dict) else {}
+    tee = (raw.get("tee") or raw.get("tee_type") or "").strip().lower()
+    if tee not in ("tdx", "snp"):
+        # Infer only if the payload leaves it implicit; never guess wrong.
+        tee = "tdx" if (raw.get("quote") or evidence.get("quote")) else "snp"
+
+    quote = raw.get("quote") or evidence.get("quote")
+    if quote is not None and not isinstance(quote, str):
+        quote = base64.b64encode(bytes(quote)).decode("ascii")
+
+    snp = evidence.get("snp")
+    if tee == "snp" and snp is not None and quote is None:
+        # SNP: carry the native structured report; `quote` stays empty.
+        quote = None
+
+    if tee == "tdx" and not quote:
+        return None  # a TDX backend must actually yield a quote
+    if tee == "snp" and snp is None and not quote:
+        return None  # an SNP backend must yield a native report
+
+    # quote_sha256 over the canonical evidence bytes actually served.
+    if quote is not None:
+        digest_src = base64.b64decode(quote + "=" * (-len(quote) % 4))
+    else:
+        digest_src = json.dumps(snp, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+    epoch = {
+        "id": raw.get("epoch_id") or (raw.get("bindings") or {}).get("epoch_id") or "",
+        "issued_at": raw.get("issued_at") or "",
+        "valid_until": raw.get("valid_until") or "",
+    }
+    schema = f"kubetee.{'tdx' if tee == 'tdx' else 'snp'}-evidence/1"
+    return {
+        "subject": "nim-terminator",
+        "schema": schema,
+        "tee": tee,
+        "role": raw.get("role") or _BACKEND_ROLE,
+        "runtime_class": raw.get("runtime_class") or "",
+        "epoch": epoch,
+        "quote": quote,
+        "report_data": evidence.get("quote_report_data") or raw.get("report_data"),
+        # The exact bytes hashed into report_data (an EPOCH statement, shared by
+        # every caller in the epoch — NOT any caller's nonce). Served verbatim
+        # so a caller verifies SHA-256(report_data_statement) || 32 zeros against
+        # report_data without re-deriving the epoch. Present when the backend
+        # binds an epoch; the per-caller nonce is bound only by `signature`.
+        "report_data_statement": (
+            raw.get("report_data_statement")
+            or (raw.get("bindings") or {}).get("report_data_statement")
+        ),
+        "event_log": raw.get("cc_eventlog") or evidence.get("event_log"),
+        "snp": snp,
+        "signature": raw.get("backend_signature") or raw.get("signature"),
+        "cert_chain": evidence.get("cert_chain"),
+        "quote_sha256": hashlib.sha256(digest_src).hexdigest(),
+        "api_base": api_base,
+    }
+
+
+def _prune_backend_quotes() -> None:
+    """Bound the cache to registered backends (simple-shuffle has 1-2 rows)."""
+    while len(_backend_quotes) > _BACKEND_QUOTE_MAX:
+        _backend_quotes.pop(next(iter(_backend_quotes)))
+
+
+async def _fetch_backend_evidence(url: str) -> dict[str, Any]:
+    """One evidence fetch from the backend guest over strict east-west mTLS.
+
+    This fetch binds NO caller nonce — deliberately. A hardware quote is sealed
+    at mint: a nonce in `report_data` would make the quote usable by exactly
+    that nonce's owner and therefore uncachable. So the backend's cached quote
+    binds its **epoch statement** instead (identical for every caller inside
+    the epoch) and returns the exact hashed bytes as `report_data_statement`,
+    so ANY caller can verify `SHA-256(statement) ‖ 32 zero bytes == report_data`.
+    Per-caller binding, when wanted, is a separate signature the backend makes
+    over `sha256(quote)‖sha256(caller_nonce)‖epoch_id` during the completion —
+    a cheap sign, never a quote mint. This module only relays both.
+
+    `role` selects the backend's role-scoped route; there is no nonce param on
+    the shared cache path.
+    """
+    import httpx
+
+    material = _eastwest_client_material()
+    client_kwargs: dict[str, Any] = {"timeout": 30.0}
+    if material is not None:
+        client_kwargs["cert"], client_kwargs["verify"] = material
+    async with httpx.AsyncClient(**client_kwargs) as client:
+        resp = await client.get(url, params={"role": _BACKEND_ROLE})
+        resp.raise_for_status()
+        return json.loads(resp.content)
+
+
+async def _backend_evidence(api_base: str) -> dict[str, Any] | None:
+    """The backend's evidence, cached in this process for < TTL seconds.
+
+    Shared by every API key — a warm hit is a dict read. Returns None when no
+    acceptable evidence is available (fail closed to the boundary label).
+    """
+    key = _backend_attest_url(api_base)
+    entry = _backend_quotes.get(key)
+    if entry is not None and (time.monotonic() - entry["_minted_monotonic"]) < _BACKEND_QUOTE_TTL_S:
+        _backend_quote_stats["hit"] += 1
+        entry["_source"] = "cache"
+        return entry
+
+    lock = _backend_quote_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        # Double-check after acquiring: a concurrent caller may have minted.
+        entry = _backend_quotes.get(key)
+        if (
+            entry is not None
+            and (time.monotonic() - entry["_minted_monotonic"]) < _BACKEND_QUOTE_TTL_S
+        ):
+            _backend_quote_stats["hit"] += 1
+            entry["_source"] = "cache"
+            await _observe_backend_evidence(key, entry)  # cheap re-verify (breaker)
+            return entry
+        _backend_quote_stats["miss"] += 1
+        try:
+            raw = await _fetch_backend_evidence(key)
+        except Exception:
+            _backend_quote_stats["fetch_error"] += 1
+            return None
+        entry = _normalize_backend_evidence(raw, api_base)
+        if entry is None:
+            return None
+        entry["_minted_monotonic"] = time.monotonic()
+        entry["_source"] = "fetch"
+        _backend_quotes[key] = entry
+        _prune_backend_quotes()
+        await _observe_backend_evidence(key, entry)  # fresh verify (breaker)
+        return entry
+
+
+# ---------------------------------------------------------------------------
+# Measurement-drift circuit breaker (gateway detective + enforcement)
+# ---------------------------------------------------------------------------
+# A compromised / tampered backend whose measured launch inputs MOVE is caught
+# here and cut off from the data plane. The design is deliberately layered so
+# one detector does not mask another:
+#
+#   TRIP   = the backend's COMPOSITION changed -> it must not serve. Auto-block
+#            its LiteLLM row (POST /model/block) + alert. Measured drift is a
+#            breach signal.
+#   DEGRADE= evidence is unavailable/stale (freshness gap) -> still serving,
+#            but only with the boot boundary label and an explicit error
+#            header. A freshness gap is an EVIDENCE gap, not proof of drift, so
+#            it never blocks a serving backend (fail-closed on fabrication).
+#
+# Freshness naming (matches CLIENT-FACING-ATTESTATION.md "Backend evidence"):
+# Layer 1 = hardware epoch (the DCAP quote, `report_data` binds the epoch
+# statement); Layer 2 = per-request signature by the backend's `tee-pubkey`
+# (Ed25519, distinct from its TLS key) over
+# `SHA-256(quote) || SHA-256(nonce) || epoch_id || counter`, `counter` a
+# monotonic per-epoch request counter. The breaker treats an expired/absent
+# epoch as a DEGRADE (Layer-1 freshness gap), never a TRIP.
+#
+# Seven trip conditions over the normalized backend envelope. TDX registers
+# are uppercase hex; trust-vector semantics follow the Trustee EAR draft-04
+# AR4SI levels (APPROVED_CONFIG=2 / APPROVED_FILES=2; low = trusted).
+#
+# All state is IN-MEMORY and per-process. This is a detective/enforcement layer
+# on top of the authoritative KBS resource-policy gate
+# (nim/eastwest/resource-policy.rego `image_gen_measured`), which blocks a
+# drifted guest's cert fetch at the source. It is NOT a durable store and NOT a
+# source of truth across gateway restarts.
+#
+# Enforcement (auto-block + alert) is OPT-IN: default OFF. Enabled with
+# KUBETEE_BREAKER_ENFORCE=1 once the triage/rollback runbook is in place —
+# flipping a serving model to 503 must be a reviewed deployment, never an
+# agent reflex (see the pre-apply/ask-before rules). Detection and the 503
+# surface are always on.
+
+# Declared reference measures for the image-gen SGLang backend class. Source:
+# kubetee-subnet/docs/tee-measurements-sglang.tdx.draft.json. A field left None
+# is not-yet-captured and therefore not enforced (a None expectation can never
+# trip — enforced only when set).
+_EXPECTED_BACKEND: dict[str, Any] = {
+    "role": os.environ.get("KUBETEE_BACKEND_EXPECTED_ROLE", "image-gen"),
+    "mrconfigid": os.environ.get(
+        "KUBETEE_BACKEND_EXPECTED_MRCONFIGID",
+        "0484a58e5927efd31bf871c74bcc9f1768f4335bb92340176989b3c5b320f934"
+        "1d772b9e3e9c4fe4d824613cc19e6e0b",
+    ).lower(),
+    "mrtd": (os.environ.get("KUBETEE_BACKEND_EXPECTED_MRTD") or "").lower() or None,
+    "rtmr0": (os.environ.get("KUBETEE_BACKEND_EXPECTED_RTMR0") or "").lower() or None,
+    "rtmr1": (os.environ.get("KUBETEE_BACKEND_EXPECTED_RTMR1") or "").lower() or None,
+    "rtmr2": (os.environ.get("KUBETEE_BACKEND_EXPECTED_RTMR2") or "").lower() or None,
+    "rtmr3": (os.environ.get("KUBETEE_BACKEND_EXPECTED_RTMR3") or "").lower() or None,
+    "ovmf_fd_sha256": (
+        os.environ.get("KUBETEE_BACKEND_EXPECTED_OVMF")
+        or "2a2dc2710b0cfafc813310c7e98c67b72b919b8e1572d52a4c79466a2e499226"
+    ).lower() or None,
+}
+
+_BREAKER_ENFORCE: bool = os.environ.get("KUBETEE_BREAKER_ENFORCE", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+_BREAKER_BACKEND: Final[str] = os.environ.get(
+    "KUBETEE_BREAKER_BACKEND", "kimi-k3-1-pro39-sglang-b300-cc-0"
+)
+_BREAKER_BLOCK_URL: Final[str] = os.environ.get(
+    "KUBETEE_BREAKER_BLOCK_URL", "https://llm.kubetee.ai/model/block"
+)
+_BREAKER_ALERT_URL: Final[str] = os.environ.get("KUBETEE_BREAKER_ALERT_URL", "")
+
+# 1 = CLOSED (healthy) · 2 = OPEN (tripped; serving blocked) · 3 = HALF-OPEN.
+BREAKER_CLOSED: Final[int] = 1
+BREAKER_OPEN: Final[int] = 2
+BREAKER_HALF_OPEN: Final[int] = 3
+
+_HEX_RE: Final = re.compile(r"[0-9a-f]{2,}")
+
+
+class _Breaker:
+    """One-backend CLOSED/OPEN/HALF-OPEN state machine (in-memory)."""
+
+    __slots__ = ("state", "trips", "degradations", "opened_at", "last_reason", "last_degrade_reason")
+
+    def __init__(self) -> None:
+        self.state: int = BREAKER_CLOSED
+        self.trips: int = 0
+        self.degradations: int = 0
+        self.opened_at: float | None = None
+        self.last_reason: str | None = None
+        self.last_degrade_reason: str | None = None
+
+    @property
+    def open(self) -> bool:
+        return self.state == BREAKER_OPEN
+
+
+_breakers: dict[str, _Breaker] = {}
+_breaker_lock = asyncio.Lock()
+_breaker_notified: set[str] = set()  # one alert+block per trip; no storm
+_breaker_stats: dict[str, int] = {"checked": 0, "tripped": 0, "degraded": 0, "enforce_ok": 0, "enforce_err": 0}
+
+
+def _breaker_for(endpoint: str) -> _Breaker:
+    return _breakers.setdefault(endpoint, _Breaker())
+
+
+def _extract_registers(evidence: dict[str, Any]) -> dict[str, str | None]:
+    """Pull MRTD/RTMR0-3/MRCONFIGID from the TDX quote body, hex -> lower.
+
+    Verifies against the quote a client reads, not self-declared summary text.
+    An SNP backend has no TDX registers (its composition is `measurement`/
+    `host_data`), so it returns all-None here and the register trip conditions
+    cannot fire for it (by design — enforce an SNP reference in the SNP twin).
+
+    Byte offsets are the AUTHORITATIVE `TDReport10` layout (Intel TDX
+    attestation; the same struct the validated `gm-miner/attestd`
+    `kubetee_verify::Measurements::of` reads via `dcap_qvl::quote::TDReport10`).
+    The report body starts at quote byte 48 (the quote header), and
+    `TDReport10` is the base of BOTH TDX Quote v4 (TD10) and v5 (TD15) report
+    bodies — the first 584 bytes (the fields below) are identical, so these
+    offsets hold across versions. Field/offset table (body-relative):
+
+        tee_tcb_svn     [  0: 16]   mr_td           [136:184]
+        mr_seam         [ 16: 64]   mr_config_id    [184:232]
+        mr_signer_seam  [ 64:112]   mr_owner        [232:280]
+        seam_attributes [112:120]   mr_owner_config [280:328]
+        td_attributes   [120:128]   rt_mr0          [328:376]
+        xfam            [128:136]   rt_mr1          [376:424]
+                                    rt_mr2          [424:472]
+                                    rt_mr3          [472:520]
+        report_data     [520:584]  (quote-absolute [568:632])
+
+    The `report_data` cross-check (quote-absolute 568) matches
+    `kubetee_binding.py`'s documented "REPORTDATA offset 568 (TDREPORT1.6
+    layout)" — a wrong base/offset scheme would move every register, so this
+    anchors the whole table. Registers are read as their raw hex (byte order
+    as stored), matching `hex::encode` of the register bytes in `kubetee_verify`.
+    """
+    out: dict[str, str | None] = {"mrtd": None, "rtmr0": None, "rtmr1": None, "rtmr2": None, "rtmr3": None, "mrconfigid": None}
+    if evidence.get("tee") != "tdx":
+        return out
+    quote = evidence.get("quote")
+    if not isinstance(quote, str) or not quote:
+        return out
+    try:
+        raw = base64.b64decode(quote + "=" * (-len(quote) % 4), validate=False)
+    except Exception:
+        return out
+    # Prefer RELAYED parsed claims when the backend carries them (evidence.tdx
+    # or evidence.claims.quote.body.*) — byte-exact from an attester/verifier.
+    claims = _tdx_body_claims(evidence)
+    if claims:
+        for src, dst in (
+            ("mr_td", "mrtd"),
+            ("rtmr_0", "rtmr0"),
+            ("rtmr_1", "rtmr1"),
+            ("rtmr_2", "rtmr2"),
+            ("rtmr_3", "rtmr3"),
+            ("mr_config_id", "mrconfigid"),
+        ):
+            v = claims.get(src)
+            if isinstance(v, str) and _HEX_RE.fullmatch(v.strip().lower()):
+                out[dst] = v.strip().lower()
+        return out
+    # Raw-quote reconstruction: quote header is 48 bytes, then the TDReport10
+    # body at the offsets above. Requires the full TDReport10 body present.
+    if len(raw) < 48 + 584:
+        return out
+    body = raw[48:]
+
+    def reg(a: int, b: int) -> str:
+        return body[a:b].hex()
+
+    out["mrtd"] = reg(136, 184)       # mr_td
+    out["mrconfigid"] = reg(184, 232)  # mr_config_id
+    out["rtmr0"] = reg(328, 376)      # rt_mr0
+    out["rtmr1"] = reg(376, 424)      # rt_mr1
+    out["rtmr2"] = reg(424, 472)      # rt_mr2
+    out["rtmr3"] = reg(472, 520)      # rt_mr3
+    return out
+
+
+def _tdx_body_claims(evidence: dict[str, Any]) -> dict[str, Any]:
+    """Parsed TDX quote-body claims if the evidence carries them.
+
+    The relayed backend envelope may carry parsed claims (evidence.tdx.* or a
+    claims tree) alongside the raw quote. When present they are authoritative
+    (byte-exact from the attester/verifier), so prefer them over offset
+    reconstruction. Returns {} when absent.
+    """
+    for key in ("tdx", "claims", "quote_claims"):
+        node = evidence.get(key)
+        if isinstance(node, dict):
+            body = node.get("quote", node).get("body") if isinstance(node.get("quote", node), dict) else None
+            if isinstance(body, dict) and any(k in body for k in ("mr_td", "rtmr_0", "mr_config_id")):
+                return body
+    return None
+
+
+def _jcs(obj: Any) -> bytes:
+    """RFC 8785 JCS canonical serialization (the signature preimage).
+
+    Matches `kubetee-website/scripts/build-tee-measurements-registry.py`'s `jcs`
+    so the registry Ed25519 signature (over the doc minus `signature`) verifies
+    byte-for-byte. Objects serialize with sorted keys and no whitespace.
+    """
+    def enc(o: Any) -> str:
+        if o is None:
+            return "null"
+        if o is True:
+            return "true"
+        if o is False:
+            return "false"
+        if isinstance(o, str):
+            return json.dumps(o, ensure_ascii=False, separators=(",", ":"))
+        if isinstance(o, int):
+            return str(o)
+        if isinstance(o, float):
+            # JCS numbers: integral floats serialize like ints; else repr round-trip.
+            return str(int(o)) if o.is_integer() else repr(o)
+        if isinstance(o, dict):
+            items = sorted(o.items(), key=lambda kv: kv[0])
+            return "{" + ",".join(
+                json.dumps(k, ensure_ascii=False, separators=(",", ":")) + ":" + enc(v)
+                for k, v in items
+            ) + "}"
+        if isinstance(o, (list, tuple)):
+            return "[" + ",".join(enc(v) for v in o) + "]"
+        raise TypeError(f"JCS cannot serialize {type(o).__name__}")
+
+    return enc(obj).encode("utf-8")
+
+
+def _iso_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _parse_ts(value: Any) -> datetime.datetime | None:
+    if not value:
+        return None
+    try:
+        ts = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return ts if ts.tzinfo else ts.replace(tzinfo=datetime.timezone.utc)
+    except Exception:
+        return None
+
+
+def _verify_registry_signature(registry: dict[str, Any]) -> bool:
+    """True iff the registry's Ed25519 `signature` verifies against the pinned key.
+
+    Fails closed on any structural/verification problem EXCEPT an absent pinned
+    key (no key -> signature not checked, but matching still runs). Uses only
+    the stdlib Ed25519 (`cryptography` is not a gateway dependency).
+    """
+    import base64 as _b64
+
+    sig_block = registry.get("signature")
+    if not isinstance(sig_block, dict):
+        return False
+    if not _REGISTRY_PUBLIC_KEY_B64:
+        return True  # no pinned key: match records, skip signature check
+    try:
+        key_bytes = _b64.b64decode(_REGISTRY_PUBLIC_KEY_B64 + "=" * (-len(_REGISTRY_PUBLIC_KEY_B64) % 4))
+        sig = _b64.b64decode(str(sig_block.get("sig", "")) + "=" * (-len(str(sig_block.get("sig", ""))) % 4))
+        unsigned = {k: v for k, v in registry.items() if k != "signature"}
+        preimage = _jcs(unsigned)
+    except Exception:
+        return False
+    # stdlib Ed25519 (Python 3.8+): the public key is the raw 32 bytes or a DER
+    # SPKI; here we expect the raw 32-byte public key.
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PublicKey,
+        )
+
+        pub = Ed25519PublicKey.from_public_bytes(key_bytes)
+        pub.verify(sig, preimage)
+        return True
+    except Exception:
+        return False
+
+
+def _registry_records(registry: dict[str, Any]) -> list[dict[str, Any]]:
+    return [r for r in (registry.get("records") or []) if isinstance(r, dict)]
+
+
+def _match_registry_record(
+    regs: dict[str, str | None], records: list[dict[str, Any]]
+) -> tuple[bool, str | None]:
+    """(approved, reason) — match live regs against ANY active (non-expired) record.
+
+    A record matches when every field it declares is present and equal in the
+    observed registers (None/absent expected fields are not enforced). A record
+    outside its `valid_until` window is deprecated and skipped (the next record
+    is tried), mirroring the 90-day deprecation lifecycle. Returns (True,
+    record_id) on the first active match; (False, reason) when no active record
+    matches.
+    """
+    now = _iso_now()
+    active_checked = 0
+    for rec in records:
+        rec_id = str(rec.get("id") or rec.get("model") or "")
+        status = str(rec.get("status") or "active").lower()
+        if status in ("deprecated", "revoked", "retired"):
+            continue
+        valid_until = _parse_ts(rec.get("valid_until"))
+        if valid_until is not None and valid_until <= now:
+            continue  # expired/deprecated — never match
+        active_checked += 1
+        expected = rec.get("measurements") if isinstance(rec.get("measurements"), dict) else {}
+        mismatches: list[str] = []
+        compared = 0
+        for name in _RECORD_FIELDS:
+            exp = expected.get(name)
+            if not exp:
+                continue  # a None/absent expectation can never trip
+            got = regs.get(name)
+            compared += 1
+            exp_norm = str(exp).lower().replace("hex:", "")
+            if got and got != exp_norm:
+                mismatches.append(f"{name}-drift: got {got[:24]} expected {exp_norm[:24]}")
+            elif got is None:
+                mismatches.append(f"{name}-absent: record {rec_id or '<unlabeled>'} declares it but evidence has none")
+        if compared == 0:
+            continue  # record declares no enforced fields — not a usable match
+        if not mismatches:
+            return True, rec_id or "<unlabeled>"
+    if active_checked == 0:
+        return False, "registry-no-active-record: every record is deprecated/expired"
+    return False, (
+        "registry-no-match: live TDX registers match no active record "
+        f"({active_checked} active checked)"
+    )
+
+
+async def _load_registry(force: bool = False) -> dict[str, Any] | None:
+    """Fetch + verify + cache the reference registry; None on failure.
+
+    Caches a verified registry for < TTL. A stale cache is served on a refetch
+    failure (the allowlist does not flap to deny on a transient network blip);
+    an empty cache with a failed fetch returns None and the fallback below
+    applies.
+    """
+    global _registry_cache, _registry_cache_monotonic
+    if not force and _registry_cache is not None:
+        if (time.monotonic() - _registry_cache_monotonic) < _REGISTRY_CACHE_TTL_S:
+            return _registry_cache
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=_REGISTRY_TIMEOUT_S) as client:
+            resp = await client.get(_REGISTRY_URL)
+            resp.raise_for_status()
+            registry = json.loads(resp.content)
+    except Exception:
+        return _registry_cache  # stale-ok; None if never loaded
+    if not isinstance(registry, dict) or not _verify_registry_signature(registry):
+        return _registry_cache  # reject tampered/unsigned doc; keep last good
+    _registry_cache = registry
+    _registry_cache_monotonic = time.monotonic()
+    return registry
+
+
+def _verify_backend_evidence(
+    evidence: dict[str, Any], registry: dict[str, Any] | None = None
+) -> tuple[list[str], list[str]]:
+    """(trip_conditions, freshness_gaps) for one normalized backend envelope.
+
+    `registry` is a pre-fetched verified reference registry (the async caller
+    loads it). When None, the in-process cache is used (may be None — e.g. the
+    sync unit tests, where the env `_EXPECTED_BACKEND` fallback applies).
+
+    Returns the list of METADATA/drift trip conditions (measurement drift —
+    safe to trip on) and the list of FRESHNESS gaps (degrade, never trip).
+    """
+    trips: list[str] = []
+    gaps: list[str] = []
+
+    # (1) and (2) — the two hard composition gates, role + pinned InitData.
+    role = str(evidence.get("role") or "")
+    if _EXPECTED_BACKEND["role"] and role != _EXPECTED_BACKEND["role"]:
+        trips.append(f"role-mismatch: got {role!r} expected {_EXPECTED_BACKEND['role']!r}")
+    regs = _extract_registers(evidence)
+    exp = _EXPECTED_BACKEND["mrconfigid"]
+    if exp and regs.get("mrconfigid") and regs["mrconfigid"] != exp:
+        trips.append(f"mrconfigid-drift: got {regs['mrconfigid'][:24]} expected {exp[:24]}")
+    elif exp and evidence.get("tee") == "tdx" and not regs.get("mrconfigid"):
+        # TDX evidence that hides its registers is itself suspicious: a
+        # verifier cannot confirm composition, so treat absence as a trip
+        # rather than silently trusting an opaque guest.
+        trips.append("mrconfigid-absent: TDX evidence carries no readable MRCONFIGID")
+
+    # (3..7) — the five TDX launch registers + OVMF. Primary gate is the SIGNED
+    # reference REGISTRY (any-active-record match); the env `_EXPECTED_BACKEND`
+    # per-field pins are the FALLBACK when no registry is reachable. A registry
+    # match that approves the whole record replaces the per-field trips — that
+    # is the `policy.match = any-active-record` contract. Enforced ONLY when a
+    # reference is captured (None = not captured = cannot trip).
+    reg_trip_names = ("mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3")
+    registry = registry if registry is not None else _registry_cache
+    records = _registry_records(registry) if registry else []
+    if records:
+        approved, match_reason = _match_registry_record(regs, records)
+        if not approved:
+            trips.append(match_reason)  # no active record matches -> drift
+    else:
+        for name in reg_trip_names:
+            expected = _EXPECTED_BACKEND.get(name)
+            got = regs.get(name)
+            if expected and got and got != expected:
+                trips.append(f"{name}-drift: got {got[:24]} expected {expected[:24]}")
+    ovmf_exp = _EXPECTED_BACKEND.get("ovmf_fd_sha256")
+    ovmf_got = str(evidence.get("ovmf_fd_sha256") or evidence.get("ovmf_sha256") or "").strip().lower()
+    if ovmf_exp and ovmf_got and ovmf_got != ovmf_exp:
+        trips.append(f"ovmf-drift: got {ovmf_got[:24]} expected {ovmf_exp[:24]}")
+
+    # Freshness — never a trip. An expired or unset epoch bounds freshness; a
+    # gap means "cannot prove recent", not "composition changed".
+    epoch = evidence.get("epoch") or {}
+    if not epoch.get("id"):
+        gaps.append("epoch-absent: no epoch_id in evidence")
+    valid_until = epoch.get("valid_until")
+    if valid_until:
+        import datetime
+
+        try:
+            expires = datetime.datetime.fromisoformat(str(valid_until).replace("Z", "+00:00"))
+            if expires <= datetime.datetime.now(datetime.timezone.utc):
+                gaps.append(f"epoch-expired: valid_until {valid_until} is past")
+        except Exception:
+            gaps.append(f"epoch-expiry-unparseable: {valid_until!r}")
+    if not evidence.get("quote") and not evidence.get("snp"):
+        gaps.append("hardware-evidence-absent: no quote and no snp report")
+    return trips, gaps
+
+
+async def _post_block_and_alert(reason: str) -> None:
+    """Auto-block the row + alert on a trip (opt-in via KUBETEE_BREAKER_ENFORCE)."""
+    import httpx
+
+    body = {"model_name": _BREAKER_BACKEND}
+    headers = {"Content-Type": "application/json"}
+    master = os.environ.get("LITELLM_MASTER_KEY") or os.environ.get("KUBETEE_MASTER_KEY")
+    if master:
+        headers["Authorization"] = f"Bearer {master}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(_BREAKER_BLOCK_URL, json=body, headers=headers)
+            ok = resp.status_code < 300
+            _breaker_stats["enforce_ok" if ok else "enforce_err"] += 1
+    except Exception:
+        _breaker_stats["enforce_err"] += 1
+        ok = False
+    if _BREAKER_ALERT_URL:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    _BREAKER_ALERT_URL,
+                    json={
+                        "event": "kubetee-measurement-drift-breaker-trip",
+                        "backend": _BREAKER_BACKEND,
+                        "reason": reason,
+                        "action": "model/block",
+                        "succeeded": ok,
+                    },
+                )
+        except Exception:
+            _breaker_stats["enforce_err"] += 1
+
+
+async def _trip_breaker(endpoint: str, evidence: dict[str, Any], trips: list[str]) -> None:
+    """Open the breaker on measurement drift and (if enforcing) block + alert."""
+    breaker = _breaker_for(endpoint)
+    reason = "; ".join(trips)
+    breaker.state = BREAKER_OPEN
+    breaker.opened_at = time.monotonic()
+    breaker.trips += 1
+    breaker.last_reason = reason
+    _breaker_stats["tripped"] += 1
+    key = f"{endpoint}|{reason}"
+    if key in _breaker_notified:
+        return  # one notification per distinct trip; no alert storm
+    _breaker_notified.add(key)
+    if _BREAKER_ENFORCE:
+        await _post_block_and_alert(reason)
+
+
+async def _observe_backend_evidence(endpoint: str, evidence: dict[str, Any] | None) -> None:
+    """Run the verifier on a fetched/relayed envelope and drive the breaker.
+
+    Called on every backend-evidence fetch (cold cache). A warm cache hit
+    re-verifies cheaply via `breaker_guard`. Measurement drift trips; a
+    freshness gap degrades only.
+    """
+    async with _breaker_lock:
+        _breaker_stats["checked"] += 1
+        breaker = _breaker_for(endpoint)
+        if breaker.open:
+            return  # already tripped; stay open until half-open success
+        if evidence is None:
+            return  # handled as a freshness gap upstream (label + error header)
+        registry = await _load_registry()
+        trips, gaps = _verify_backend_evidence(evidence, registry=registry)
+        if trips:
+            await _trip_breaker(endpoint, evidence, trips)
+            return
+        if gaps:
+            breaker.degradations += 1
+            breaker.last_degrade_reason = "; ".join(gaps)
+            _breaker_stats["degraded"] += 1
+
+
+def breaker_state(endpoint: str | None) -> dict[str, Any]:
+    """Introspection for tests and a future status surface (read-only)."""
+    ep = endpoint or _BREAKER_BACKEND
+    breaker = _breakers.get(ep, _Breaker())
+    return {
+        "backend": ep,
+        "state": {BREAKER_CLOSED: "CLOSED", BREAKER_OPEN: "OPEN", BREAKER_HALF_OPEN: "HALF-OPEN"}[breaker.state],
+        "open": breaker.open,
+        "trips": breaker.trips,
+        "degradations": breaker.degradations,
+        "last_reason": breaker.last_reason,
+        "last_degrade_reason": breaker.last_degrade_reason,
+        "enforce": _BREAKER_ENFORCE,
+        "expected": {k: (v[:16] + "…" if isinstance(v, str) and len(v) > 16 else v) for k, v in _EXPECTED_BACKEND.items()},
+    }
+
+
+def breaker_guard(endpoint: str) -> dict[str, str] | None:
+    """Response headers to inject when the breaker blocks/degrades this backend.
+
+    Returns None when healthy. On an OPEN (measurement-drift) breaker returns
+    headers that map to an HTTP 503 auto-block (the caller surfaces them and
+    stops routing to this backend). A freshness gap returns error-tag headers
+    WITHOUT blocking (degraded-not-tripped).
+    """
+    breaker = _breakers.get(endpoint)
+    if breaker is None:
+        return None
+    if breaker.open:
+        return {
+            "X-KubeTEE-Breaker-State": "OPEN",
+            "X-KubeTEE-Breaker-Trip": breaker.last_reason or "measurement drift",
+            "X-KubeTEE-Breaker-Action": "auto-block (HTTP 503)",
+        }
+    if breaker.last_degrade_reason:
+        return {
+            "X-KubeTEE-Breaker-State": "DEGRADED",
+            "X-KubeTEE-Breaker-Reason": breaker.last_degrade_reason,
+        }
+    return None
 
 
 # Gateway-only SNP producer; neither function nor configuration changes KBS.
@@ -494,14 +1314,20 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
 
 
 
-def _backend_identity_headers(
+async def _backend_identity_headers(
     data: dict, litellm_call_info: dict | None
 ) -> dict[str, str]:
     """Best-effort backend identity headers for inline evidence.
 
-    Per the scope decision, backends are boot-time attested (Trustee-gated
-    mTLS cert issuance) — we surface identity metadata only, not per-request
-    GPU quotes.
+    The backend's hardware evidence comes from the **shared** per-backend cache
+    in `_backend_evidence` — one quote per backend, reused for every key and
+    every request inside its epoch. It is never fetched per key (the
+    `user_api_key_dict` argument is deliberately absent from this call: key
+    material has no role here).
+
+    A warm cache hit emits the relayed quote evidence. A cold/expired fetch
+    failure falls back to the boot-time boundary label and says so — never a
+    silent downgrade from a quote to a label.
     """
     headers: dict[str, str] = {}
     info = litellm_call_info or {}
@@ -519,7 +1345,92 @@ def _backend_identity_headers(
         headers["X-KubeTEE-Backend"] = str(model_name or model_id)
     if api_base:
         headers["X-KubeTEE-Backend-Endpoint"] = str(api_base)
-    headers["X-KubeTEE-Backend-Attested"] = "boot-time (Trustee EAR; east-west mTLS)"
+
+    evidence: dict[str, Any] | None = None
+    if api_base:
+        evidence = await _backend_evidence(str(api_base))
+        # Circuit-breaker surface (measurement drift / freshness gap). A drifted
+        # (composition-changed) backend emits the OPEN -> auto-block/503 labels;
+        # a freshness gap emits DEGRADED. Both are merged into the response
+        # headers so the CLIENT can see why it is being cut off or degraded.
+        guard = breaker_guard(_backend_attest_url(str(api_base)))
+        if guard:
+            headers.update(guard)
+
+    if evidence is None:
+        headers["X-KubeTEE-Backend-Attested"] = (
+            "boot-time (Trustee EAR; east-west mTLS)"
+        )
+        if api_base:
+            headers["X-KubeTEE-Backend-Evidence-Error"] = (
+                "backend evidence unavailable — boundary label only"
+            )
+            # A freshness gap degrades but never trips — record + surface it.
+            await _observe_backend_evidence(_backend_attest_url(str(api_base)), None)
+            guard = breaker_guard(_backend_attest_url(str(api_base)))
+            if guard:
+                headers.update(guard)
+        return headers
+
+    headers["X-KubeTEE-Backend-Attested"] = "hardware-evidence (shared epoch cache)"
+    epoch = evidence.get("epoch") or {}
+
+    # Self-describing discriminators, FLAT so a client can filter without
+    # decoding the envelope: WHOSE evidence (subject), WHAT it is (schema),
+    # and the TEE (tee). The NIM may be TDX or SNP; the client reads `tee` —
+    # it never has to know it in advance, ask for it, or pick a header name.
+    headers["X-KubeTEE-Backend-Evidence-Subject"] = str(
+        evidence.get("subject") or "nim-terminator"
+    )
+    headers["X-KubeTEE-Backend-Evidence-Schema"] = str(evidence.get("schema") or "")
+    headers["X-KubeTEE-Backend-Evidence-Tee"] = str(evidence.get("tee") or "")
+    if evidence.get("runtime_class"):
+        headers["X-KubeTEE-Backend-Evidence-Runtime-Class"] = str(evidence["runtime_class"])
+    headers["X-KubeTEE-Backend-Evidence-Digest"] = evidence["quote_sha256"]
+    headers["X-KubeTEE-Backend-Evidence-Source"] = str(evidence.get("_source", "cache"))
+    if epoch.get("id"):
+        headers["X-KubeTEE-Backend-Epoch"] = str(epoch["id"])
+    if epoch.get("issued_at"):
+        headers["X-KubeTEE-Backend-Epoch-Issued-At"] = str(epoch["issued_at"])
+    if epoch.get("valid_until"):
+        headers["X-KubeTEE-Backend-Epoch-Valid-Until"] = str(epoch["valid_until"])
+    if evidence.get("signature"):
+        headers["X-KubeTEE-Backend-Evidence-Signature"] = str(evidence["signature"])
+
+    # ONE self-describing envelope carries the TEE-specific payload (quote +
+    # event_log + report_data for TDX; native `snp` for SNP) plus cert_chain.
+    # The client decodes one blob and branches on its `schema`/`tee` fields —
+    # never on a header name. Inline only while it fits the header budget;
+    # past that the client fetches the backend's standalone bundle.
+    envelope: dict[str, Any] = {
+        "subject": evidence.get("subject", "nim-terminator"),
+        "schema": evidence.get("schema"),
+        "tee": evidence.get("tee"),
+        "role": evidence.get("role"),
+        "runtime_class": evidence.get("runtime_class"),
+        "epoch": epoch,
+        "digest": evidence.get("quote_sha256"),
+        "report_data": evidence.get("report_data"),
+        "report_data_statement": evidence.get("report_data_statement"),
+        "cert_chain": evidence.get("cert_chain"),
+        "signature": evidence.get("signature"),
+    }
+    if evidence.get("tee") == "tdx":
+        envelope["quote"] = evidence.get("quote")
+        envelope["event_log"] = evidence.get("event_log")
+    else:
+        envelope["snp"] = evidence.get("snp")
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(envelope, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    if len(encoded) <= _BACKEND_EVIDENCE_MAX_HEADER_CHARS:
+        headers["X-KubeTEE-Backend-Evidence"] = encoded
+    else:
+        headers["X-KubeTEE-Backend-Evidence-Location"] = _backend_attest_url(str(api_base))
+        headers["X-KubeTEE-Backend-Evidence-Reason"] = (
+            f"evidence envelope {len(encoded)} chars exceeds inline budget "
+            f"{_BACKEND_EVIDENCE_MAX_HEADER_CHARS}; fetch the standalone bundle"
+        )
     return headers
 
 
@@ -634,7 +1545,7 @@ class KubeTEEAttestationLogger(CustomLogger):
             out = _attestation_headers(payload, raw_nonce)
         except Exception as e:
             return {"X-KubeTEE-Attestation-Error": f"attestation evidence unavailable: {e}"}
-        out.update(_backend_identity_headers(data, litellm_call_info))
+        out.update(await _backend_identity_headers(data, litellm_call_info))
         return out
 
 

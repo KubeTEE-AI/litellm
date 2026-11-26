@@ -292,6 +292,29 @@ jobs:
               "/tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_snp_evidence.py",
           ]))
           '
+          # Registry matcher / evidence-path security gates. NO -k filter on
+          # purpose: the broad regression selection above would deselect these,
+          # and they are release gates (any-active-record matching, 90-day
+          # expiry/deprecation rejection, Ed25519 registry signature, role
+          # gate, /v1 evidence-path fix). Own isolated process: mutates module
+          # globals (registry loader, breakers, pinned key).
+          docker run --rm \
+            -e LITELLM_MASTER_KEY=unit-test-key \
+            -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
+            -v /tmp/litellm-overlay-test-deps:/workspace:ro \
+            -v "$PWD/tools:/tools:ro" -v "$PWD/tests:/tests:ro" -w /tests \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
+            -c '
+          import sys
+          sys.path[:0] = ["/workspace/test-deps", "/app/.venv/lib/python3.13/site-packages"]
+          import pytest
+          raise SystemExit(pytest.main([
+              "-q", "-p", "no:cacheprovider", "--import-mode=importlib",
+              "-o", "asyncio_mode=auto",
+              "/tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_attestation_registry.py",
+          ]))
+          '
           # Public checkout and exact packaged enterprise share one import source.
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \
