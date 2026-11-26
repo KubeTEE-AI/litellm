@@ -434,7 +434,7 @@ jobs:
       - name: Verify overlay modules are present and non-trivial
         run: |
           cd tools/kubetee-litellm-overlay
-          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py redpill_tee.py Dockerfile; do
+          for f in kubetee_route_guard.py kubetee_attestation.py kubetee_binding.py kubetee_ear.py kubetee_eastwest.py kubetee_bootstrap.py kubetee-entrypoint.sh sitecustomize.py kubetee_glm_effort.py kubetee_mcp_trust.py kubetee_health_latest.py kubetee_proof.py redpill_tee.py Dockerfile; do
             test -s "$f" || { echo "MISSING $f"; exit 1; }
           done
           test ! -e kubetee_pricing.py
@@ -449,6 +449,7 @@ jobs:
           kubetee_glm_effort.py
           kubetee_health_latest.py
           kubetee_mcp_trust.py
+          kubetee_proof.py
           kubetee_route_guard.py
           redpill_tee.py
           sitecustomize.py'
@@ -499,6 +500,8 @@ jobs:
               'async_pre_call_hook must be async def (awaited by proxy dispatch)'
           assert inspect.iscoroutinefunction(KubeTEEGlmEffort.async_pre_call_hook), \
               'glm effort async_pre_call_hook must be async def'
+          assert inspect.iscoroutinefunction(KubeTEEAttestationLogger.async_pre_call_hook), \
+              'attestation async_pre_call_hook (429 gate) must be async def'
           assert inspect.iscoroutinefunction(KubeTEEAttestationLogger.async_post_call_response_headers_hook), \
               'async_post_call_response_headers_hook must be async def'
           print('hook coroutine-function check OK')
@@ -506,6 +509,14 @@ jobs:
           # Attestation module must mount /v1/attestation via CustomLogger.
           grep -q 'KubeTEEAttestationLogger' kubetee_attestation.py
           grep -q '/v1/attestation' kubetee_attestation.py
+          # Proof-of-inference module: the v1 statement + self-doc 429 must
+          # both be present, and a missing signing key must never fabricate a
+          # signature (fail-closed gate). The 429 gate must live in the
+          # attestation async_pre_call_hook (checked above).
+          grep -q 'kubetee.proof.v1' kubetee_proof.py
+          grep -q 'use_instead' kubetee_proof.py
+          grep -q 'X-KubeTEE-Proof-Signature' kubetee_proof.py
+          grep -q 'FreshMintLimiter' kubetee_proof.py
           # Binding module must carry the v1 construction + its pinned purpose tag.
           grep -q 'kubetee.attestation.v1' kubetee_binding.py
           grep -q 'report_data_statement' kubetee_binding.py

@@ -87,6 +87,7 @@ from urllib.parse import urlencode
 
 import kubetee_binding
 import kubetee_ear
+import kubetee_proof
 from litellm.integrations.custom_logger import CustomLogger
 
 SPEC_VERSION = "kubetee.attestation.v1"
@@ -100,6 +101,14 @@ REPORT_DATA_INPUT = "kubetee.attestation.v1" if V1_MODE else kubetee_binding.LEG
 _NONCE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _AA_BASE = os.environ.get("KUBETEE_AA_BASE", "http://127.0.0.1:8006")
 _NONCE_HEADER = "x-kubetee-nonce"
+_PROOF_HEADER = "x-kubetee-proof"
+
+# Fresh-mint rate limit for the X-KubeTEE-Nonce path only (one silicon mint per
+# request is expensive + serializes one-at-a-time; see the Phase 4b timing
+# matrix). X-KubeTEE-Proof is the unlimited proof-of-inference alternative.
+_FRESH_MINT_LIMIT: Final[int] = int(os.environ.get("KUBETEE_FRESH_MINT_LIMIT", "1"))
+_FRESH_MINT_WINDOW_S: Final[float] = float(os.environ.get("KUBETEE_FRESH_MINT_WINDOW_S", "60"))
+_fresh_mint_limiter = kubetee_proof.FreshMintLimiter(_FRESH_MINT_LIMIT, _FRESH_MINT_WINDOW_S)
 _TLS_DIR = os.environ.get("KUBETEE_TLS_DIR", "/etc/tls")
 _TLS_KEY_PATH = os.environ.get("KUBETEE_TLS_KEY", os.path.join(_TLS_DIR, "tls.key"))
 _TLS_CERT_PATH = os.environ.get("KUBETEE_TLS_CERT", os.path.join(_TLS_DIR, "tls.crt"))
@@ -1631,6 +1640,106 @@ def _attestation_headers(payload: dict[str, Any], nonce: str) -> dict[str, str]:
     return out
 
 
+def _served_keyset_digest() -> str | None:
+    """The served keyset digest (commits the gateway signing key), or None."""
+    try:
+        with open(_TLS_CERT_PATH, "rb") as f:
+            cert_pem = f.read()
+        keyset = kubetee_binding.keyset_from_cert_pem(cert_pem, _TLS_DOMAIN)
+        return kubetee_binding.keyset_digest(keyset)
+    except Exception:
+        return None
+
+
+def _request_header(headers: Any, name: str) -> str | None:
+    """Case-insensitive header lookup across the shapes LiteLLM passes."""
+    if not headers:
+        return None
+    if isinstance(headers, dict):
+        for k, v in headers.items():
+            if str(k).lower() == name.lower():
+                return v if isinstance(v, str) else str(v)
+    return None
+
+
+def _pre_call_request_headers(data: dict) -> dict:
+    """The caller's HTTP headers from the pre-call `data` dict (best-effort).
+
+    LiteLLM lands raw request headers in `data["proxy_server_request"]["headers"]`
+    and, on some paths, mirrors them into `data["headers"]` / `data["metadata"]["headers"]`.
+    Probe all three; the response hook receives `request_headers` directly.
+    """
+    for holder in (
+        (data.get("proxy_server_request") or {}).get("headers"),
+        data.get("headers"),
+        (data.get("metadata") or {}).get("headers"),
+    ):
+        if isinstance(holder, dict) and holder:
+            return holder
+    return {}
+
+
+async def _proof_headers(
+    backend_headers: dict[str, str],
+    data: dict,
+    request_headers: dict[str, str],
+    response: Any,
+) -> dict[str, str]:
+    """Proof-of-inference on the ROUTED backend pod (X-KubeTEE-Proof).
+
+    `backend_headers` is the relayed identity set already built for this
+    response (fetched ONCE upstream and shared) — its
+    `X-KubeTEE-Backend-Evidence-Digest` is exactly what the proof commits to.
+    Returns a gateway signature binding the routed pod's evidence to THIS
+    response and the caller's anchor. Cheap + unlimited (the fresh silicon mint
+    stays on the rate-limited X-KubeTEE-Nonce path).
+    """
+    out: dict[str, str] = {}
+
+    # Bind the response when its body is available (non-streaming); on the
+    # streaming path the body is not assembled at header-freeze -> fall back to
+    # request-binding and SAY SO (mode: request-bound).
+    is_stream = bool((data or {}).get("stream"))
+    content, model = kubetee_proof.extract_response_content(response)
+    req_digest = kubetee_proof.request_digest((data or {}).get("messages"), (data or {}).get("model"))
+    if not is_stream and content:
+        mode = kubetee_proof.MODE_RESPONSE_BOUND
+        r_input = kubetee_proof.RECIPE_RESPONSE
+        r_digest = kubetee_proof.response_digest(content, model)
+    else:
+        mode = kubetee_proof.MODE_REQUEST_BOUND
+        r_input = kubetee_proof.RECIPE_REQUEST
+        r_digest = req_digest
+
+    # The caller's anchor: X-KubeTEE-Proof: <64hex> binds their nonce (strongest);
+    # X-KubeTEE-Proof: 1 binds a request-digest anchor instead.
+    anchor_val = (_request_header(request_headers, _PROOF_HEADER) or "").strip()
+    if _NONCE_RE.match(anchor_val):
+        anchor = {"kind": "nonce", "value": anchor_val.lower()}
+    else:
+        anchor = {"kind": "request-digest", "value": req_digest}
+
+    evidence_digest = backend_headers.get("X-KubeTEE-Backend-Evidence-Digest", "")
+    endpoint = backend_headers.get("X-KubeTEE-Backend-Endpoint", "")
+    keyset_digest = _served_keyset_digest() or ""
+    issued_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    out.update(
+        kubetee_proof.proof_headers(
+            response_mode=mode,
+            response_input=r_input,
+            response_digest_value=r_digest,
+            request_anchor=anchor,
+            backend_evidence_digest=evidence_digest,
+            backend_endpoint=endpoint,
+            keyset_digest=keyset_digest,
+            issued_at=issued_at,
+            signing_key=_load_serving_key(),
+        )
+    )
+    return out
+
+
 def _binding_for_nonce(nonce: str) -> tuple[dict, kubetee_binding.Binding]:
     """The served keyset + v1 binding for a nonce, or raise.
 
@@ -1957,6 +2066,53 @@ class KubeTEEAttestationLogger(CustomLogger):
         super().__init__()
         _mount_once()
 
+    async def async_pre_call_hook(
+        self,
+        user_api_key_dict: Any,
+        cache: Any,
+        data: dict,
+        call_type: str,
+    ) -> Any:
+        """Rate-limit the FRESH silicon mint path (X-KubeTEE-Nonce).
+
+        One fresh CPU+8GPU mint per request is expensive (~1.3 s) and the quote
+        serializes one-at-a-time, so the nonce path is limited to
+        `KUBETEE_FRESH_MINT_LIMIT` per `KUBETEE_FRESH_MINT_WINDOW_S` per key and
+        rejected with a SELF-DOCUMENTING 429 beyond (the body + headers name the
+        limit AND the `X-KubeTEE-Proof: 1` workaround in-band, so an agent needs
+        zero external docs to recover). X-KubeTEE-Proof (proof-of-inference) is
+        NOT rate-limited and passes through untouched.
+
+        Returns None to allow; raises HTTPException(429) to reject BEFORE the
+        model runs (LiteLLM renders `detail` as the JSON body).
+        """
+        headers = _pre_call_request_headers(data)
+        raw_nonce = _request_header(headers, _NONCE_HEADER)
+        if raw_nonce is None:
+            return None  # no fresh mint requested — nothing to rate-limit
+        # Malformed nonce is handled (and reported) on the response path; do not
+        # consume a rate-limit permit here for a request that will be rejected.
+        if _validate_nonce(raw_nonce) is None:
+            return None
+
+        # Per-key (a virtual key when present; else the bearer token).
+        key_id = (
+            getattr(user_api_key_dict, "token", None)
+            or getattr(user_api_key_dict, "user_api_key", None)
+            or "anonymous"
+        )
+        allowed, retry_after = _fresh_mint_limiter.check(str(key_id))
+        if allowed:
+            return None
+
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=429,
+            detail=kubetee_proof.rate_limit_error(_FRESH_MINT_LIMIT, _FRESH_MINT_WINDOW_S, retry_after),
+            headers=kubetee_proof.rate_limit_headers(_FRESH_MINT_LIMIT, _FRESH_MINT_WINDOW_S, retry_after),
+        )
+
     async def async_post_call_response_headers_hook(
         self,
         data: dict,
@@ -1971,33 +2127,53 @@ class KubeTEEAttestationLogger(CustomLogger):
         X-KubeTEE-* headers that LiteLLM merges into the HTTP response.
         """
         headers = request_headers or {}
-        nonce = None
-        for k, v in headers.items():
-            if k.lower() == _NONCE_HEADER:
-                nonce = v
-                break
+        nonce = _request_header(headers, _NONCE_HEADER)
         raw_nonce = _validate_nonce(nonce)
         if nonce is not None and raw_nonce is None:
             # Malformed nonce: signal, don't fail the completion.
             return _latin1_headers(
                 {"X-KubeTEE-Attestation-Error": "invalid nonce (need 64 hex)"}
             )
-        if raw_nonce is None:
-            return None  # opt-in header absent — no-op
+        proof_val = (_request_header(headers, _PROOF_HEADER) or "").strip()
+        wants_proof = proof_val != ""
+        if raw_nonce is None and not wants_proof:
+            return None  # no opt-in header — no-op
 
+        out: dict[str, str] = {}
         try:
-            payload = await get_attestation_payload(raw_nonce)
-            if payload is None:
-                return _latin1_headers(
-                    {"X-KubeTEE-Attestation-Error": "invalid nonce (need 64 hex)"}
-                )
-            out = _attestation_headers(payload, raw_nonce)
+            if raw_nonce is not None:
+                payload = await get_attestation_payload(raw_nonce)
+                if payload is None:
+                    return _latin1_headers(
+                        {"X-KubeTEE-Attestation-Error": "invalid nonce (need 64 hex)"}
+                    )
+                out.update(_attestation_headers(payload, raw_nonce))
         except Exception as e:
             # The exception text is free-form and may not be latin-1; sanitize.
             return _latin1_headers(
                 {"X-KubeTEE-Attestation-Error": f"attestation evidence unavailable: {e}"}
             )
-        out.update(await _backend_identity_headers(data, litellm_call_info, nonce=raw_nonce))
+
+        # The routed backend pod's evidence — fetched ONCE and shared by the
+        # identity headers and the proof, so the proof commits to the SAME
+        # digest the relay exposes (fresh when a nonce was forwarded, the pod's
+        # cached epoch otherwise).
+        backend_headers: dict[str, str] = {}
+        if raw_nonce is not None or wants_proof:
+            backend_headers = await _backend_identity_headers(
+                data, litellm_call_info, nonce=raw_nonce
+            )
+            out.update(backend_headers)
+
+        if wants_proof:
+            try:
+                out.update(
+                    await _proof_headers(
+                        backend_headers, data, request_headers, response
+                    )
+                )
+            except Exception as e:
+                out["X-KubeTEE-Proof-Error"] = f"proof unavailable: {e}"
         return _latin1_headers(out)
 
 
