@@ -194,3 +194,35 @@ def test_no_double_append(monkeypatch) -> None:
     out2 = ka._snp_cert_chain_augment(_report(), out1)  # already-augmented
     assert [e["cert_type"] for e in out2] == ["VCEK", "ASK", "ARK"]
     assert len(out2) == 3
+
+
+def test_vcek_as_raw_der_is_parsed(monkeypatch) -> None:
+    """REGRESSION: AMD's VCEK endpoint returns raw DER (0x30 ...), not PEM.
+
+    A PEM-only parser decoded the DER body as ASCII and threw, so the fail-safe
+    returned the ORIGINAL empty chain in production even though the code was
+    'correct'. This test serves the VCEK as the raw bytes AMD actually returns
+    and requires the chain to still complete to VCEK -> ASK -> ARK.
+    """
+    _reset()
+
+    def fake(url: str) -> bytes:
+        if "cert_chain" in url:
+            return _CA_PEM.encode()  # CA endpoint: PEM bundle [ASK, ARK]
+        return _VCEK_DER  # VCEK endpoint: RAW DER (starts 0x30)
+
+    monkeypatch.setattr(ka, "_kds_get", fake)
+    out = ka._snp_cert_chain_augment(_report(), [])
+    assert [e["cert_type"] for e in out] == ["VCEK", "ASK", "ARK"]
+    assert out[0]["data"] == list(_VCEK_DER)
+
+
+def test_cert_ders_handles_pem_and_der() -> None:
+    """Unit: ``_cert_ders`` accepts a PEM bundle, a raw DER cert, and junk."""
+    # PEM bundle -> one DER per cert block
+    assert ka._cert_ders(_CA_PEM.encode()) == [_ASK_DER, _ARK_DER]
+    # raw DER (first byte 0x30) -> a single cert
+    assert ka._cert_ders(_VCEK_DER) == [_VCEK_DER]
+    # non-cert bytes -> empty (fail-safe, no crash)
+    assert ka._cert_ders(b"") == []
+    assert ka._cert_ders(b"\x00\x01\x02 not a cert") == []

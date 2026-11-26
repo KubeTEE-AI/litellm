@@ -1287,7 +1287,7 @@ _KDS_PRODUCT = {
 
 
 def _kds_get(url: str) -> bytes:
-    """GET a PEM resource from AMD KDS; raises on any failure (fail-safe)."""
+    """GET a resource from AMD KDS; raises on any failure (fail-safe)."""
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": _KDS_USER_AGENT})
     with urllib.request.urlopen(req, timeout=_KDS_TIMEOUT_S) as resp:
@@ -1300,6 +1300,21 @@ def _pem_cert_ders(pem: str) -> list[bytes]:
         r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", pem, re.S
     )
     return [base64.b64decode("".join(b.split())) for b in blocks]
+
+
+def _cert_ders(blob: bytes) -> list[bytes]:
+    """Parse an AMD KDS cert response that may be PEM **or** raw DER.
+
+    AMD's `/cert_chain` returns a PEM bundle (ASK + ARK), but the VCEK
+    endpoint returns the certificate as **raw DER** (0x30 0x82 ...) — not PEM.
+    Decoding a DER body as ASCII raises and silently returned an empty chain.
+    Handle both: PEM text splits into N certs; binary DER is one certificate.
+    """
+    if b"-----BEGIN CERTIFICATE-----" in blob:
+        return _pem_cert_ders(blob.decode("ascii", errors="strict"))
+    if blob and blob[0] == 0x30:  # ASN.1 SEQUENCE: a single DER certificate
+        return [blob]
+    return []
 
 
 def _snp_cert_chain_augment(report: dict[str, Any], chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1335,7 +1350,7 @@ def _snp_cert_chain_augment(report: dict[str, Any], chain: list[dict[str, Any]])
     ca = _KDS_CHAIN_CACHE.get(product)
     if ca is None:
         try:
-            ders = _pem_cert_ders(_kds_get(_KDS_CHAIN_URL.format(product=product)).decode("ascii"))
+            ders = _cert_ders(_kds_get(_KDS_CHAIN_URL.format(product=product)))
         except Exception:
             return chain  # KDS unreachable: keep CoCo's chain as-is (fail-safe)
         # KDS order is [ASK, ARK] (the self-signed root is last).
@@ -1363,8 +1378,8 @@ def _snp_cert_chain_augment(report: dict[str, Any], chain: list[dict[str, Any]])
         key = f"{product}|{chip_id}|{qs}"
         vceks = _KDS_VCEK_CACHE.get(key)
         if vceks is None:
-            ders = _pem_cert_ders(
-                _kds_get(_KDS_VCEK_URL.format(product=product, chip_id=chip_id) + "?" + qs).decode("ascii")
+            ders = _cert_ders(
+                _kds_get(_KDS_VCEK_URL.format(product=product, chip_id=chip_id) + "?" + qs)
             )
             if not ders:
                 return chain
