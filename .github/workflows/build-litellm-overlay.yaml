@@ -315,6 +315,28 @@ jobs:
               "/tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_attestation_registry.py",
           ]))
           '
+          # Response-header latin-1 safety gate. NO -k filter (the broad
+          # selection above would deselect it): every X-KubeTEE-* header value
+          # must be latin-1-encodable or the response 500s while headers freeze
+          # (the U+2014 em-dash fallback-header bug). Own isolated process:
+          # monkeypatches _backend_evidence / breaker_guard on the module.
+          docker run --rm \
+            -e LITELLM_MASTER_KEY=unit-test-key \
+            -e PYTHONPATH=/app/.venv/lib/python3.13/site-packages:/workspace/test-deps \
+            -v /tmp/litellm-overlay-test-deps:/workspace:ro \
+            -v "$PWD/tools:/tools:ro" -v "$PWD/tests:/tests:ro" -w /tests \
+            --entrypoint /app/.venv/bin/python \
+            ghcr.io/berriai/litellm-database@${DEFAULT_BASE_DIGEST} \
+            -c '
+          import sys
+          sys.path[:0] = ["/workspace/test-deps", "/app/.venv/lib/python3.13/site-packages"]
+          import pytest
+          raise SystemExit(pytest.main([
+              "-q", "-p", "no:cacheprovider", "--import-mode=importlib",
+              "-o", "asyncio_mode=auto",
+              "/tests/test_litellm/tools/kubetee-litellm-overlay/test_kubetee_header_latin1.py",
+          ]))
+          '
           # Public checkout and exact packaged enterprise share one import source.
           docker run --rm \
             -e PYTHONDONTWRITEBYTECODE=1 \

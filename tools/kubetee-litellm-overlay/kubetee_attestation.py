@@ -1206,6 +1206,30 @@ def _report_data_from_payload(payload: dict[str, Any], nonce: str) -> bytes:
     return kubetee_binding.report_data(statement)
 
 
+def _latin1_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Coerce every header VALUE to a latin-1-safe string.
+
+    HTTP header values are latin-1 (PEP 3333 / ASGI): a non-latin-1 byte in
+    any value raises UnicodeEncodeError while the response headers freeze and
+    turns a healthy completion into a 500. Attestation values can carry
+    free-form backend strings (labels, reasons, names), so sanitize at this
+    single choke point — the response-headers hook — rather than trusting every
+    literal. ASCII is preserved verbatim; any byte that cannot encode as
+    latin-1 is replaced with '?'. This is a crash guard, NOT an evidence
+    decision: it never alters a digest, quote, signature, or nonce (those are
+    already hex/base64 ASCII).
+    """
+    safe: dict[str, str] = {}
+    for key, value in headers.items():
+        text = value if isinstance(value, str) else str(value)
+        try:
+            text.encode("latin-1")
+        except UnicodeEncodeError:
+            text = text.encode("latin-1", "replace").decode("latin-1")
+        safe[str(key)] = text
+    return safe
+
+
 def _attestation_headers(payload: dict[str, Any], nonce: str) -> dict[str, str]:
     """Same evidence as /v1/attestation, expressed as inline HTTP headers."""
     tee = payload["tee"]
@@ -1362,8 +1386,12 @@ async def _backend_identity_headers(
             "boot-time (Trustee EAR; east-west mTLS)"
         )
         if api_base:
+            # ASCII only — HTTP header values are latin-1; a non-latin-1 byte
+            # (the former U+2014 em-dash at byte 29) raised UnicodeEncodeError
+            # and 500'd the completion the moment the graceful fallback ran
+            # (cold evidence-cache miss). Keep every header value ASCII.
             headers["X-KubeTEE-Backend-Evidence-Error"] = (
-                "backend evidence unavailable — boundary label only"
+                "backend evidence unavailable - boundary label only"
             )
             # A freshness gap degrades but never trips — record + surface it.
             await _observe_backend_evidence(_backend_attest_url(str(api_base)), None)
@@ -1534,19 +1562,26 @@ class KubeTEEAttestationLogger(CustomLogger):
         raw_nonce = _validate_nonce(nonce)
         if nonce is not None and raw_nonce is None:
             # Malformed nonce: signal, don't fail the completion.
-            return {"X-KubeTEE-Attestation-Error": "invalid nonce (need 64 hex)"}
+            return _latin1_headers(
+                {"X-KubeTEE-Attestation-Error": "invalid nonce (need 64 hex)"}
+            )
         if raw_nonce is None:
             return None  # opt-in header absent — no-op
 
         try:
             payload = await get_attestation_payload(raw_nonce)
             if payload is None:
-                return {"X-KubeTEE-Attestation-Error": "invalid nonce (need 64 hex)"}
+                return _latin1_headers(
+                    {"X-KubeTEE-Attestation-Error": "invalid nonce (need 64 hex)"}
+                )
             out = _attestation_headers(payload, raw_nonce)
         except Exception as e:
-            return {"X-KubeTEE-Attestation-Error": f"attestation evidence unavailable: {e}"}
+            # The exception text is free-form and may not be latin-1; sanitize.
+            return _latin1_headers(
+                {"X-KubeTEE-Attestation-Error": f"attestation evidence unavailable: {e}"}
+            )
         out.update(await _backend_identity_headers(data, litellm_call_info))
-        return out
+        return _latin1_headers(out)
 
 
 # Resolved by get_instance_fn("kubetee_attestation.kubetee_attestation_logger").
