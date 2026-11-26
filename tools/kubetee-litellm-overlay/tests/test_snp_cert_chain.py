@@ -177,6 +177,27 @@ def test_no_double_append() -> None:
     assert len(out2) == 3, [e["cert_type"] for e in out2]
 
 
+def test_vcek_as_raw_der_is_parsed() -> None:
+    """REGRESSION: AMD's VCEK endpoint returns raw DER (0x30 ...), not PEM.
+
+    A PEM-only parser decoded the DER body as ASCII and threw, so the fail-safe
+    returned the ORIGINAL empty chain in production even though the code looked
+    correct. Serve the VCEK as the raw bytes AMD actually returns and require
+    the chain to still complete to VCEK -> ASK -> ARK.
+    """
+    _reset()
+
+    def fake(url: str) -> bytes:
+        if "cert_chain" in url:
+            return _CA_PEM.encode()  # CA endpoint: PEM bundle [ASK, ARK]
+        return _VCEK_DER  # VCEK endpoint: RAW DER (starts 0x30)
+
+    ka._kds_get = fake  # type: ignore[assignment]
+    out = ka._snp_cert_chain_augment(_report(), [])
+    assert [e["cert_type"] for e in out] == ["VCEK", "ASK", "ARK"]
+    assert out[0]["data"] == list(_VCEK_DER)
+
+
 def main() -> int:
     print("== SNP cert-chain delivery (VCEK + ASK/ARK via KDS) ==")
     for fn in (
@@ -186,6 +207,7 @@ def main() -> int:
         test_kds_unreachable_leaves_original_chain,
         test_vcek_fetch_fail_does_not_emit_bare_ca,
         test_no_double_append,
+        test_vcek_as_raw_der_is_parsed,
     ):
         try:
             fn()
