@@ -1270,60 +1270,110 @@ def _snp_raw_report(report: dict[str, Any]) -> bytes:
     return bytes(out)
 
 
-# AMD KDS ARK/ASK chain cache (per product); VCEK comes from CoCo's evidence.
+# AMD KDS certificate delivery (VCEK + ASK/ARK). CoCo's AA returns an EMPTY
+# cert chain on our guests (the firmware cert page is empty and the guest does
+# no KDS fetch), so we fetch VCEK/ASK/ARK here to complete the chain. See the
+# rationale comment in `_snp_cert_chain_augment`. Caches: CA chain per product;
+# VCEK per (chip, reported TCB).
 _KDS_CHAIN_CACHE: dict[str, list[dict[str, Any]]] = {}
+_KDS_VCEK_CACHE: dict[str, list[dict[str, Any]]] = {}
 _KDS_CHAIN_URL = "https://kdsintf.amd.com/vcek/v1/{product}/cert_chain"
-_KDS_CHAIN_TIMEOUT_S = 4.0
+_KDS_VCEK_URL = "https://kdsintf.amd.com/vcek/v1/{product}/{chip_id}"
+_KDS_TIMEOUT_S = 4.0
+_KDS_USER_AGENT = "kubetee-litellm-attestation/1.0"
+_KDS_PRODUCT = {
+    "milan": "Milan", "genoa": "Genoa", "turin": "Turin", "venice": "Venice",
+}
+
+
+def _kds_get(url: str) -> bytes:
+    """GET a PEM resource from AMD KDS; raises on any failure (fail-safe)."""
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": _KDS_USER_AGENT})
+    with urllib.request.urlopen(req, timeout=_KDS_TIMEOUT_S) as resp:
+        return resp.read()
+
+
+def _pem_cert_ders(pem: str) -> list[bytes]:
+    """Split a PEM bundle into DER certificate blobs (in file order)."""
+    blocks = re.findall(
+        r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", pem, re.S
+    )
+    return [base64.b64decode("".join(b.split())) for b in blocks]
 
 
 def _snp_cert_chain_augment(report: dict[str, Any], chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Complete the chain with AMD's ARK/ASK when only a VCEK is present.
+    """Complete the SNP chain to leaf-to-root VCEK -> ASK -> ARK via AMD KDS.
 
-    CoCo's AA often returns just the VCEK; a verifier needs ARK->ASK->VCEK to
-    anchor the chain to AMD's root of trust without a KDS query of its own. We
-    fetch the (static, per-product) ARK/ASK from AMD KDS and APPEND them. On
-    any failure we return the original chain unchanged — never a downgrade,
-    never an invented certificate. The network fetch is best-effort and cached.
+    CoCo's AA returns an EMPTY cert chain on our guests (the firmware cert page
+    is empty at boot and the guest does no KDS fetch), so a verifier gets no
+    key to check the report signature. We fetch the exact signing VCEK (for
+    this report's chip + reported TCB) and the (static, per-product) ASK/ARK
+    from AMD KDS and return leaf-to-root VCEK -> ASK -> ARK. This is safe to
+    fetch over a network because the certs are SELF-AUTHENTICATING: the VCEK's
+    signature over raw_report proves it is the real signing key, and ASK/ARK
+    chain to AMD's well-known root. An untrusted KDS cannot forge evidence —
+    only withhold it. On any failure we return the original chain UNCHANGED
+    (never a bare ASK/ARK with no VCEK anchor, never an invented cert): the
+    envelope then still carries `raw_report`, so a verifier that has AMD trust
+    can fetch the certs itself. Fetches are best-effort and cached.
     """
     existing_types = {
         (e.get("cert_type") or "").upper()
         for e in chain
         if isinstance(e, dict)
     }
-    if {"ARK", "ASK"} <= existing_types or "VCEK" not in existing_types:
-        return chain  # already complete, or nothing to anchor
+    have_vcek = "VCEK" in existing_types
+    if have_vcek and {"ARK", "ASK"} <= existing_types:
+        return chain  # already complete (VCEK + ASK + ARK)
     try:
-        product = {
-            "milan": "Milan", "genoa": "Genoa", "turin": "Turin", "venice": "Venice",
-        }[_snp_cpu_generation(report)]
+        product = _KDS_PRODUCT[_snp_cpu_generation(report)]
     except EvidenceError:
-        return chain
-    cached = _KDS_CHAIN_CACHE.get(product)
-    if cached is None:
+        return chain  # unknown CPU: cannot name the KDS product (fail-safe)
+
+    # (ASK, ARK): static per product, cached. Leaf-to-root when appended.
+    ca = _KDS_CHAIN_CACHE.get(product)
+    if ca is None:
         try:
-            import urllib.request
-            req = urllib.request.Request(
-                _KDS_CHAIN_URL.format(product=product),
-                headers={"User-Agent": "kubetee-litellm-attestation/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=_KDS_CHAIN_TIMEOUT_S) as resp:
-                pem_bundle = resp.read().decode("ascii")
-            # KDS returns PEM blocks; split and DER-encode each.
-            blocks = re.findall(r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", pem_bundle, re.S)
-            import base64 as _b64
-            ders = [_b64.b64decode("".join(b.split())) for b in blocks]
-            # KDS order is typically [ASK, ARK]; label by matching the self-signed ARK.
-            # Both are X.509 DER; identify the ARK as the one whose subject==issuer
-            # chain root is first-signed. Simplest reliable split: first = ASK, last = ARK.
-            labels = (["ASK", "ARK"] if len(ders) == 2 else [f"CERT{i}" for i in range(len(ders))])
-            cached = [
-                {"cert_type": label, "data": list(der)}
-                for label, der in zip(labels, ders)
-            ]
-            _KDS_CHAIN_CACHE[product] = cached
+            ders = _pem_cert_ders(_kds_get(_KDS_CHAIN_URL.format(product=product)).decode("ascii"))
         except Exception:
             return chain  # KDS unreachable: keep CoCo's chain as-is (fail-safe)
-    return chain + cached
+        # KDS order is [ASK, ARK] (the self-signed root is last).
+        labels = (["ASK", "ARK"] if len(ders) == 2 else [f"CERT{i}" for i in range(len(ders))])
+        ca = [{"cert_type": lab, "data": list(der)} for lab, der in zip(labels, ders)]
+        _KDS_CHAIN_CACHE[product] = ca
+
+    if have_vcek:
+        # CoCo supplied the VCEK: append only the CA certs it did not send.
+        return list(chain) + [e for e in ca if (e.get("cert_type") or "").upper() not in existing_types]
+
+    # VCEK absent (the common case on our guests): fetch the exact signing key
+    # for THIS report's chip + reported TCB. The VCEK is "not necessarily the
+    # newest" - it is bound to the reported_tcb, i.e. the key that actually
+    # signed this report. Any failure returns the chain unchanged (fail-safe).
+    try:
+        chip_id = _snp_bytes(report.get("chip_id"), "chip_id", 64).hex()
+        tcb = report.get("reported_tcb") or {}
+        qs = urlencode({
+            "blSPL": int(tcb.get("bootloader") or 0),
+            "teeSPL": int(tcb.get("tee") or 0),
+            "snpSPL": int(tcb.get("snp") or 0),
+            "ucodeSPL": int(tcb.get("microcode") or 0),
+        })
+        key = f"{product}|{chip_id}|{qs}"
+        vceks = _KDS_VCEK_CACHE.get(key)
+        if vceks is None:
+            ders = _pem_cert_ders(
+                _kds_get(_KDS_VCEK_URL.format(product=product, chip_id=chip_id) + "?" + qs).decode("ascii")
+            )
+            if not ders:
+                return chain
+            vceks = [{"cert_type": "VCEK", "data": list(ders[0])}]
+            _KDS_VCEK_CACHE[key] = vceks
+    except Exception:
+        return chain  # VCEK fetch failed: do NOT emit ASK/ARK with no anchor
+
+    return vceks + ca
 
 
 def _snp_evidence(report: Any, cert_chain: Any, report_data: bytes) -> dict[str, Any]:
