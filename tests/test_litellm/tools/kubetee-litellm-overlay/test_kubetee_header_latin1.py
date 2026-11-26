@@ -128,7 +128,7 @@ def test_fallback_headers_are_latin1(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     import asyncio
 
-    async def _no_evidence(_url: str) -> None:
+    async def _no_evidence(_url: str, nonce: str | None = None) -> None:
         return None
 
     async def _no_observe(_url: str, _entry: Any) -> None:
