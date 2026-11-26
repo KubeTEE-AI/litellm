@@ -104,7 +104,10 @@ def evidence(gateway, monkeypatch):
 def test_stock_coco_json_and_gm_miner_binding_are_preserved(gateway, evidence):
     response = json.loads(asyncio.run(ROUTES["/v1/attestation"]("11" * 32)).body)
     assert response["evidence"]["snp"]["schema"] == "kubetee.snp-evidence/1"
-    assert response["evidence"]["snp"]["cert_chain"] == evidence["cert_chain"]
+    # Native CoCo chain is preserved as a prefix (ARK/ASK may be appended).
+    native = evidence["cert_chain"]
+    served = response["evidence"]["snp"]["cert_chain"]
+    assert served[: len(native)] == native
     report = response["evidence"]["snp"]["attestation_report"]
     for field in ("measurement", "host_data", "signature", "current_tcb", "version"):
         assert report[field] == evidence["attestation_report"][field]
@@ -157,3 +160,62 @@ def test_tdx_path_still_does_not_accept_an_amd_report(gateway):
     gateway.TEE_TYPE = "tdx"
     with pytest.raises(gateway.EvidenceError):
         gateway._hardware_evidence(json.loads(FIXTURE.read_text()), bytes(64))
+
+
+# --- Phase 1: raw_report + full cert chain (envelope-raw-report) ------------
+# Golden = the exact 1184-byte AMD report for the ORIGINAL fixture, produced by
+# the Rust `sev` 9.0.0 oracle (kubetee-attestation-verifier `snp-report-bytes`).
+# The Python encoder MUST be byte-identical to it (the VCEK signs the first
+# 0x2A0 bytes). Note the served evidence rewrites report_data to the nonce
+# binding, so the absolute-golden check runs the encoder on the UNMUTATED
+# fixture report directly.
+_GOLDEN_RAW_SHA256 = "18e907bf99a957d8ccf30f2081da17f673da648a7a0b9d551a866e875234c21a"
+
+
+def test_raw_report_encoder_is_byte_exact_vs_rust_oracle(gateway, evidence):
+    # Unmutated fixture -> absolute 1184-byte golden from the Rust sev oracle.
+    raw = gateway._snp_raw_report(evidence["attestation_report"])
+    assert len(raw) == 1184
+    assert hashlib.sha256(raw).hexdigest() == _GOLDEN_RAW_SHA256
+
+
+def test_raw_report_present_and_self_consistent(gateway, evidence):
+    response = json.loads(asyncio.run(ROUTES["/v1/attestation"]("33" * 32)).body)
+    snp = response["evidence"]["snp"]
+    raw = base64.b64decode(snp["raw_report"])
+    assert snp["raw_report_len"] == 1184
+    assert len(raw) == 1184
+    assert snp["raw_report_sha256"] == hashlib.sha256(raw).hexdigest()
+    # The signed body's report_data equals the served binding (report rewrites it).
+    statement = response["bindings"]["report_data_statement"]
+    expected = hashlib.sha256(statement.encode()).digest() + bytes(32)
+    assert raw[0x050:0x050 + 64] == expected
+
+
+def test_raw_report_fields_sit_at_amd_offsets(gateway, evidence):
+    report = evidence["attestation_report"]
+    response = json.loads(asyncio.run(ROUTES["/v1/attestation"]("44" * 32)).body)
+    raw = base64.b64decode(response["evidence"]["snp"]["raw_report"])
+    # Signed body is 0..0x2A0 (672 B); signature block is r@0x2A0 || s@0x2E8.
+    assert raw[0x090:0x090 + 48] == bytes(report["measurement"])
+    assert raw[0x0C0:0x0C0 + 32] == bytes(report["host_data"])
+    assert raw[0x140:0x140 + 32] == bytes(report["report_id"])
+    assert raw[0x1A0:0x1A0 + 64] == bytes(report["chip_id"])
+    assert raw[0x2A0:0x2A0 + 72] == bytes(report["signature"]["r"])
+    assert raw[0x2E8:0x2E8 + 72] == bytes(report["signature"]["s"])
+    # The 512-byte signature block tail and pre-signature reserved are MBZ.
+    assert raw[0x330:0x4A0] == bytes(0x4A0 - 0x330)
+
+
+def test_cert_chain_augmented_with_ark_ask(gateway, evidence):
+    # Pre-seed a cached ARK/ASK (no network in tests) and confirm the gateway
+    # completes a VCEK-only chain while preserving CoCo's VCEK first.
+    gateway._KDS_CHAIN_CACHE["Genoa"] = [
+        {"cert_type": "ASK", "data": [1, 2, 3]},
+        {"cert_type": "ARK", "data": [4, 5, 6]},
+    ]
+    response = json.loads(asyncio.run(ROUTES["/v1/attestation"]("55" * 32)).body)
+    chain = response["evidence"]["snp"]["cert_chain"]
+    types = [e["cert_type"] for e in chain]
+    assert types[0] == "VCEK"          # CoCo's VCEK is preserved first
+    assert "ASK" in types and "ARK" in types
