@@ -317,7 +317,12 @@ _registry_cache_monotonic: float = 0.0
 
 _backend_quotes: dict[str, dict[str, Any]] = {}
 _backend_quote_locks: dict[str, asyncio.Lock] = {}
-_backend_quote_stats: dict[str, int] = {"hit": 0, "miss": 0, "fetch_error": 0}
+_backend_quote_stats: dict[str, int] = {
+    "hit": 0,
+    "miss": 0,
+    "fetch_error": 0,
+    "fresh_nonce": 0,
+}
 
 
 def _eastwest_client_material() -> tuple[str, str] | None:
@@ -360,7 +365,9 @@ def _backend_attest_url(api_base: str) -> str:
     return base + _BACKEND_ATTEST_PATH
 
 
-def _normalize_backend_evidence(raw: Any, api_base: str) -> dict[str, Any] | None:
+def _normalize_backend_evidence(
+    raw: Any, api_base: str, nonce: str | None = None
+) -> dict[str, Any] | None:
     """Project the backend's evidence onto a self-describing envelope.
 
     The client does not know (and must not have to guess) whether the backend
@@ -411,7 +418,7 @@ def _normalize_backend_evidence(raw: Any, api_base: str) -> dict[str, Any] | Non
     schema = f"kubetee.{'tdx' if tee == 'tdx' else 'snp'}-evidence/1"
     signature = raw.get("backend_signature") or raw.get("signature")
     counter = raw.get("counter")
-    return {
+    out: dict[str, Any] = {
         "subject": "nim-terminator",
         "schema": schema,
         "tee": tee,
@@ -420,11 +427,12 @@ def _normalize_backend_evidence(raw: Any, api_base: str) -> dict[str, Any] | Non
         "epoch": epoch,
         "quote": quote,
         "report_data": evidence.get("quote_report_data") or raw.get("report_data"),
-        # The exact bytes hashed into report_data (an EPOCH statement, shared by
-        # every caller in the epoch — NOT any caller's nonce). Served verbatim
-        # so a caller verifies SHA-256(report_data_statement) || 32 zeros against
-        # report_data without re-deriving the epoch. Present when the backend
-        # binds an epoch; the per-caller nonce is bound only by `signature`.
+        # The exact bytes hashed into report_data. SHARED-epoch path: an EPOCH
+        # statement (identical for every caller in the epoch — NOT any caller's
+        # nonce). FRESH nonce path: the per-caller nonce-derived statement. Either
+        # way it is served verbatim so a caller verifies
+        # SHA-256(report_data_statement) || 32 zeros against report_data without
+        # re-deriving it.
         "report_data_statement": (
             raw.get("report_data_statement")
             or (raw.get("bindings") or {}).get("report_data_statement")
@@ -452,6 +460,20 @@ def _normalize_backend_evidence(raw: Any, api_base: str) -> dict[str, Any] | Non
         "quote_sha256": hashlib.sha256(digest_src).hexdigest(),
         "api_base": api_base,
     }
+    # FRESH NONCE-BOUND composite (Phase 4b): when a caller nonce was forwarded,
+    # the backend mints a fresh CPU quote (REPORTDATA = nonce-derived statement)
+    # AND fresh per-GPU evidence echoing the SAME nonce in each SPDM frame.
+    # Surface the GPU inventory + per-leg timing so the client can see the whole
+    # CPU+8-GPU mint actually happened, not just a cached epoch quote.
+    if nonce:
+        out["nonce_echoed"] = raw.get("nonce")
+        out["fresh"] = bool(raw.get("fresh"))
+        out["gpu_count"] = raw.get("gpu_count")
+        out["gpu_arch"] = raw.get("gpu_arch")
+        out["evidence_digest"] = raw.get("evidence_digest")
+        out["gpus"] = raw.get("gpus")
+        out["timing"] = dict(raw.get("timing") or {}) or None
+    return out
 
 
 def _prune_backend_quotes() -> None:
@@ -460,21 +482,29 @@ def _prune_backend_quotes() -> None:
         _backend_quotes.pop(next(iter(_backend_quotes)))
 
 
-async def _fetch_backend_evidence(url: str) -> dict[str, Any]:
+async def _fetch_backend_evidence(
+    url: str, nonce: str | None = None
+) -> dict[str, Any]:
     """One evidence fetch from the backend guest over strict east-west mTLS.
 
-    This fetch binds NO caller nonce — deliberately. A hardware quote is sealed
-    at mint: a nonce in `report_data` would make the quote usable by exactly
-    that nonce's owner and therefore uncachable. So the backend's cached quote
-    binds its **epoch statement** instead (identical for every caller inside
-    the epoch) and returns the exact hashed bytes as `report_data_statement`,
-    so ANY caller can verify `SHA-256(statement) ‖ 32 zero bytes == report_data`.
-    Per-caller binding, when wanted, is a separate signature the backend makes
-    over `sha256(quote)‖sha256(caller_nonce)‖epoch_id` during the completion —
-    a cheap sign, never a quote mint. This module only relays both.
+    Two modes, selected by `nonce`:
 
-    `role` selects the backend's role-scoped route; there is no nonce param on
-    the shared cache path.
+    * ``nonce=None`` — the SHARED EPOCH path. Binds NO caller nonce on purpose:
+      a hardware quote is sealed at mint, so a nonce in `report_data` would make
+      the quote usable by exactly that nonce's owner and therefore uncachable.
+      The backend's cached quote binds its **epoch statement** instead (identical
+      for every caller inside the epoch) and returns the exact hashed bytes as
+      `report_data_statement`, so ANY caller can verify
+      `SHA-256(statement) ‖ 32 zero bytes == report_data`. Cheap and cacheable.
+
+    * ``nonce=<64-hex>`` — the FRESH NONCE-BOUND path (Phase 4b). The backend
+      mints a NEW quote with the caller nonce bound into REPORTDATA and collects
+      fresh per-GPU (CPU + 8-GPU) evidence that echoes the SAME nonce in each
+      SPDM GET_MEASUREMENTS frame. This is the "fresh CPU+8GPU per client nonce"
+      design: one fresh composite per nonce-bearing request. Sealed to that nonce
+      — deliberately UNCACHABLE (the caller below bypasses the cache for it).
+
+    `role` selects the backend's role-scoped route.
     """
     import httpx
 
@@ -482,19 +512,51 @@ async def _fetch_backend_evidence(url: str) -> dict[str, Any]:
     client_kwargs: dict[str, Any] = {"timeout": 30.0}
     if material is not None:
         client_kwargs["cert"], client_kwargs["verify"] = material
+    params: dict[str, str] = {"role": _BACKEND_ROLE}
+    if nonce:
+        params["nonce"] = nonce.lower()
     async with httpx.AsyncClient(**client_kwargs) as client:
-        resp = await client.get(url, params={"role": _BACKEND_ROLE})
+        resp = await client.get(url, params=params)
         resp.raise_for_status()
         return json.loads(resp.content)
 
 
-async def _backend_evidence(api_base: str) -> dict[str, Any] | None:
-    """The backend's evidence, cached in this process for < TTL seconds.
+async def _backend_evidence(
+    api_base: str, nonce: str | None = None
+) -> dict[str, Any] | None:
+    """The backend's evidence.
 
-    Shared by every API key — a warm hit is a dict read. Returns None when no
-    acceptable evidence is available (fail closed to the boundary label).
+    Two paths, selected by `nonce`:
+
+    * ``nonce=None`` (default) — SHARED epoch quote, cached in this process for
+      < TTL seconds and shared by every API key. A warm hit is a dict read.
+
+    * ``nonce=<64-hex>`` (Phase 4b) — FRESH CPU+8GPU mint sealed to that nonce.
+      Bypasses BOTH the cache read AND the cache write (a nonce-bound composite
+      is uncachable by design — serving it to another caller would leak a quote
+      whose REPORTDATA names a nonce that is not theirs). Each fresh result is
+      fetched, normalized, fed to the breaker, and returned WITHOUT being
+      stored. The shared epoch cache is left untouched (still serves the
+      non-nonce path cheaply).
+
+    Returns None when no acceptable evidence is available (fail closed to the
+    boundary label).
     """
     key = _backend_attest_url(api_base)
+    if nonce:
+        _backend_quote_stats["fresh_nonce"] += 1
+        try:
+            raw = await _fetch_backend_evidence(key, nonce=nonce)
+        except Exception:
+            _backend_quote_stats["fetch_error"] += 1
+            return None
+        entry = _normalize_backend_evidence(raw, api_base, nonce=nonce)
+        if entry is None:
+            return None
+        entry["_minted_monotonic"] = time.monotonic()
+        entry["_source"] = "fresh-nonce"
+        await _observe_backend_evidence(key, entry)  # fresh verify (breaker)
+        return entry
     entry = _backend_quotes.get(key)
     if entry is not None and (time.monotonic() - entry["_minted_monotonic"]) < _BACKEND_QUOTE_TTL_S:
         _backend_quote_stats["hit"] += 1
@@ -1631,19 +1693,23 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
 
 
 async def _backend_identity_headers(
-    data: dict, litellm_call_info: dict | None
+    data: dict, litellm_call_info: dict | None, nonce: str | None = None
 ) -> dict[str, str]:
     """Best-effort backend identity headers for inline evidence.
 
-    The backend's hardware evidence comes from the **shared** per-backend cache
-    in `_backend_evidence` — one quote per backend, reused for every key and
-    every request inside its epoch. It is never fetched per key (the
-    `user_api_key_dict` argument is deliberately absent from this call: key
-    material has no role here).
+    The backend's hardware evidence is fetched by `_backend_evidence`. Two modes:
 
-    A warm cache hit emits the relayed quote evidence. A cold/expired fetch
-    failure falls back to the boot-time boundary label and says so — never a
-    silent downgrade from a quote to a label.
+    * ``nonce=None`` (default) — SHARED per-backend epoch cache: one quote per
+      backend, reused for every key and every request inside its epoch. Never
+      fetched per key (the `user_api_key_dict` argument is deliberately absent
+      from this call: key material has no role here).
+    * ``nonce=<64-hex>`` (Phase 4b) — a FRESH CPU+8GPU mint sealed to the caller
+      nonce (REPORTDATA = nonce-derived statement; every GPU's SPDM frame echoes
+      the same nonce). One fresh composite per nonce-bearing request, uncached.
+
+    A warm cache hit (or a fresh mint) emits the relayed quote evidence. A
+    cold/expired fetch failure falls back to the boot-time boundary label and
+    says so — never a silent downgrade from a quote to a label.
     """
     headers: dict[str, str] = {}
     info = litellm_call_info or {}
@@ -1664,7 +1730,7 @@ async def _backend_identity_headers(
 
     evidence: dict[str, Any] | None = None
     if api_base:
-        evidence = await _backend_evidence(str(api_base))
+        evidence = await _backend_evidence(str(api_base), nonce=nonce)
         # Circuit-breaker surface (measurement drift / freshness gap). A drifted
         # (composition-changed) backend emits the OPEN -> auto-block/503 labels;
         # a freshness gap emits DEGRADED. Both are merged into the response
@@ -1692,7 +1758,13 @@ async def _backend_identity_headers(
                 headers.update(guard)
         return headers
 
-    headers["X-KubeTEE-Backend-Attested"] = "hardware-evidence (shared epoch cache)"
+    # Reflect what was actually minted: a fresh nonce-bound CPU+8GPU composite
+    # (Phase 4b) or the shared epoch quote. Never claim freshness we don't have.
+    _src = str(evidence.get("_source", "cache"))
+    if nonce and _src == "fresh-nonce":
+        headers["X-KubeTEE-Backend-Attested"] = "hardware-evidence (fresh cpu+gpu, nonce-bound)"
+    else:
+        headers["X-KubeTEE-Backend-Attested"] = "hardware-evidence (shared epoch cache)"
     epoch = evidence.get("epoch") or {}
 
     # Self-describing discriminators, FLAT so a client can filter without
@@ -1724,6 +1796,23 @@ async def _backend_identity_headers(
         headers["X-KubeTEE-Backend-Evidence-Layer2"] = "present"
     else:
         headers["X-KubeTEE-Backend-Evidence-Layer2"] = "absent"
+
+    # FRESH NONCE-BOUND telemetry (Phase 4b): the GPU inventory + the per-leg
+    # timing the backend measured while minting the CPU quote and collecting the
+    # GPU evidence. Only present on the fresh path. These are the observables
+    # the cache/rate-limit decision is made from (how much latency a fresh
+    # CPU+8-GPU mint costs per nonce-bearing request).
+    if nonce and _src == "fresh-nonce":
+        headers["X-KubeTEE-Backend-GPU-Count"] = str(evidence.get("gpu_count") or 0)
+        if evidence.get("gpu_arch"):
+            headers["X-KubeTEE-Backend-GPU-Arch"] = str(evidence["gpu_arch"])
+        timing = evidence.get("timing") or {}
+        if timing.get("cpu_mint_ms") is not None:
+            headers["X-KubeTEE-Backend-CPU-Mint-Ms"] = str(timing["cpu_mint_ms"])
+        if timing.get("gpu_collect_ms") is not None:
+            headers["X-KubeTEE-Backend-GPU-Collect-Ms"] = str(timing["gpu_collect_ms"])
+        if timing.get("total_ms") is not None:
+            headers["X-KubeTEE-Backend-Mint-Total-Ms"] = str(timing["total_ms"])
 
     # ONE self-describing envelope carries the TEE-specific payload (quote +
     # event_log + report_data for TDX; native `snp` for SNP) plus cert_chain.
@@ -1759,6 +1848,23 @@ async def _backend_identity_headers(
         envelope["event_log"] = evidence.get("event_log")
     else:
         envelope["snp"] = evidence.get("snp")
+    # FRESH NONCE-BOUND (Phase 4b): a compact GPU summary + the composite digest
+    # (a commitment to the FULL CPU+8GPU bundle) ride inline. The 8 raw SPDM
+    # reports + cert chains are ~190 KB and would blow any HTTP header budget,
+    # so they stay in the backend's standalone bundle — the client fetches
+    # `/kubetee/evidence?nonce=<theirs>` for the full proofs and checks them
+    # against `evidence_digest`. Inline here is what proves THIS nonce got a
+    # fresh CPU+8GPU mint (not a shared epoch quote) and what the timing cost.
+    if nonce and _src == "fresh-nonce":
+        gpu = {
+            "count": evidence.get("gpu_count"),
+            "arch": evidence.get("gpu_arch"),
+            "evidence_digest": evidence.get("evidence_digest"),
+            "timing": evidence.get("timing"),
+        }
+        if evidence.get("nonce_echoed"):
+            gpu["nonce_echoed"] = evidence.get("nonce_echoed")
+        envelope["gpu"] = gpu
     encoded = base64.urlsafe_b64encode(
         json.dumps(envelope, separators=(",", ":"), sort_keys=True).encode("utf-8")
     ).decode("ascii").rstrip("=")
@@ -1891,7 +1997,7 @@ class KubeTEEAttestationLogger(CustomLogger):
             return _latin1_headers(
                 {"X-KubeTEE-Attestation-Error": f"attestation evidence unavailable: {e}"}
             )
-        out.update(await _backend_identity_headers(data, litellm_call_info))
+        out.update(await _backend_identity_headers(data, litellm_call_info, nonce=raw_nonce))
         return _latin1_headers(out)
 
 

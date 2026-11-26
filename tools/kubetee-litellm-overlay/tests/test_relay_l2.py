@@ -193,7 +193,7 @@ def test_layer2_header_discriminator() -> None:
         return await ka._backend_identity_headers({}, {"api_base": "https://b.example/v1"})
 
     def _ev(payload):
-        async def _f(_api_base):
+        async def _f(_api_base, nonce=None):
             return payload
 
         return _f
