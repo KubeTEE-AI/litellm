@@ -296,7 +296,17 @@ def decode_ear_claims(ear_token: str) -> dict[str, Any]:
 
 
 def ar4si(claims: dict[str, Any]) -> dict[str, Any] | None:
-    """The AR4SI trustworthiness vector plus the partner claim mapping."""
+    """The AR4SI trustworthiness vector plus the partner claim mapping.
+
+    Trustee v0.23.0 (EAR **draft-04**) renames the dotted claim keys to
+    underscored forms and flattens them onto the submodule
+    (``submods.<tee>.ear_status``), per the AS ``ear_token`` migration
+    ("rename dotted claims to underscored forms"). The pre-draft-04 dotted
+    spellings are still accepted so older captures parse too. This is
+    claim-name normalization in a *display* parser (the appraisal is additive
+    and never gates authorization). AR4SI group names inside the vector
+    (``executables``, ``configuration``, …) are unchanged.
+    """
     vector: dict[str, Any] = {}
     status: str | None = None
 
@@ -304,9 +314,9 @@ def ar4si(claims: dict[str, Any]) -> dict[str, Any] | None:
         nonlocal status
         if isinstance(node, dict):
             for key, value in node.items():
-                if key == "ear.trustworthiness-vector" and isinstance(value, dict):
+                if key in ("ear_trustworthiness_vector", "ear.trustworthiness-vector") and isinstance(value, dict):
                     vector.update(value)
-                elif key == "ear.status" and isinstance(value, str):
+                elif key in ("ear_status", "ear.status") and isinstance(value, str):
                     status = value
                 else:
                     walk(value)
