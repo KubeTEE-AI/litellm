@@ -274,6 +274,20 @@ _BACKEND_QUOTE_MAX: Final[int] = int(os.environ.get("KUBETEE_BACKEND_QUOTE_MAX",
 _BACKEND_EVIDENCE_MAX_HEADER_CHARS: Final[int] = int(
     os.environ.get("KUBETEE_BACKEND_EVIDENCE_MAX_HEADER_CHARS", "24000")
 )
+# Normative Layer-2 signature-input recipe, self-describing so a verifier
+# never has to guess the byte layout (matches the backend signer's
+# `signature_input()` exactly): concatenation of
+#   SHA-256(quote_bytes)                32B  = the relayed `quote_sha256`
+#   SHA-256(bytes.fromhex(nonce_hex))   32B  (nonce = 32B from a 64-hex string)
+#   epoch_id.encode("ascii")           var
+#   counter.to_bytes(8, "big")           8B
+# signed Ed25519 (RFC 8032) by `tee_pubkey`. The nonce defeats quote reuse
+# across callers; the counter defeats within-epoch replay.
+_LAYER2_SIGNATURE_INPUT: Final[str] = (
+    "ed25519(RFC8032) over "
+    "sha256(quote_bytes)||sha256(bytes.fromhex(nonce_64hex))||"
+    "epoch_id.encode('ascii')||counter.to_bytes(8,'big')"
+)
 
 # --- Reference registry (the CLIENT-FACING allowlist) -----------------------
 # The backend's live TDX registers are matched against the SIGNED reference
@@ -395,6 +409,8 @@ def _normalize_backend_evidence(raw: Any, api_base: str) -> dict[str, Any] | Non
         "valid_until": raw.get("valid_until") or "",
     }
     schema = f"kubetee.{'tdx' if tee == 'tdx' else 'snp'}-evidence/1"
+    signature = raw.get("backend_signature") or raw.get("signature")
+    counter = raw.get("counter")
     return {
         "subject": "nim-terminator",
         "schema": schema,
@@ -415,7 +431,23 @@ def _normalize_backend_evidence(raw: Any, api_base: str) -> dict[str, Any] | Non
         ),
         "event_log": raw.get("cc_eventlog") or evidence.get("event_log"),
         "snp": snp,
-        "signature": raw.get("backend_signature") or raw.get("signature"),
+        "signature": signature,
+        # Layer-2 verification material. `signature` (Ed25519 by `tee_pubkey`)
+        # is relayed verbatim and never re-signed here (we hold no backend
+        # key). To be VERIFIABLE it must arrive with everything the client
+        # needs to reconstruct its input and check the key: `counter` and
+        # `epoch.id` complete `signature_input`; `tee_pubkey` is the Ed25519
+        # verifying key (public); `keyset`/`keyset_digest` bind that key into
+        # the hardware quote (report_data_statement commits keyset_digest).
+        # All are PUBLIC. A MISSING/EMPTY signature (the shared cache path,
+        # which binds no caller) leaves these empty — the caller then sees
+        # "no caller-binding" and falls back to epoch freshness. Surface them
+        # only when a real signature is present, never as counter=0 noise.
+        "counter": counter if signature else None,
+        "tee_pubkey": raw.get("tee_pubkey") if signature else None,
+        "keyset": raw.get("keyset"),
+        "keyset_digest": (raw.get("bindings") or {}).get("keyset_digest"),
+        "signature_input": _LAYER2_SIGNATURE_INPUT if signature else None,
         "cert_chain": evidence.get("cert_chain"),
         "quote_sha256": hashlib.sha256(digest_src).hexdigest(),
         "api_base": api_base,
@@ -1110,6 +1142,190 @@ def _snp_bytes(value: Any, name: str, size: int | None = None) -> bytes:
     return raw
 
 
+# ---------------------------------------------------------------------------
+# SNP raw-report serialization (AMD ATT_REP_FW_LEN = 1184 bytes)
+# ---------------------------------------------------------------------------
+# Reconstructs the exact binary AMD SEV-SNP attestation report from CoCo's
+# structured JSON so an offline verifier (SayGM/Chutes/gm-miner) can check the
+# VCEK ECDSA P-384/SHA-384 signature over `raw_report[..0x2a0]` WITHOUT
+# hand-assembling the layout. This is a faithful port of `virtee/sev` 9.0.0
+# `AttestationReport`'s `Encoder` (validated byte-for-byte against the
+# `sev`-oracle golden vector in the reference verifier's `snp-report-bytes`).
+#
+# Two non-obvious wire details (the reason a hand-rolled encoder breaks):
+#   * `Version` (current/committed) is a 24-bit LITTLE-ENDIAN int encoded as
+#     [build, minor, major] — NOT [major, minor, build].
+#   * `signature` is a 144-byte block = r(72) || s(72) at offset 0x2A0.
+# The report version selects the reserved/mitigation-vector span; only
+# (V6, Venice) carries extended TCBs. Our Milan/Genoa/Turin V3/V5 guests leave
+# the ETCB span MBZ.
+_SNP_REPORT_LEN: Final = 1184
+_SNP_SIGNED_BODY_LEN: Final = 0x2A0
+
+
+def _snp_cpu_generation(report: dict[str, Any]) -> str:
+    """Map cpuid family/model to the TCB byte layout, per sev::Generation."""
+    fam = report.get("cpuid_fam_id") or 0
+    model = report.get("cpuid_mod_id") or 0
+    if fam == 0x19 and model <= 0x0F:
+        return "milan"
+    if fam == 0x19 and ((0x10 <= model <= 0x1F) or (0xA0 <= model <= 0xAF)):
+        return "genoa"
+    if fam == 0x1A and 0x00 <= model <= 0x1F:
+        return "turin"
+    if fam == 0x1A and ((0x50 <= model <= 0x5F) or (0xC0 <= model <= 0xCF)):
+        return "venice"
+    raise EvidenceError(f"SNP unknown CPU family/model 0x{fam:x}/0x{model:x}")
+
+
+def _snp_tcb_bytes(tcb: dict[str, Any], gen: str) -> bytes:
+    """Serialize an 8-byte TCB in the generation's wire order (sev TcbVersion)."""
+    fmc = (tcb.get("fmc") or 0) & 0xFF
+    bootloader = (tcb.get("bootloader") or 0) & 0xFF
+    tee = (tcb.get("tee") or 0) & 0xFF
+    snp = (tcb.get("snp") or 0) & 0xFF
+    ucode = (tcb.get("microcode") or 0) & 0xFF
+    if gen in ("milan", "genoa"):
+        return bytes([bootloader, tee, 0, 0, 0, 0, snp, ucode])
+    if gen == "turin":
+        return bytes([fmc, bootloader, tee, snp, 0, 0, 0, ucode])
+    # Venice: fmc, tee, snp; no bootloader/microcode.
+    return bytes([fmc, tee, snp, 0, 0, 0, 0, 0])
+
+
+def _snp_version_bytes(version: dict[str, Any]) -> bytes:
+    """sev encodes Version as [build, minor, major] (24-bit little-endian)."""
+    return bytes([
+        (version.get("build") or 0) & 0xFF,
+        (version.get("minor") or 0) & 0xFF,
+        (version.get("major") or 0) & 0xFF,
+    ])
+
+
+def _snp_raw_report(report: dict[str, Any]) -> bytes:
+    """Serialize the structured report to the exact 1184-byte AMD binary.
+
+    Fails closed on any field-shape error (via _snp_bytes) or unknown CPU.
+    """
+    ab = lambda name: _snp_bytes(report.get(name), name)  # noqa: E731
+    version = report.get("version", 3)
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise EvidenceError(f"unsupported SNP report version: {version!r}")
+    variant = "V2" if version == 2 else ("V3" if version in (3, 4) else ("V5" if version == 5 else "V6"))
+    gen = _snp_cpu_generation(report)
+
+    out = bytearray()
+    out += int(version).to_bytes(4, "little")
+    out += (report.get("guest_svn") or 0).to_bytes(4, "little")
+    out += (report.get("policy") or 0).to_bytes(8, "little")
+    out += ab("family_id") + ab("image_id")
+    out += (report.get("vmpl") or 0).to_bytes(4, "little")
+    out += (report.get("sig_algo") or 0).to_bytes(4, "little")
+    out += _snp_tcb_bytes(report.get("current_tcb") or {}, gen)
+    out += (report.get("plat_info") or 0).to_bytes(8, "little")
+    out += (report.get("key_info") or 0).to_bytes(4, "little")
+    out += bytes(4)  # reserved
+    out += ab("report_data") + ab("measurement") + ab("host_data")
+    out += ab("id_key_digest") + ab("author_key_digest")
+    out += ab("report_id") + ab("report_id_ma")
+    out += _snp_tcb_bytes(report.get("reported_tcb") or {}, gen)
+
+    if variant == "V2":
+        out += bytes(24) + ab("chip_id")
+    else:
+        out += bytes([
+            (report.get("cpuid_fam_id") or 0) & 0xFF,
+            (report.get("cpuid_mod_id") or 0) & 0xFF,
+            (report.get("cpuid_step") or 0) & 0xFF,
+        ])
+        out += bytes(21) + ab("chip_id")
+
+    out += _snp_tcb_bytes(report.get("committed_tcb") or {}, gen)
+    out += _snp_version_bytes(report.get("current") or {})
+    out += bytes(1)  # reserved
+    out += _snp_version_bytes(report.get("committed") or {})
+    out += bytes(1)  # reserved
+    out += _snp_tcb_bytes(report.get("launch_tcb") or {}, gen)
+
+    if variant in ("V2", "V3"):
+        out += bytes(40)  # reserved (no mitigation vectors pre-V5)
+    else:
+        out += (report.get("launch_mit_vector") or 0).to_bytes(8, "little")
+        out += (report.get("current_mit_vector") or 0).to_bytes(8, "little")
+        out += bytes(24)
+
+    # Extended TCBs are (V6, Venice) only; the 96-byte span is MBZ elsewhere.
+    out += bytes(96)
+    out += bytes(32)  # reserved before the signature block
+
+    # The signature block is 512 bytes at 0x2A0..0x4A0 (sev Signature): r(72)
+    # || s(72) || 368 reserved zero bytes. The signed body is 0x2A0 (672) bytes.
+    sig = report.get("signature") or {}
+    out += _snp_bytes(sig.get("r"), "signature.r", 72)
+    out += _snp_bytes(sig.get("s"), "signature.s", 72)
+    out += bytes(_SNP_REPORT_LEN - _SNP_SIGNED_BODY_LEN - 144)
+
+    if len(out) != _SNP_REPORT_LEN:
+        raise EvidenceError(f"SNP raw report serialization is {len(out)} bytes, expected {_SNP_REPORT_LEN}")
+    return bytes(out)
+
+
+# AMD KDS ARK/ASK chain cache (per product); VCEK comes from CoCo's evidence.
+_KDS_CHAIN_CACHE: dict[str, list[dict[str, Any]]] = {}
+_KDS_CHAIN_URL = "https://kdsintf.amd.com/vcek/v1/{product}/cert_chain"
+_KDS_CHAIN_TIMEOUT_S = 4.0
+
+
+def _snp_cert_chain_augment(report: dict[str, Any], chain: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Complete the chain with AMD's ARK/ASK when only a VCEK is present.
+
+    CoCo's AA often returns just the VCEK; a verifier needs ARK->ASK->VCEK to
+    anchor the chain to AMD's root of trust without a KDS query of its own. We
+    fetch the (static, per-product) ARK/ASK from AMD KDS and APPEND them. On
+    any failure we return the original chain unchanged — never a downgrade,
+    never an invented certificate. The network fetch is best-effort and cached.
+    """
+    existing_types = {
+        (e.get("cert_type") or "").upper()
+        for e in chain
+        if isinstance(e, dict)
+    }
+    if {"ARK", "ASK"} <= existing_types or "VCEK" not in existing_types:
+        return chain  # already complete, or nothing to anchor
+    try:
+        product = {
+            "milan": "Milan", "genoa": "Genoa", "turin": "Turin", "venice": "Venice",
+        }[_snp_cpu_generation(report)]
+    except EvidenceError:
+        return chain
+    cached = _KDS_CHAIN_CACHE.get(product)
+    if cached is None:
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                _KDS_CHAIN_URL.format(product=product),
+                headers={"User-Agent": "kubetee-litellm-attestation/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=_KDS_CHAIN_TIMEOUT_S) as resp:
+                pem_bundle = resp.read().decode("ascii")
+            # KDS returns PEM blocks; split and DER-encode each.
+            blocks = re.findall(r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----", pem_bundle, re.S)
+            import base64 as _b64
+            ders = [_b64.b64decode("".join(b.split())) for b in blocks]
+            # KDS order is typically [ASK, ARK]; label by matching the self-signed ARK.
+            # Both are X.509 DER; identify the ARK as the one whose subject==issuer
+            # chain root is first-signed. Simplest reliable split: first = ASK, last = ARK.
+            labels = (["ASK", "ARK"] if len(ders) == 2 else [f"CERT{i}" for i in range(len(ders))])
+            cached = [
+                {"cert_type": label, "data": list(der)}
+                for label, der in zip(labels, ders)
+            ]
+            _KDS_CHAIN_CACHE[product] = cached
+        except Exception:
+            return chain  # KDS unreachable: keep CoCo's chain as-is (fail-safe)
+    return chain + cached
+
+
 def _snp_evidence(report: Any, cert_chain: Any, report_data: bytes) -> dict[str, Any]:
     """Pass CoCo's structured SnpEvidence; check binding and buffer shapes.
 
@@ -1160,12 +1376,23 @@ def _snp_evidence(report: Any, cert_chain: Any, report_data: bytes) -> dict[str,
             raise EvidenceError("SNP cert_chain entries must have a cert_type string")
         if not _snp_bytes(entry.get("data"), "certificate DER"):
             raise EvidenceError("SNP certificate is empty")
+    # Reconstruct the exact 1184-byte AMD report so an offline verifier can
+    # check the VCEK signature without hand-assembling the layout (the known
+    # to_bytes footgun). Fails closed on any shape error above.
+    raw_report = _snp_raw_report(report)
+    # Complete the chain with AMD's ARK/ASK when CoCo returned only the VCEK,
+    # so the verifier can anchor to AMD's root of trust without its own KDS
+    # query. Best-effort + cached; on failure the chain is returned unchanged.
+    full_chain = _snp_cert_chain_augment(report, cert_chain)
     # This is the protocol discriminator consumed by gm-miner, not a claim of
     # AMD trust. The latter is established only by VCEK/report verification.
     return {
         "schema": "kubetee.snp-evidence/1",
         "attestation_report": report,
-        "cert_chain": cert_chain,
+        "raw_report": base64.b64encode(raw_report).decode("ascii"),
+        "raw_report_len": _SNP_REPORT_LEN,
+        "raw_report_sha256": hashlib.sha256(raw_report).hexdigest(),
+        "cert_chain": full_chain,
     }
 
 
@@ -1424,6 +1651,14 @@ async def _backend_identity_headers(
         headers["X-KubeTEE-Backend-Epoch-Valid-Until"] = str(epoch["valid_until"])
     if evidence.get("signature"):
         headers["X-KubeTEE-Backend-Evidence-Signature"] = str(evidence["signature"])
+        # Flat, filterable discriminator: whether the relayed envelope carries a
+        # per-request caller-binding signature (Layer 2) or is epoch-freshness
+        # only (Layer 1). The plain cache path returns no signature; a
+        # nonce-bound mint does. The client reads this without decoding the
+        # envelope to know whether caller-binding is even present to verify.
+        headers["X-KubeTEE-Backend-Evidence-Layer2"] = "present"
+    else:
+        headers["X-KubeTEE-Backend-Evidence-Layer2"] = "absent"
 
     # ONE self-describing envelope carries the TEE-specific payload (quote +
     # event_log + report_data for TDX; native `snp` for SNP) plus cert_chain.
@@ -1442,6 +1677,17 @@ async def _backend_identity_headers(
         "report_data_statement": evidence.get("report_data_statement"),
         "cert_chain": evidence.get("cert_chain"),
         "signature": evidence.get("signature"),
+        # Layer-2 caller-binding verification material (public). `signature`
+        # is Ed25519 over `signature_input` by `tee_pubkey`; `counter` +
+        # `epoch.id` reconstruct the input and `keyset_digest` (committed in
+        # report_data_statement) binds `tee_pubkey` into the hardware quote.
+        # Without these a client cannot verify `signature` — so they ride with
+        # it. Empty when the relay path returned no signature (no caller-binding).
+        "counter": evidence.get("counter"),
+        "tee_pubkey": evidence.get("tee_pubkey"),
+        "keyset": evidence.get("keyset"),
+        "keyset_digest": evidence.get("keyset_digest"),
+        "signature_input": evidence.get("signature_input"),
     }
     if evidence.get("tee") == "tdx":
         envelope["quote"] = evidence.get("quote")
