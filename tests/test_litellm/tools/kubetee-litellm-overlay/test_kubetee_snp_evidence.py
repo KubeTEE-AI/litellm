@@ -28,7 +28,7 @@ pytestmark = pytest.mark.kubetee_isolated_protocol_fixture
 
 
 def load():
-    for name in ("kubetee_binding", "kubetee_ear"):
+    for name in ("kubetee_binding", "kubetee_ear", "kubetee_proof"):
         spec = importlib.util.spec_from_file_location(name, OVERLAY / f"{name}.py")
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
