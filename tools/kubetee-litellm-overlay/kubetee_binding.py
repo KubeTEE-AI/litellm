@@ -215,27 +215,65 @@ def report_data_v2(pkix_pubkey: bytes, nonce: bytes, context: str) -> bytes:
 
 @dataclass(frozen=True, slots=True)
 class BindingV2:
-    """One key-attestation binding: inputs served verbatim for verification."""
+    """One key-attestation binding: the statement + its derived report_data.
+
+    Wire shape matches v1 (`bindings = {version, report_data_statement,
+    keyset_digest}`) — only the statement template differs. The statement is
+    the JCS of `{context, keyset_digest, nonce, pkix_pubkey_b64url, purpose}`
+    (the verifier's `report_data_statement_v2` recomputes it field-by-field
+    and rejects any divergence — anti-downgrade). `nonce` inside the statement
+    is the 64-hex caller nonce string; the derivation hashes its raw 32 bytes.
+    """
 
     version: str
-    key_purpose: str
-    context: str
-    pkix_pubkey_b64: str
-    nonce_b64: str
+    keyset_digest: str
+    statement: str
     report_data: bytes
 
 
-def build_binding_v2(pkix_pubkey: bytes, nonce: bytes, context: str) -> BindingV2:
-    """v2 construction for a per-boot generated key and this request nonce."""
+def report_data_statement_v2(
+    keyset_digest_value: str, nonce: str, pkix_pubkey_b64url: str, context: str
+) -> str:
+    """The JCS statement served verbatim (and re-derived) for a v2 binding."""
+    if not isinstance(keyset_digest_value, str) or not _KEYSET_DIGEST_RE.match(keyset_digest_value):
+        raise ValueError("keyset_digest must match 'sha256:<64 hex>'")
+    if not isinstance(pkix_pubkey_b64url, str) or not pkix_pubkey_b64url:
+        raise ValueError("pkix_pubkey_b64url must be non-empty")
+    if not isinstance(context, str) or not V2_CONTEXT_RE.match(context):
+        raise ValueError("context must be 1..128 printable ASCII characters")
+    statement: Final[Mapping[str, str]] = {
+        "context": context,
+        "keyset_digest": keyset_digest_value,
+        "nonce": normalize_nonce(nonce),
+        "pkix_pubkey_b64url": pkix_pubkey_b64url,
+        "purpose": PURPOSE_V2,
+    }
+    return jcs(statement)
+
+
+def _b64url_nopad(raw: bytes) -> str:
     import base64
 
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def build_binding_v2(
+    pkix_pubkey: bytes, keyset: Mapping[str, JsonTree], nonce: str, context: str
+) -> BindingV2:
+    """v2 construction for a per-boot generated key and this request nonce.
+
+    The statement's `pkix_pubkey_b64url` is URL-safe base64 without padding
+    (verifier contract); the derivation hashes the raw DER bytes.
+    """
+    digest: Final = keyset_digest(keyset)
+    statement: Final = report_data_statement_v2(
+        digest, nonce, _b64url_nopad(pkix_pubkey), context
+    )
     return BindingV2(
         version=VERSION_V2,
-        key_purpose="tls-ephemeral",
-        context=context,
-        pkix_pubkey_b64=base64.b64encode(pkix_pubkey).decode("ascii"),
-        nonce_b64=base64.b64encode(nonce).decode("ascii"),
-        report_data=report_data_v2(pkix_pubkey, nonce, context),
+        keyset_digest=digest,
+        statement=statement,
+        report_data=report_data_v2(pkix_pubkey, bytes.fromhex(normalize_nonce(nonce)), context),
     )
 
 
@@ -266,7 +304,7 @@ def keyset_with_pkix(
         {
             "domain": domain,
             "key_type": "tls-ephemeral",
-            "pkix_pubkey_b64": base64.b64encode(pkix_pubkey).decode("ascii"),
+            "pkix_pubkey_b64url": _b64url_nopad(pkix_pubkey),
             "purpose": PURPOSE_V2,
         },
     )

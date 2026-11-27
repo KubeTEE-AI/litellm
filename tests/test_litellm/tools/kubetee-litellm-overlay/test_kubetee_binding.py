@@ -16,6 +16,7 @@ import base64
 import datetime
 import hashlib
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Final
@@ -39,6 +40,7 @@ V2_PKIX: Final = bytes.fromhex(
     "302a300506032b6570032100" + "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 )
 V2_NONCE: Final = bytes([0xAA] * 32)
+V2_NONCE_HEX: Final = V2_NONCE.hex()  # the statement's nonce field (64 hex)
 V2_CONTEXT: Final = "kubetee-test-context"
 V2_PREIMAGE_TAIL_SHA384: Final = (
     "7c7f82da79e64d00bb228bf3bd7075ea31b938759d00162f1f1d83021f245e24eff25929ec5761309dbbc014119dc4c0"
@@ -300,12 +302,45 @@ def test_v2_rejects_malformed_inputs_fails_closed() -> None:
 
 
 def test_v2_binding_served_inputs_reproduce_report_data() -> None:
-    binding: Final = kb.build_binding_v2(V2_PKIX, V2_NONCE.upper(), V2_CONTEXT)
+    keyset: Final = {
+        "subject": "kubetee.attestation.v1/llm.kubetee.ai",
+        "not_after": "2027-01-01T00:00:00Z",
+        "tls_public_keys": ({"domain": "llm.kubetee.ai", "spki_sha256": "aa" * 32},),
+        "signing_keys": (),
+        "e2ee_keys": (),
+    }
+    binding: Final = kb.build_binding_v2(V2_PKIX, keyset, V2_NONCE_HEX.upper(), V2_CONTEXT)
     assert binding.version == "kubetee.attestation.v2"
-    assert binding.key_purpose == "tls-ephemeral"
-    pkix: Final = base64.b64decode(binding.pkix_pubkey_b64)
-    nonce: Final = base64.b64decode(binding.nonce_b64)
-    assert kb.report_data_v2(pkix, nonce, binding.context) == binding.report_data
+    # The statement is the canonical JCS of the served binding inputs (the
+    # consumer re-derives it field-by-field and rejects any divergence).
+    fields: Final = json.loads(binding.statement)
+    assert fields["purpose"] == "kubetee.attestation.v2"
+    assert fields["context"] == V2_CONTEXT
+    assert fields["nonce"] == V2_NONCE_HEX  # normalized lowercase
+    assert fields["keyset_digest"] == binding.keyset_digest
+    assert fields["pkix_pubkey_b64url"] == base64.urlsafe_b64encode(V2_PKIX).decode().rstrip("=")
+    assert kb.report_data_statement_v2(
+        fields["keyset_digest"], fields["nonce"], fields["pkix_pubkey_b64url"], fields["context"]
+    ) == binding.statement
+    # And the quote commitment derives from exactly those statement fields.
+    padding: Final = "=" * (-len(fields["pkix_pubkey_b64url"]) % 4)
+    pkix: Final = base64.urlsafe_b64decode(fields["pkix_pubkey_b64url"] + padding)
+    nonce: Final = bytes.fromhex(fields["nonce"])
+    assert kb.report_data_v2(pkix, nonce, fields["context"]) == binding.report_data
+
+
+def test_v2_statement_matches_rust_jcs_kat() -> None:
+    """Cross-language KAT: identical literal in the Rust verifier's test."""
+    assert (
+        kb.report_data_statement_v2(
+            "sha256:" + "ab" * 32, "aa" * 32, "AQIDBA", "role=nim-terminator"
+        )
+        == '{"context":"role=nim-terminator",'
+        '"keyset_digest":"sha256:' + "ab" * 32 + '",'
+        '"nonce":"' + "aa" * 32 + '",'
+        '"pkix_pubkey_b64url":"AQIDBA",'
+        '"purpose":"kubetee.attestation.v2"}'
+    )
 
 
 def test_v2_ephemeral_key_possession_signature_verifies_under_bound_key() -> None:

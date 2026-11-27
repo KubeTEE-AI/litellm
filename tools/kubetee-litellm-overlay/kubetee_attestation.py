@@ -1586,19 +1586,40 @@ def _report_data_from_payload(payload: dict[str, Any], nonce: str) -> bytes:
     """Extract the hardware-bound input from the served bindings, not labels.
 
     v1: recompute SHA-256(statement) from the served statement bytes. v2:
-    recompute SHA-384(framed(pkix, nonce, context)) from the served binding
-    inputs — the same derivation the quote's REPORTDATA carries. Either way
-    the caller compares this to the quote and fails closed on mismatch.
+    parse the served statement (the JCS of its binding inputs), re-derive it
+    field-by-field and reject any non-canonical form (anti-downgrade), then
+    recompute SHA-384(framed(pkix, nonce, context)) from those same fields —
+    the derivation the quote's REPORTDATA carries. Either way the caller
+    compares this to the quote and fails closed on mismatch.
     """
     if not isinstance(payload.get("bindings"), dict):
         raise EvidenceError("payload has no keyset/nonce binding statement")
     bindings = payload["bindings"]
     if bindings.get("version") == kubetee_binding.VERSION_V2:
         try:
-            pkix = base64.b64decode(bindings["pkix_pubkey_b64"], validate=True)
-            raw_nonce = base64.b64decode(bindings["nonce_b64"], validate=True)
-            return kubetee_binding.report_data_v2(pkix, raw_nonce, bindings["context"])
-        except (KeyError, TypeError, ValueError) as exc:
+            statement = bindings["report_data_statement"]
+            fields = json.loads(statement)
+            context = fields["context"]
+            digest = fields["keyset_digest"]
+            stmt_nonce = kubetee_binding.normalize_nonce(fields["nonce"])
+            pkix_b64url = fields["pkix_pubkey_b64url"]
+            # Anti-downgrade: the statement must be the canonical JCS of
+            # exactly these fields (the consumer re-derives it the same way).
+            if (
+                kubetee_binding.report_data_statement_v2(
+                    digest, stmt_nonce, pkix_b64url, context
+                )
+                != statement
+            ):
+                raise EvidenceError("v2 report_data_statement is not canonical")
+            padding = "=" * (-len(pkix_b64url) % 4)
+            pkix = base64.urlsafe_b64decode(pkix_b64url + padding)
+            return kubetee_binding.report_data_v2(
+                pkix, bytes.fromhex(stmt_nonce), context
+            )
+        except EvidenceError:
+            raise
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise EvidenceError(f"v2 binding inputs unusable: {exc}")
     statement = bindings.get("report_data_statement")
     if not isinstance(statement, str):
@@ -1664,16 +1685,13 @@ def _attestation_headers(payload: dict[str, Any], nonce: str) -> dict[str, str]:
     else:
         raise EvidenceError(f"unsupported evidence platform: {tee}")
     if V1_MODE or V2_MODE:
+        # Both versions serve the same binding field shape: the statement is
+        # the version's fixed template (v2's is the JCS of
+        # {context, keyset_digest, nonce, pkix_pubkey_b64url, purpose}).
         bindings = payload["bindings"]
-        if V2_MODE:
-            out["X-KubeTEE-Binding-Version"] = bindings["version"]
-            out["X-KubeTEE-Binding-Key-Purpose"] = bindings["key_purpose"]
-            out["X-KubeTEE-Binding-Context"] = bindings["context"]
-            out["X-KubeTEE-Binding-PKIX-Pubkey"] = bindings["pkix_pubkey_b64"]
-            out["X-KubeTEE-Binding-Nonce"] = bindings["nonce_b64"]
-        else:
-            out["X-KubeTEE-Binding-Statement"] = bindings["report_data_statement"]
-            out["X-KubeTEE-Binding-Keyset-Digest"] = bindings["keyset_digest"]
+        out["X-KubeTEE-Binding-Version"] = bindings["version"]
+        out["X-KubeTEE-Binding-Statement"] = bindings["report_data_statement"]
+        out["X-KubeTEE-Binding-Keyset-Digest"] = bindings["keyset_digest"]
     tls_proof = payload.get("tls_possession")
     if tls_proof:
         out["X-KubeTEE-TLS-Signature"] = tls_proof["tls_signature"]
@@ -1811,16 +1829,18 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
     if V2_MODE:
         # Phase 6 zero-operator binding: key generated in-guest per boot; the
         # quote commits its DER SPKI, the caller nonce, and the binding
-        # context. keyset carries the same key (phase6_key_attestation) plus
-        # the KBS-released keyset fields for dual-accepting verifiers.
+        # context. The served keyset carries the same key
+        # (phase6_key_attestation) alongside the TLS keyset fields, and the
+        # served bindings keep the v1 field shape (version,
+        # report_data_statement, keyset_digest) with the v2 statement inside.
         eph = kubetee_ephemeral.boot_key(_TLS_DOMAIN)
-        binding_v2 = kubetee_binding.build_binding_v2(
-            eph.pkix_pubkey, raw_nonce.encode("ascii"), _V2_CONTEXT
-        )
         keyset = kubetee_binding.keyset_with_pkix(
             kubetee_binding.keyset_from_cert_pem(_read_tls_cert_pem(), _TLS_DOMAIN),
             _TLS_DOMAIN,
             eph.pkix_pubkey,
+        )
+        binding_v2 = kubetee_binding.build_binding_v2(
+            eph.pkix_pubkey, keyset, raw_nonce, _V2_CONTEXT
         )
         binding = None
         report_data = binding_v2.report_data
@@ -1860,10 +1880,8 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
             "spec_version": SPEC_VERSION, "tee_type": TEE_TYPE, "keyset": keyset,
             "bindings": {
                 "version": binding_v2.version,
-                "key_purpose": binding_v2.key_purpose,
-                "context": binding_v2.context,
-                "pkix_pubkey_b64": binding_v2.pkix_pubkey_b64,
-                "nonce_b64": binding_v2.nonce_b64,
+                "report_data_statement": binding_v2.statement,
+                "keyset_digest": binding_v2.keyset_digest,
             },
             "evidence": {
                 "quote": payload["quote"],
