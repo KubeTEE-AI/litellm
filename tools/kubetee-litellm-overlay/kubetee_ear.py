@@ -242,10 +242,18 @@ def agent_policy_claims(rego_text: str) -> Any | None:
 def vm_config() -> dict[str, Any] | None:
     """``evidence.vm_config`` — the composition anchor a verifier diffs.
 
+    Carries ``initdata_toml``: the deployment configuration document exactly as
+    measured into the quote (``host_data``/``MRCONFIGID`` = SHA-384 of its
+    bytes). A verifier recomputes the hash from the served document and checks
+    it against the hardware quote — the deployment configuration (InitData) is
+    sent with the evidence.
+
     This is self-reported composition, not an appraisal. On TDX the verifier
     compares SHA-384(initdata) with MRCONFIGID (spec §5 item 3); on SNP it
     must use the actual runtime's HOST_DATA digest semantics and independently
     derived values. Neither path accepts serving text alone as measurement proof.
+    ``initdata_toml`` (the exact document) makes that check executable on the
+    client: hash the served bytes, compare to the quote field.
     """
     initdata = load_initdata()
     if initdata is None:
@@ -255,6 +263,15 @@ def vm_config() -> dict[str, Any] | None:
         "algorithm": initdata.get("algorithm", "sha384"),
         "version": initdata.get("version", "0.1.0"),
     }
+    # The deployment configuration document itself, VERBATIM — the exact bytes
+    # the firmware hashed at launch. A verifier recomputes SHA-384 of
+    # initdata_toml and checks it against the quote's host_data (SNP, first 32
+    # bytes) / MRCONFIGID (TDX). It is the normative binding input; the parsed
+    # `files` below are a readability aid only. Never re-serialized from the
+    # parsed form.
+    text = load_initdata_text()
+    if text is not None:
+        out["initdata_toml"] = text
     if isinstance(data, dict):
         out["role"] = data.get("role")
         out["files"] = {k: data[k] for k in INITDATA_FILE_KEYS if k in data}
@@ -277,6 +294,12 @@ def vm_config() -> dict[str, Any] | None:
                 return out
             out["host_data"] = hashlib.sha384(text.encode("utf-8")).digest()[:32].hex()
             out["host_data_semantics"] = "kata4initdataSha384Truncated32"
+        else:
+            # TDX: the quote's MRCONFIGID IS SHA-384 of the initdata document
+            # (Kata 4.4) — the same recomputation check, the full 48 bytes.
+            sha = initdata_sha384()
+            if sha is not None:
+                out["mrconfigid"] = sha
     return out
 
 

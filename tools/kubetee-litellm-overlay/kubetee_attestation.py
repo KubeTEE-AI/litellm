@@ -447,6 +447,10 @@ def _normalize_backend_evidence(
             or (raw.get("bindings") or {}).get("report_data_statement")
         ),
         "event_log": raw.get("cc_eventlog") or evidence.get("event_log"),
+        # The backend's deployment configuration document (initdata_toml
+        # inside its vm_config) — relayed verbatim so the client checks
+        # sha384(initdata_toml) == tdinfo.mrconfigid (TDX) on the backend hop.
+        "vm_config": evidence.get("vm_config"),
         "snp": snp,
         "signature": signature,
         # Layer-2 verification material. `signature` (Ed25519 by `tee_pubkey`)
@@ -1787,7 +1791,12 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
             "evidence": {
                 "quote": payload["quote"],
                 "quote_report_data": base64.b64encode(report_data).decode("ascii"),
-                "event_log": payload["cc_eventlog"], "vm_config": kubetee_ear.vm_config(),
+                "event_log": payload["cc_eventlog"],
+                # vm_config carries initdata_toml (the deployment configuration
+                # document, verbatim) so the client recomputes
+                # sha384(initdata_toml) == host_data/MRCONFIGID from the served
+                # bytes — never trust the served digest alone.
+                "vm_config": kubetee_ear.vm_config(),
             },
         })
         if TEE_TYPE == "snp":
