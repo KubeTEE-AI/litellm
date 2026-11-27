@@ -245,8 +245,8 @@ def vm_config() -> dict[str, Any] | None:
     Carries ``initdata_toml``: the deployment configuration document exactly as
     measured into the quote (``host_data``/``MRCONFIGID`` = SHA-384 of its
     bytes). A verifier recomputes the hash from the served document and checks
-    it against the hardware quote — NEAR-parity ("send the deployment
-    configuration (InitData) with the evidence").
+    it against the hardware quote — the deployment configuration (InitData) is
+    sent with the evidence.
 
     This is self-reported composition, not an appraisal. On TDX the verifier
     compares SHA-384(initdata) with MRCONFIGID (spec §5 item 3); on SNP it
@@ -264,11 +264,11 @@ def vm_config() -> dict[str, Any] | None:
         "version": initdata.get("version", "0.1.0"),
     }
     # The deployment configuration document itself, VERBATIM — the exact bytes
-    # the firmware hashed at launch (NEAR-parity: "send the InitData with the
-    # evidence"). A verifier recomputes SHA-384 of initdata_toml and checks it
-    # against the quote's host_data (SNP, first 32 bytes) / MRCONFIGID (TDX).
-    # It is the normative binding input; the parsed `files` below are a
-    # readability aid only. Never re-serialized from the parsed form.
+    # the firmware hashed at launch. A verifier recomputes SHA-384 of
+    # initdata_toml and checks it against the quote's host_data (SNP, first 32
+    # bytes) / MRCONFIGID (TDX). It is the normative binding input; the parsed
+    # `files` below are a readability aid only. Never re-serialized from the
+    # parsed form.
     text = load_initdata_text()
     if text is not None:
         out["initdata_toml"] = text
