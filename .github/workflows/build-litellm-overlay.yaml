@@ -662,13 +662,13 @@ jobs:
           # Modules land in the venv site-packages the proxy runs with.
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
-            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, sitecustomize, kubetee_glm_effort, kubetee_mcp_trust, kubetee_health_latest, redpill_tee; print('verify: import OK')"
+            -c "import kubetee_route_guard, kubetee_attestation, kubetee_binding, kubetee_ear, kubetee_eastwest, kubetee_bootstrap, kubetee_ephemeral, sitecustomize, kubetee_glm_effort, kubetee_mcp_trust, kubetee_health_latest, kubetee_proof, redpill_tee; print('verify: import OK')"
           docker run --rm --entrypoint /app/.venv/bin/python \
             ${REGISTRY}/${IMAGE_NAME}:${TAG} \
             -c "
           from pathlib import Path
           p = Path('/app/.venv/lib/python3.13/site-packages')
-          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'kubetee_ear.py', 'kubetee_eastwest.py', 'kubetee_bootstrap.py', 'sitecustomize.py', 'kubetee_glm_effort.py', 'kubetee_mcp_trust.py', 'kubetee_health_latest.py'):
+          for m in ('kubetee_route_guard.py', 'kubetee_attestation.py', 'kubetee_binding.py', 'kubetee_ear.py', 'kubetee_eastwest.py', 'kubetee_bootstrap.py', 'kubetee_ephemeral.py', 'sitecustomize.py', 'kubetee_glm_effort.py', 'kubetee_mcp_trust.py', 'kubetee_health_latest.py', 'kubetee_proof.py'):
               f = p / m
               assert f.is_file(), f'MISSING {m}'
               print(m, f.stat().st_size, 'bytes')
