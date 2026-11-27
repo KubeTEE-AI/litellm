@@ -87,6 +87,7 @@ from urllib.parse import urlencode
 
 import kubetee_binding
 import kubetee_ear
+import kubetee_ephemeral
 import kubetee_proof
 from litellm.integrations.custom_logger import CustomLogger
 
@@ -95,8 +96,20 @@ SPEC_VERSION = "kubetee.attestation.v1"
 # Construction switch: this gateway uses KUBETEE_ATTESTATION_V1=1 for the
 # published v1 statement. Legacy SHA512(nonce) remains available only for an
 # explicitly configured older consumer, with matching response metadata.
+# KUBETEE_ATTESTATION_V2=1 (Phase 6, the gateway release .10 flip) supersedes
+# v1: the report_data binds a per-boot in-guest generated key instead of the
+# KBS-released keyset, and the possession proof signs the quote-bound value
+# under that key. Default remains v1 until the consumer fleet dual-accepts.
 V1_MODE = os.environ.get("KUBETEE_ATTESTATION_V1", "").strip().lower() in ("1", "true", "yes", "on")
-REPORT_DATA_INPUT = "kubetee.attestation.v1" if V1_MODE else kubetee_binding.LEGACY_REPORT_DATA_INPUT
+V2_MODE = os.environ.get("KUBETEE_ATTESTATION_V2", "").strip().lower() in ("1", "true", "yes", "on")
+if V2_MODE:
+    SPEC_VERSION = "kubetee.attestation.v2"
+REPORT_DATA_INPUT = (
+    "kubetee.attestation.v2" if V2_MODE
+    else "kubetee.attestation.v1" if V1_MODE
+    else kubetee_binding.LEGACY_REPORT_DATA_INPUT
+)
+_V2_CONTEXT = os.environ.get("KUBETEE_V2_CONTEXT", "llm.kubetee.ai/tls-possession")
 
 _NONCE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _AA_BASE = os.environ.get("KUBETEE_AA_BASE", "http://127.0.0.1:8006")
@@ -219,6 +232,12 @@ def _tls_possession_proof(nonce: str) -> dict | None:
         }
     except Exception:
         return None
+
+
+def _read_tls_cert_pem() -> bytes:
+    """The TLS chain PEM from the standard serving-cert path."""
+    with open(_TLS_CERT_PATH, "rb") as f:
+        return f.read()
 
 
 def _binding_bundle(
@@ -1564,10 +1583,24 @@ def _hardware_evidence(evidence: Any, report_data: bytes) -> dict[str, Any]:
 
 
 def _report_data_from_payload(payload: dict[str, Any], nonce: str) -> bytes:
-    """Extract the hardware-bound input from the v1 response, not labels."""
+    """Extract the hardware-bound input from the served bindings, not labels.
+
+    v1: recompute SHA-256(statement) from the served statement bytes. v2:
+    recompute SHA-384(framed(pkix, nonce, context)) from the served binding
+    inputs — the same derivation the quote's REPORTDATA carries. Either way
+    the caller compares this to the quote and fails closed on mismatch.
+    """
     if not isinstance(payload.get("bindings"), dict):
-        raise EvidenceError("v1 payload has no keyset/nonce binding statement")
-    statement = payload["bindings"].get("report_data_statement")
+        raise EvidenceError("payload has no keyset/nonce binding statement")
+    bindings = payload["bindings"]
+    if bindings.get("version") == kubetee_binding.VERSION_V2:
+        try:
+            pkix = base64.b64decode(bindings["pkix_pubkey_b64"], validate=True)
+            raw_nonce = base64.b64decode(bindings["nonce_b64"], validate=True)
+            return kubetee_binding.report_data_v2(pkix, raw_nonce, bindings["context"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise EvidenceError(f"v2 binding inputs unusable: {exc}")
+    statement = bindings.get("report_data_statement")
     if not isinstance(statement, str):
         raise EvidenceError("v1 report_data_statement is absent")
     return kubetee_binding.report_data(statement)
@@ -1630,10 +1663,17 @@ def _attestation_headers(payload: dict[str, Any], nonce: str) -> dict[str, str]:
                 out["X-KubeTEE-Attestation-Event-Log"] = payload["cc_eventlog"]
     else:
         raise EvidenceError(f"unsupported evidence platform: {tee}")
-    if V1_MODE:
+    if V1_MODE or V2_MODE:
         bindings = payload["bindings"]
-        out["X-KubeTEE-Binding-Statement"] = bindings["report_data_statement"]
-        out["X-KubeTEE-Binding-Keyset-Digest"] = bindings["keyset_digest"]
+        if V2_MODE:
+            out["X-KubeTEE-Binding-Version"] = bindings["version"]
+            out["X-KubeTEE-Binding-Key-Purpose"] = bindings["key_purpose"]
+            out["X-KubeTEE-Binding-Context"] = bindings["context"]
+            out["X-KubeTEE-Binding-PKIX-Pubkey"] = bindings["pkix_pubkey_b64"]
+            out["X-KubeTEE-Binding-Nonce"] = bindings["nonce_b64"]
+        else:
+            out["X-KubeTEE-Binding-Statement"] = bindings["report_data_statement"]
+            out["X-KubeTEE-Binding-Keyset-Digest"] = bindings["keyset_digest"]
     tls_proof = payload.get("tls_possession")
     if tls_proof:
         out["X-KubeTEE-TLS-Signature"] = tls_proof["tls_signature"]
@@ -1641,6 +1681,11 @@ def _attestation_headers(payload: dict[str, Any], nonce: str) -> dict[str, str]:
         out["X-KubeTEE-TLS-Signature-Input"] = tls_proof["tls_signature_input"]
         if tls_proof.get("tls_cert_sha256"):
             out["X-KubeTEE-TLS-Cert-SHA256"] = tls_proof["tls_cert_sha256"]
+    kp = payload.get("key_possession")
+    if kp:
+        out["X-KubeTEE-Key-Possession-Input"] = kp["input"]
+        out["X-KubeTEE-Key-Possession-Alg"] = kp["alg"]
+        out["X-KubeTEE-Key-Possession-Signature"] = kp["signature_b64"]
     return out
 
 
@@ -1762,7 +1807,24 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
     raw_nonce = _validate_nonce(nonce)
     if raw_nonce is None:
         return None
-    if V1_MODE:
+    binding_v2 = None
+    if V2_MODE:
+        # Phase 6 zero-operator binding: key generated in-guest per boot; the
+        # quote commits its DER SPKI, the caller nonce, and the binding
+        # context. keyset carries the same key (phase6_key_attestation) plus
+        # the KBS-released keyset fields for dual-accepting verifiers.
+        eph = kubetee_ephemeral.boot_key(_TLS_DOMAIN)
+        binding_v2 = kubetee_binding.build_binding_v2(
+            eph.pkix_pubkey, raw_nonce.encode("ascii"), _V2_CONTEXT
+        )
+        keyset = kubetee_binding.keyset_with_pkix(
+            kubetee_binding.keyset_from_cert_pem(_read_tls_cert_pem(), _TLS_DOMAIN),
+            _TLS_DOMAIN,
+            eph.pkix_pubkey,
+        )
+        binding = None
+        report_data = binding_v2.report_data
+    elif V1_MODE:
         keyset, binding = _binding_for_nonce(raw_nonce)
         report_data = binding.report_data
     else:
@@ -1778,11 +1840,44 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
         "tee": TEE_TYPE, "runtime_class": RUNTIME_CLASS,
     }
     tls_proof = _tls_possession_proof(raw_nonce)
-    if tls_proof is not None:
+    if V2_MODE:
+        # v2 possession: sign the quote-bound 64-byte report_data under the
+        # per-boot generated key — the signature verifies only under the SPKI
+        # the quote committed, closing the operator-custody gap. Replaces the
+        # legacy sha256(nonce) serving-key proof entirely in this mode.
+        sig, alg = kubetee_ephemeral.boot_key(_TLS_DOMAIN).possession_signature(report_data)
+        payload["key_possession"] = {
+            "input": "quote_report_data",
+            "alg": alg,
+            "signature_b64": base64.b64encode(sig).decode("ascii"),
+        }
+    elif tls_proof is not None:
         payload["tls_possession"] = tls_proof
     if pod := _pod_name():
         payload["pod"] = pod
-    if V1_MODE:
+    if V2_MODE:
+        payload.update({
+            "spec_version": SPEC_VERSION, "tee_type": TEE_TYPE, "keyset": keyset,
+            "bindings": {
+                "version": binding_v2.version,
+                "key_purpose": binding_v2.key_purpose,
+                "context": binding_v2.context,
+                "pkix_pubkey_b64": binding_v2.pkix_pubkey_b64,
+                "nonce_b64": binding_v2.nonce_b64,
+            },
+            "evidence": {
+                "quote": payload["quote"],
+                "quote_report_data": base64.b64encode(report_data).decode("ascii"),
+                "event_log": payload["cc_eventlog"],
+                "vm_config": kubetee_ear.vm_config(),
+            },
+        })
+        if TEE_TYPE == "snp":
+            payload["evidence"]["snp"] = {"schema": "kubetee.snp-evidence/1", **platform_evidence}
+        appraisal = kubetee_ear.appraisal(kubetee_ear.load_cached_ear())
+        if appraisal is not None:
+            payload["appraisal"] = appraisal
+    elif V1_MODE:
         payload.update({
             "spec_version": SPEC_VERSION, "tee_type": TEE_TYPE, "keyset": keyset,
             "bindings": {"version": binding.version,

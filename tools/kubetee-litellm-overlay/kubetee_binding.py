@@ -31,6 +31,27 @@ from typing import Final, TypeAlias
 PURPOSE: Final = "kubetee.attestation.v1"
 VERSION: Final = "kubetee.attestation.v1"
 
+# kubetee.attestation.v2 — zero-operator trust (Phase 6). The v2 statement
+# binds a per-boot in-guest generated key ("key attestation") instead of the
+# KMS-released serving keyset: REPORTDATA commits the DER SPKI of the generated
+# key, the caller nonce, and a binding context, so one hardware quote proves
+# BOTH measurement and possession of that key's private half. Construction
+# (kubetee-subnet/docs/ATTESTATION-PHASE6-TRUST-BOOTSTRAP.md section 2.1,
+# TranscriptDerivation "ReportDataForKeyWithContext"):
+#
+#     preimage = KEY_ATTESTATION_TAG || framed(pkix_pubkey) || framed(nonce)
+#                || framed(context)
+#     report_data = SHA-384(preimage) || 16 zero bytes (64 total)
+#
+# where framed(x) = len(x).to_be_bytes(8, big-endian) || x. Cross-language
+# conformance: the same vector is pinned in the Rust verifier
+# (kubetee-attestation-verifier tests/phase6_failclosed.rs) and verified
+# byte-identical here (tests pin the same hex).
+PURPOSE_V2: Final = "kubetee.attestation.v2"
+VERSION_V2: Final = "kubetee.attestation.v2"
+KEY_ATTESTATION_TAG: Final = b"kubetee.attestation.v2/ReportDataForKeyWithContext"
+V2_CONTEXT_RE: Final = re.compile(r"^[\x20-\x7e]{1,128}$")
+
 # The legacy construction — the WIRE DEFAULT until the gm-miner switch PR
 # (taostat/gm-miner) is accepted upstream and redeployed. The deployed
 # verifier checks exactly this: SHA-512 over the ASCII nonce hex string
@@ -160,3 +181,93 @@ def keyset_from_cert_pem(cert_pem: bytes, domain: str) -> dict[str, JsonTree]:
         "signing_keys": (),
         "e2ee_keys": (),
     }
+
+
+def _framed(parts: tuple[bytes, ...]) -> bytes:
+    """Length-prefixed concatenation: framed(x) = u64-be(len) || x."""
+    out: Final = bytearray()
+    for part in parts:
+        out += (len(part) & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "big")
+        out += part
+    return bytes(out)
+
+
+def report_data_preimage_v2(pkix_pubkey: bytes, nonce: bytes, context: str) -> bytes:
+    """The exact bytes hashed for a v2 key-attestation binding."""
+    if not isinstance(pkix_pubkey, bytes) or not (32 <= len(pkix_pubkey) <= 512):
+        raise ValueError("pkix_pubkey must be 32..512 DER bytes (SubjectPublicKeyInfo)")
+    if not isinstance(nonce, bytes) or not 16 <= len(nonce) <= 128:
+        raise ValueError("nonce must be 16..128 raw bytes")
+    if not isinstance(context, str) or not V2_CONTEXT_RE.match(context):
+        raise ValueError("context must be 1..128 printable ASCII characters")
+    return KEY_ATTESTATION_TAG + _framed((pkix_pubkey, nonce, context.encode("ascii")))
+
+
+def report_data_v2(pkix_pubkey: bytes, nonce: bytes, context: str) -> bytes:
+    """SHA-384 of the framed preimage, zero-padded to 64 bytes.
+
+    The 32-byte digest head is the quote REPORTDATA (TDX) / report_data
+    (SNP) content a verifier recomputes from the served binding inputs; the
+    16 zero bytes are the padding half of the 64-byte hardware register.
+    """
+    return hashlib.sha384(report_data_preimage_v2(pkix_pubkey, nonce, context)).digest() + b"\x00" * 16
+
+
+@dataclass(frozen=True, slots=True)
+class BindingV2:
+    """One key-attestation binding: inputs served verbatim for verification."""
+
+    version: str
+    key_purpose: str
+    context: str
+    pkix_pubkey_b64: str
+    nonce_b64: str
+    report_data: bytes
+
+
+def build_binding_v2(pkix_pubkey: bytes, nonce: bytes, context: str) -> BindingV2:
+    """v2 construction for a per-boot generated key and this request nonce."""
+    import base64
+
+    return BindingV2(
+        version=VERSION_V2,
+        key_purpose="tls-ephemeral",
+        context=context,
+        pkix_pubkey_b64=base64.b64encode(pkix_pubkey).decode("ascii"),
+        nonce_b64=base64.b64encode(nonce).decode("ascii"),
+        report_data=report_data_v2(pkix_pubkey, nonce, context),
+    )
+
+
+def pkix_from_public_key(public_key: object) -> bytes:
+    """DER SubjectPublicKeyInfo for a cryptography public key object."""
+    from cryptography.hazmat.primitives import serialization
+
+    return public_key.public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+
+def keyset_with_pkix(
+    keyset: dict[str, JsonTree], domain: str, pkix_pubkey: bytes
+) -> dict[str, JsonTree]:
+    """Add the quote-bound generated key to a served keyset.
+
+    The phase6_key_attestation entry commits the exact DER SPKI the v2
+    statement binds (the verifier recomputes the binding from these bytes).
+    The v1 keyset fields are carried unchanged so a dual-accepting verifier
+    can still match the registry record from the same document.
+    """
+    import base64
+
+    out: Final = dict(keyset)
+    out["phase6_key_attestation"] = (
+        {
+            "domain": domain,
+            "key_type": "tls-ephemeral",
+            "pkix_pubkey_b64": base64.b64encode(pkix_pubkey).decode("ascii"),
+            "purpose": PURPOSE_V2,
+        },
+    )
+    return out

@@ -4,10 +4,15 @@ Vectors come from kubetee-subnet/docs/ATTESTATION-SPEC-v1.md section 4
 (published 2026-10-23). They are the partner contract, so these assertions
 are byte-for-byte on purpose: a mismatch means the published contract
 broke, and the spec (not the test) must be revisited with the partners.
+
+The v2 key-attestation vector (below) is shared with the Rust verifier
+(kubetee-attestation-verifier tests/phase6_failclosed.rs) — the SAME hex on
+both sides is the cross-language known-answer test for Phase 6.
 """
 
 from __future__ import annotations
 
+import base64
 import datetime
 import hashlib
 import importlib.util
@@ -28,6 +33,17 @@ assert _SPEC is not None and _SPEC.loader is not None, f"cannot load {_MODULE_PA
 kb: Final = importlib.util.module_from_spec(_SPEC)
 sys.modules["kubetee_binding"] = kb
 _SPEC.loader.exec_module(kb)
+
+# Phase 6 vector — the cross-language KAT (Rust: report_data_v2_vector).
+V2_PKIX: Final = bytes.fromhex(
+    "302a300506032b6570032100" + "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+)
+V2_NONCE: Final = bytes([0xAA] * 32)
+V2_CONTEXT: Final = "kubetee-test-context"
+V2_PREIMAGE_TAIL_SHA384: Final = (
+    "7c7f82da79e64d00bb228bf3bd7075ea31b938759d00162f1f1d83021f245e24eff25929ec5761309dbbc014119dc4c0"
+)
+V2_REPORT_DATA: Final = bytes.fromhex(V2_PREIMAGE_TAIL_SHA384) + b"\x00" * 16
 
 VECTOR_KEYSET: Final = {
     "not_after": "2030-01-01T00:00:00Z",
@@ -241,3 +257,90 @@ def test_legacy_report_data_is_not_the_v1_binding() -> None:
     }
     v1 = kb.build_binding(keyset, nonce).report_data
     assert v1 != kb.legacy_report_data(nonce)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: kubetee.attestation.v2 key-attestation binding
+# ---------------------------------------------------------------------------
+
+
+def test_v2_report_data_matches_rust_kat() -> None:
+    """Cross-language KAT: identical hex in the Rust verifier's test."""
+    assert kb.report_data_v2(V2_PKIX, V2_NONCE, V2_CONTEXT) == V2_REPORT_DATA
+
+
+def test_v2_preimage_framing_is_length_prefixed() -> None:
+    preimage: Final = kb.report_data_preimage_v2(V2_PKIX, V2_NONCE, V2_CONTEXT)
+    assert preimage.startswith(kb.KEY_ATTESTATION_TAG)
+    offset = len(kb.KEY_ATTESTATION_TAG)
+    for part in (V2_PKIX, V2_NONCE, V2_CONTEXT.encode("ascii")):
+        length = int.from_bytes(preimage[offset : offset + 8], "big")
+        assert length == len(part)
+        offset += 8
+        assert preimage[offset : offset + length] == part
+        offset += length
+    assert offset == len(preimage)
+
+
+def test_v2_report_data_is_64_bytes_with_16_zero_padding() -> None:
+    rd: Final = kb.report_data_v2(V2_PKIX, V2_NONCE, V2_CONTEXT)
+    assert len(rd) == 64
+    assert rd[48:] == b"\x00" * 16
+
+
+def test_v2_rejects_malformed_inputs_fails_closed() -> None:
+    with pytest.raises(ValueError):
+        kb.report_data_v2(b"short", V2_NONCE, V2_CONTEXT)
+    with pytest.raises(ValueError):
+        kb.report_data_v2(V2_PKIX, b"short", V2_CONTEXT)
+    with pytest.raises(ValueError):
+        kb.report_data_v2(V2_PKIX, V2_NONCE, "context\nwith-newline")
+    with pytest.raises(ValueError):
+        kb.report_data_v2(V2_PKIX, V2_NONCE, "x" * 129)
+
+
+def test_v2_binding_served_inputs_reproduce_report_data() -> None:
+    binding: Final = kb.build_binding_v2(V2_PKIX, V2_NONCE.upper(), V2_CONTEXT)
+    assert binding.version == "kubetee.attestation.v2"
+    assert binding.key_purpose == "tls-ephemeral"
+    pkix: Final = base64.b64decode(binding.pkix_pubkey_b64)
+    nonce: Final = base64.b64decode(binding.nonce_b64)
+    assert kb.report_data_v2(pkix, nonce, binding.context) == binding.report_data
+
+
+def test_v2_ephemeral_key_possession_signature_verifies_under_bound_key() -> None:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding,
+        PublicFormat,
+        load_der_public_key,
+    )
+
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[4] / "tools" / "kubetee-litellm-overlay" / "kubetee_ephemeral.py"
+    spec = importlib.util.spec_from_file_location("kubetee_ephemeral", path)
+    assert spec is not None and spec.loader is not None
+    ke = importlib.util.module_from_spec(spec)
+    sys.modules["kubetee_ephemeral"] = ke  # dataclasses resolve cls via sys.modules
+    spec.loader.exec_module(ke)
+
+    eph = ke.boot_key("llm.kubetee.ai")
+    # per-boot: same object on repeat access (custody is one key per boot)
+    assert ke.boot_key("llm.kubetee.ai") is eph
+
+    rd = kb.report_data_v2(eph.pkix_pubkey, V2_NONCE, V2_CONTEXT)
+    sig, alg = eph.possession_signature(rd)
+    assert alg == "ecdsa-secp256r1-sha256"
+    # the signature verifies ONLY under the key whose SPKI the quote bound
+    bound_key = load_der_public_key(eph.pkix_pubkey)
+    bound_key.verify(sig, rd, ec.ECDSA(hashes.SHA256()))
+    # and the served public bytes round-trip to the same key
+    assert (
+        bound_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo) == eph.pkix_pubkey
+    )
+    with pytest.raises(Exception):
+        other = ke._generate("llm.kubetee.ai")
+        other_key = load_der_public_key(other.pkix_pubkey)
+        other_key.verify(sig, rd, ec.ECDSA(hashes.SHA256()))
