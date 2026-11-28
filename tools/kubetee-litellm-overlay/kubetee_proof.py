@@ -40,7 +40,7 @@ A per-response signature over a canonical statement commits to:
   * `backend_endpoint` + `issued_at` – context + freshness.
 
 Signed by the GATEWAY serving key (the key committed into the gateway's SNP
-quote via `keyset_digest`; the same key `_tls_possession_proof` uses). The
+quote via `keyset_digest`). The
 BACKEND TEE is vouched by its attached evidence and its own Ed25519 Layer-2
 binding over the quote (which rides along in the evidence). So the chain is:
   gateway-sig(response+nonce+evidence)  ->  evidence(quote)  ->  backend-L2(quote+nonce).

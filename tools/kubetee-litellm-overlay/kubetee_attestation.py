@@ -5,14 +5,15 @@
 #   callbacks: ["dynamic_rate_limiter_v3", "prometheus",
 #               "kubetee_attestation.kubetee_attestation_logger"]
 #
-# The surface (kubetee-subnet/docs/ATTESTATION-SPEC-v1.md is the contract)
+# The surface (kubetee-subnet/docs/ATTESTATION-PHASE6-TRUST-BOOTSTRAP.md is
+# the v2 contract; ATTESTATION-SPEC-v1.md is retired history)
 # ---------------------------------------------------------------------------
-# GET /v1/attestation?nonce=<64 hex> returns the v1 bundle:
+# GET /v1/attestation?nonce=<64 hex> returns the v2 bundle:
 #
 #   {spec_version, tee_type, nonce, report_data_input, pod, quote, cc_eventlog,
-#    keyset, bindings, tls_possession, quote=null, cc_eventlog=null,
-#    evidence: {snp: {schema, attestation_report, cert_chain}, vm_config},
-#    appraisal: {ear_token, ar4si}}
+#    keyset, bindings, key_possession, quote=null, cc_eventlog=null,
+#    evidence: {snp: {schema, attestation_report, cert_chain}, quote_report_data,
+#               vm_config}, appraisal: {ear_token, ar4si}}
 #
 # TDX top-level fields are retained for explicit protocol evolution only:
 # on SNP they are null, and legacy quote-only clients cannot verify it.
@@ -24,35 +25,31 @@
 # X-KubeTEE-Attestation-SNP + the same binding/possession headers on the
 # SAME response, binding proof to the serving replica.
 #
-# The binding — kubetee.attestation.v1 (spec section 4)
+# The binding — kubetee.attestation.v2 (zero-operator trust, Phase 6)
 # ---------------------------------------------------------------------------
-# REPORTDATA (64 B in the quote) = SHA-256(JCS(statement)) || 32 zero bytes
-# for the fixed template:
-#
-#   {"keyset_digest":"sha256:<hex>","nonce":"<64-hex>","purpose":"kubetee.attestation.v1"}
+# REPORTDATA (64 B in the quote) = SHA-384(TAG || framed(pkix_pubkey)
+# || framed(nonce) || framed(context)) || 16 zero bytes, over a per-boot
+# in-guest generated key (kubetee_ephemeral). The served statement is the JCS
+# of {context, keyset_digest, nonce, pkix_pubkey_b64url, purpose} and is
+# re-derived field-by-field by the verifier (anti-downgrade). Possession is an
+# ECDSA P-256 signature over the 64-byte quote-bound report_data under that
+# key — it verifies only under the SPKI the quote committed, so no operator
+# holding the serving TLS key can forge evidence. Legacy v1 (SHA-256 JCS
+# statement over the KBS-released keyset) and the older SHA-512(nonce)
+# construction are HARD-RETIRED: this module always mints v2 and any
+# bindings.version != v2 fails closed.
 #
 # TDX REPORTDATA or SNP report_data. `report_data_input` names the
 # construction on every response. SNP places its native structured evidence
 # under `evidence.snp`; its AMD report is never a TDX quote. Both endpoints
 # reject a TDX quote, wrong-platform evidence, or an invalid signed binding.
 #
-# TLS possession (both surfaces)
-# ---------------------------------------------------------------------------
-# llm.kubetee.ai is TLS PASSTHROUGH — the client's TLS session terminates
-# INSIDE this guest. Both surfaces sign the nonce with this pod's serving
-# key — the cert-manager litellm-tls key (RS256) or, where a per-boot
-# in-guest key is configured via KUBETEE_TLS_KEY, that P-256 key (ES256).
-# The client verifies against the leaf from its OWN TLS session, so the quote
-# is pinned to the exact serving pod. `tls_signature_alg` names the algorithm
-# actually used — gm-miner accepts both and fails closed on any other or on
-# a key-type mismatch.
-#
-# Appraisal (spec section 1 — the EAR/AR4SI results leg)
+# Appraisal (the EAR/AR4SI results leg)
 # ---------------------------------------------------------------------------
 # `appraisal.ear_token` is a Trustee EAR minted ONCE PER BOOT over the RCAR
-# binding (its own hash — see kubetee_ear.py for why it is not the v1
+# binding (its own hash — see kubetee_ear.py for why it is not the v2
 # statement). It appraises this SNP guest's measurements + initdata; the per-request
-# nonce binding is the v1 statement's job. `appraisal.ar4si` exposes the
+# nonce binding is the v2 statement's job. `appraisal.ar4si` exposes the
 # trustworthiness vector plus the partner claim mapping so adapters never
 # parse the JWT by hand. Absent (field omitted) when Trustee is unreachable —
 # the quote and binding stand alone.
@@ -91,24 +88,15 @@ import kubetee_ephemeral
 import kubetee_proof
 from litellm.integrations.custom_logger import CustomLogger
 
-SPEC_VERSION = "kubetee.attestation.v1"
-
-# Construction switch: this gateway uses KUBETEE_ATTESTATION_V1=1 for the
-# published v1 statement. Legacy SHA512(nonce) remains available only for an
-# explicitly configured older consumer, with matching response metadata.
-# KUBETEE_ATTESTATION_V2=1 (Phase 6, the gateway release .10 flip) supersedes
-# v1: the report_data binds a per-boot in-guest generated key instead of the
-# KBS-released keyset, and the possession proof signs the quote-bound value
-# under that key. Default remains v1 until the consumer fleet dual-accepts.
-V1_MODE = os.environ.get("KUBETEE_ATTESTATION_V1", "").strip().lower() in ("1", "true", "yes", "on")
-V2_MODE = os.environ.get("KUBETEE_ATTESTATION_V2", "").strip().lower() in ("1", "true", "yes", "on")
-if V2_MODE:
-    SPEC_VERSION = "kubetee.attestation.v2"
-REPORT_DATA_INPUT = (
-    "kubetee.attestation.v2" if V2_MODE
-    else "kubetee.attestation.v1" if V1_MODE
-    else kubetee_binding.LEGACY_REPORT_DATA_INPUT
-)
+# kubetee.attestation.v2 only (zero-operator trust). The report_data binds a
+# per-boot in-guest generated key and the possession proof signs the
+# quote-bound value under that key. Legacy v1 (KBS-released keyset + SHA-256
+# statement) and the older SHA-512(nonce) construction are hard-retired: the
+# KUBETEE_ATTESTATION_V1 / KUBETEE_ATTESTATION_V2 env toggles are gone and this
+# module unconditionally mints v2. Any served bindings.version != v2 fails
+# closed in the verifier and in report_data_from_payload.
+SPEC_VERSION = "kubetee.attestation.v2"
+REPORT_DATA_INPUT = "kubetee.attestation.v2"
 _V2_CONTEXT = os.environ.get("KUBETEE_V2_CONTEXT", "llm.kubetee.ai/tls-possession")
 
 _NONCE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -157,105 +145,10 @@ def _load_serving_key():
         return None
 
 
-def _tls_possession_proof(nonce: str) -> dict | None:
-    """Sign the nonce with the pod's TLS private key (POSSESSION proof).
-
-    The client verifies the signature against the leaf certificate from ITS
-    OWN TLS session (llm.kubetee.ai terminates inside this guest). A valid
-    signature proves the guest that minted the attestation payload also
-    holds the private key of the cert the client is connected to — binding
-    the quote to the exact serving pod, not just "some gateway replica".
-
-    The algorithm is reported, not assumed: the per-boot key is EC P-256 and
-    signs ES256 (ECDSA over SHA-256, ASN.1 DER signature); a legacy RSA key
-    signs RS256 (RSASSA-PKCS1-v1_5 over SHA-256). Both are one line of code
-    in cryptography and one verify call in gm-miner.
-
-    Returns {"tls_signature": b64, "tls_signature_alg": "ES256"|"RS256",
-             "tls_signature_input": "sha256(nonce)", "tls_cert_sha256": hex}
-    or None if the key is unavailable (best-effort; the quote is still the
-    primary evidence).
-    """
-    try:
-        from cryptography import x509
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import ec, padding, utils
-
-        key = _load_serving_key()
-        if key is None:
-            return None
-
-        if isinstance(key, ec.EllipticCurvePrivateKey):
-            # ES256: ECDSA over SHA-256. JWS/ES256 uses raw r||s, but the
-            # spec's verifier contract (and gm-miner) verify the ASN.1 DER
-            # signature that cryptography produces natively — same bytes
-            # a TLS stack would present. Report "ES256" + DER.
-            der = key.sign(nonce.encode("ascii"), ec.ECDSA(hashes.SHA256()))
-            # Normalize to JOSE raw r||s (64 bytes) for wire-format
-            # predictability; gm-miner decodes DER or raw.
-            r, s = utils.decode_dss_signature(der)
-            size = key.curve.key_size // 8
-            sig = r.to_bytes(size, "big") + s.to_bytes(size, "big")
-            alg = "ES256"
-        else:
-            # Legacy RSA path (a cert-manager-era key). RS256 semantics:
-            # signature over SHA256(nonce).
-            sig = key.sign(
-                nonce.encode("ascii"),
-                padding.PKCS1v15(),
-                hashes.SHA256(),
-            )
-            alg = "RS256"
-
-        cert_fp: str | None = None
-        try:
-            from cryptography.hazmat.primitives.serialization import Encoding
-
-            with open(_TLS_CERT_PATH, "rb") as f:
-                cert_pem = f.read()
-            # tls.crt carries the full chain (leaf + intermediates); the
-            # client fingerprint is of the LEAF (first cert in the file,
-            # and the one its TLS session serves). Hash only that.
-            first_pem = (
-                cert_pem.split(b"-----END CERTIFICATE-----")[0]
-                + b"-----END CERTIFICATE-----"
-            )
-            der = x509.load_pem_x509_certificate(first_pem).public_bytes(Encoding.DER)
-            cert_fp = hashlib.sha256(der).hexdigest()
-        except Exception:
-            pass
-        return {
-            "tls_signature": base64.b64encode(sig).decode("ascii"),
-            "tls_signature_alg": alg,
-            "tls_signature_input": "sha256(nonce)",
-            "tls_cert_sha256": cert_fp,
-        }
-    except Exception:
-        return None
-
-
 def _read_tls_cert_pem() -> bytes:
     """The TLS chain PEM from the standard serving-cert path."""
     with open(_TLS_CERT_PATH, "rb") as f:
         return f.read()
-
-
-def _binding_bundle(
-    nonce: str,
-) -> tuple[dict[str, kubetee_binding.JsonTree], kubetee_binding.Binding] | None:
-    """Served keyset (spec section 5) + v1 binding for this nonce, or None.
-
-    Mandatory at the gateway flip: a response without a binding is a bug, so
-    the caller logs and omits only when the key material is unreadable (the
-    possession proof degrades the same way).
-    """
-    try:
-        with open(_TLS_CERT_PATH, "rb") as f:
-            cert_pem = f.read()
-        keyset = kubetee_binding.keyset_from_cert_pem(cert_pem, _TLS_DOMAIN)
-    except Exception:
-        return None
-    return keyset, kubetee_binding.build_binding(keyset, nonce)
 
 
 async def _aa_get_evidence(runtime_data_b64url: str) -> dict:
@@ -458,9 +351,9 @@ def _normalize_backend_evidence(
         # The exact bytes hashed into report_data. SHARED-epoch path: an EPOCH
         # statement (identical for every caller in the epoch — NOT any caller's
         # nonce). FRESH nonce path: the per-caller nonce-derived statement. Either
-        # way it is served verbatim so a caller verifies
-        # SHA-256(report_data_statement) || 32 zeros against report_data without
-        # re-deriving it.
+        # way it is served verbatim so a caller verifies the v2 report_data
+        # derivation (SHA-384 over the framed statement fields) against
+        # report_data without re-deriving it.
         "report_data_statement": (
             raw.get("report_data_statement")
             or (raw.get("bindings") or {}).get("report_data_statement")
@@ -1585,46 +1478,46 @@ def _hardware_evidence(evidence: Any, report_data: bytes) -> dict[str, Any]:
 def _report_data_from_payload(payload: dict[str, Any], nonce: str) -> bytes:
     """Extract the hardware-bound input from the served bindings, not labels.
 
-    v1: recompute SHA-256(statement) from the served statement bytes. v2:
-    parse the served statement (the JCS of its binding inputs), re-derive it
-    field-by-field and reject any non-canonical form (anti-downgrade), then
-    recompute SHA-384(framed(pkix, nonce, context)) from those same fields —
-    the derivation the quote's REPORTDATA carries. Either way the caller
-    compares this to the quote and fails closed on mismatch.
+    v2 only: parse the served statement (the JCS of its binding inputs),
+    re-derive it field-by-field and reject any non-canonical form
+    (anti-downgrade), then recompute SHA-384(framed(pkix, nonce, context)) from
+    those same fields — the derivation the quote's REPORTDATA carries. The
+    caller compares this to the quote and fails closed on mismatch. A retired
+    v1 statement (or anything else) raises: no fallback derivation exists.
     """
     if not isinstance(payload.get("bindings"), dict):
         raise EvidenceError("payload has no keyset/nonce binding statement")
     bindings = payload["bindings"]
-    if bindings.get("version") == kubetee_binding.VERSION_V2:
-        try:
-            statement = bindings["report_data_statement"]
-            fields = json.loads(statement)
-            context = fields["context"]
-            digest = fields["keyset_digest"]
-            stmt_nonce = kubetee_binding.normalize_nonce(fields["nonce"])
-            pkix_b64url = fields["pkix_pubkey_b64url"]
-            # Anti-downgrade: the statement must be the canonical JCS of
-            # exactly these fields (the consumer re-derives it the same way).
-            if (
-                kubetee_binding.report_data_statement_v2(
-                    digest, stmt_nonce, pkix_b64url, context
-                )
-                != statement
-            ):
-                raise EvidenceError("v2 report_data_statement is not canonical")
-            padding = "=" * (-len(pkix_b64url) % 4)
-            pkix = base64.urlsafe_b64decode(pkix_b64url + padding)
-            return kubetee_binding.report_data_v2(
-                pkix, bytes.fromhex(stmt_nonce), context
+    if bindings.get("version") != kubetee_binding.VERSION_V2:
+        raise EvidenceError(
+            "only kubetee.attestation.v2 bindings are accepted (legacy v1 is retired); "
+            f"got {bindings.get('version')!r}"
+        )
+    try:
+        statement = bindings["report_data_statement"]
+        fields = json.loads(statement)
+        context = fields["context"]
+        digest = fields["keyset_digest"]
+        stmt_nonce = kubetee_binding.normalize_nonce(fields["nonce"])
+        pkix_b64url = fields["pkix_pubkey_b64url"]
+        # Anti-downgrade: the statement must be the canonical JCS of
+        # exactly these fields (the consumer re-derives it the same way).
+        if (
+            kubetee_binding.report_data_statement_v2(
+                digest, stmt_nonce, pkix_b64url, context
             )
-        except EvidenceError:
-            raise
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise EvidenceError(f"v2 binding inputs unusable: {exc}")
-    statement = bindings.get("report_data_statement")
-    if not isinstance(statement, str):
-        raise EvidenceError("v1 report_data_statement is absent")
-    return kubetee_binding.report_data(statement)
+            != statement
+        ):
+            raise EvidenceError("v2 report_data_statement is not canonical")
+        padding = "=" * (-len(pkix_b64url) % 4)
+        pkix = base64.urlsafe_b64decode(pkix_b64url + padding)
+        return kubetee_binding.report_data_v2(
+            pkix, bytes.fromhex(stmt_nonce), context
+        )
+    except EvidenceError:
+        raise
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise EvidenceError(f"v2 binding inputs unusable: {exc}")
 
 
 def _latin1_headers(headers: dict[str, str]) -> dict[str, str]:
@@ -1660,8 +1553,7 @@ def _attestation_headers(payload: dict[str, Any], nonce: str) -> dict[str, str]:
         "X-KubeTEE-Runtime-Class": payload["runtime_class"],
         "X-KubeTEE-Report-Data-Input": payload["report_data_input"],
         "X-KubeTEE-Attestation-Report-Data": base64.b64encode(
-            _report_data_from_payload(payload, nonce) if payload["report_data_input"] == kubetee_binding.PURPOSE
-            else kubetee_binding.legacy_report_data(nonce)
+            _report_data_from_payload(payload, nonce)
         ).decode("ascii"),
     }
     if tee == "snp":
@@ -1684,21 +1576,12 @@ def _attestation_headers(payload: dict[str, Any], nonce: str) -> dict[str, str]:
                 out["X-KubeTEE-Attestation-Event-Log"] = payload["cc_eventlog"]
     else:
         raise EvidenceError(f"unsupported evidence platform: {tee}")
-    if V1_MODE or V2_MODE:
-        # Both versions serve the same binding field shape: the statement is
-        # the version's fixed template (v2's is the JCS of
-        # {context, keyset_digest, nonce, pkix_pubkey_b64url, purpose}).
-        bindings = payload["bindings"]
-        out["X-KubeTEE-Binding-Version"] = bindings["version"]
-        out["X-KubeTEE-Binding-Statement"] = bindings["report_data_statement"]
-        out["X-KubeTEE-Binding-Keyset-Digest"] = bindings["keyset_digest"]
-    tls_proof = payload.get("tls_possession")
-    if tls_proof:
-        out["X-KubeTEE-TLS-Signature"] = tls_proof["tls_signature"]
-        out["X-KubeTEE-TLS-Signature-Alg"] = tls_proof["tls_signature_alg"]
-        out["X-KubeTEE-TLS-Signature-Input"] = tls_proof["tls_signature_input"]
-        if tls_proof.get("tls_cert_sha256"):
-            out["X-KubeTEE-TLS-Cert-SHA256"] = tls_proof["tls_cert_sha256"]
+    # Bindings are mandatory on v2: the statement is the JCS of
+    # {context, keyset_digest, nonce, pkix_pubkey_b64url, purpose}.
+    bindings = payload["bindings"]
+    out["X-KubeTEE-Binding-Version"] = bindings["version"]
+    out["X-KubeTEE-Binding-Statement"] = bindings["report_data_statement"]
+    out["X-KubeTEE-Binding-Keyset-Digest"] = bindings["keyset_digest"]
     kp = payload.get("key_possession")
     if kp:
         out["X-KubeTEE-Key-Possession-Input"] = kp["input"]
@@ -1807,49 +1690,27 @@ async def _proof_headers(
     return out
 
 
-def _binding_for_nonce(nonce: str) -> tuple[dict, kubetee_binding.Binding]:
-    """The served keyset + v1 binding for a nonce, or raise.
-
-    Fail-closed: rather than emit a quote with an unbound REPORTDATA (the
-    flip made the binding mandatory), missing key material raises and the
-    caller maps it to an error response.
-    """
-    bundle = _binding_bundle(nonce)
-    if bundle is None:
-        raise RuntimeError("serving key material unavailable for the v1 binding")
-    return bundle
-
-
 async def get_attestation_payload(nonce: str | None) -> dict | None:
-    """Mint fresh AMD SEV-SNP evidence for this gateway request."""
+    """Mint fresh AMD SEV-SNP v2 evidence for this gateway request.
+
+    Zero-operator trust (v2 only): the key is generated in-guest per boot and
+    the quote commits its DER SPKI, the caller nonce, and the binding context;
+    the possession proof signs the quote-bound report_data under that key. No
+    env toggle and no legacy v1 / SHA-512(nonce) path remains.
+    """
     raw_nonce = _validate_nonce(nonce)
     if raw_nonce is None:
         return None
-    binding_v2 = None
-    if V2_MODE:
-        # Phase 6 zero-operator binding: key generated in-guest per boot; the
-        # quote commits its DER SPKI, the caller nonce, and the binding
-        # context. The served keyset carries the same key
-        # (phase6_key_attestation) alongside the TLS keyset fields, and the
-        # served bindings keep the v1 field shape (version,
-        # report_data_statement, keyset_digest) with the v2 statement inside.
-        eph = kubetee_ephemeral.boot_key(_TLS_DOMAIN)
-        keyset = kubetee_binding.keyset_with_pkix(
-            kubetee_binding.keyset_from_cert_pem(_read_tls_cert_pem(), _TLS_DOMAIN),
-            _TLS_DOMAIN,
-            eph.pkix_pubkey,
-        )
-        binding_v2 = kubetee_binding.build_binding_v2(
-            eph.pkix_pubkey, keyset, raw_nonce, _V2_CONTEXT
-        )
-        binding = None
-        report_data = binding_v2.report_data
-    elif V1_MODE:
-        keyset, binding = _binding_for_nonce(raw_nonce)
-        report_data = binding.report_data
-    else:
-        keyset = binding = None
-        report_data = kubetee_binding.legacy_report_data(raw_nonce)
+    eph = kubetee_ephemeral.boot_key(_TLS_DOMAIN)
+    keyset = kubetee_binding.keyset_with_pkix(
+        kubetee_binding.keyset_from_cert_pem(_read_tls_cert_pem(), _TLS_DOMAIN),
+        _TLS_DOMAIN,
+        eph.pkix_pubkey,
+    )
+    binding_v2 = kubetee_binding.build_binding_v2(
+        eph.pkix_pubkey, keyset, raw_nonce, _V2_CONTEXT
+    )
+    report_data = binding_v2.report_data
     runtime_data = base64.urlsafe_b64encode(report_data).decode("ascii").rstrip("=")
     raw_evidence = await _aa_get_evidence(runtime_data)
     platform_evidence = _hardware_evidence(raw_evidence, report_data)
@@ -1859,66 +1720,41 @@ async def get_attestation_payload(nonce: str | None) -> dict | None:
         "cc_eventlog": platform_evidence.get("cc_eventlog") if TEE_TYPE == "tdx" else None,
         "tee": TEE_TYPE, "runtime_class": RUNTIME_CLASS,
     }
-    tls_proof = _tls_possession_proof(raw_nonce)
-    if V2_MODE:
-        # v2 possession: sign the quote-bound 64-byte report_data under the
-        # per-boot generated key — the signature verifies only under the SPKI
-        # the quote committed, closing the operator-custody gap. Replaces the
-        # legacy sha256(nonce) serving-key proof entirely in this mode.
-        sig, alg = kubetee_ephemeral.boot_key(_TLS_DOMAIN).possession_signature(report_data)
-        payload["key_possession"] = {
-            "input": "quote_report_data",
-            "alg": alg,
-            "signature_b64": base64.b64encode(sig).decode("ascii"),
-        }
-    elif tls_proof is not None:
-        payload["tls_possession"] = tls_proof
+    # v2 possession: sign the quote-bound 64-byte report_data under the
+    # per-boot generated key — the signature verifies only under the SPKI
+    # the quote committed, closing the operator-custody gap. (The legacy
+    # sha256(nonce) serving-key proof is retired.)
+    sig, alg = kubetee_ephemeral.boot_key(_TLS_DOMAIN).possession_signature(report_data)
+    payload["key_possession"] = {
+        "input": "quote_report_data",
+        "alg": alg,
+        "signature_b64": base64.b64encode(sig).decode("ascii"),
+    }
     if pod := _pod_name():
         payload["pod"] = pod
-    if V2_MODE:
-        payload.update({
-            "spec_version": SPEC_VERSION, "tee_type": TEE_TYPE, "keyset": keyset,
-            "bindings": {
-                "version": binding_v2.version,
-                "report_data_statement": binding_v2.statement,
-                "keyset_digest": binding_v2.keyset_digest,
-            },
-            "evidence": {
-                "quote": payload["quote"],
-                "quote_report_data": base64.b64encode(report_data).decode("ascii"),
-                "event_log": payload["cc_eventlog"],
-                "vm_config": kubetee_ear.vm_config(),
-            },
-        })
-        if TEE_TYPE == "snp":
-            payload["evidence"]["snp"] = {"schema": "kubetee.snp-evidence/1", **platform_evidence}
-        appraisal = kubetee_ear.appraisal(kubetee_ear.load_cached_ear())
-        if appraisal is not None:
-            payload["appraisal"] = appraisal
-    elif V1_MODE:
-        payload.update({
-            "spec_version": SPEC_VERSION, "tee_type": TEE_TYPE, "keyset": keyset,
-            "bindings": {"version": binding.version,
-                "report_data_statement": binding.statement,
-                "keyset_digest": binding.keyset_digest},
-            "evidence": {
-                "quote": payload["quote"],
-                "quote_report_data": base64.b64encode(report_data).decode("ascii"),
-                "event_log": payload["cc_eventlog"],
-                # vm_config carries initdata_toml (the deployment configuration
-                # document, verbatim) so the client recomputes
-                # sha384(initdata_toml) == host_data/MRCONFIGID from the served
-                # bytes — never trust the served digest alone.
-                "vm_config": kubetee_ear.vm_config(),
-            },
-        })
-        if TEE_TYPE == "snp":
-            payload["evidence"]["snp"] = {"schema": "kubetee.snp-evidence/1", **platform_evidence}
-        appraisal = kubetee_ear.appraisal(kubetee_ear.load_cached_ear())
-        if appraisal is not None:
-            payload["appraisal"] = appraisal
-    elif TEE_TYPE == "snp":
-        payload["evidence"] = {"snp": {"schema": "kubetee.snp-evidence/1", **platform_evidence}, "quote_report_data": base64.b64encode(report_data).decode("ascii")}
+    payload.update({
+        "spec_version": SPEC_VERSION, "tee_type": TEE_TYPE, "keyset": keyset,
+        "bindings": {
+            "version": binding_v2.version,
+            "report_data_statement": binding_v2.statement,
+            "keyset_digest": binding_v2.keyset_digest,
+        },
+        "evidence": {
+            "quote": payload["quote"],
+            "quote_report_data": base64.b64encode(report_data).decode("ascii"),
+            "event_log": payload["cc_eventlog"],
+            # vm_config carries initdata_toml (the deployment configuration
+            # document, verbatim) so the client recomputes
+            # sha384(initdata_toml) == host_data/MRCONFIGID from the served
+            # bytes — never trust the served digest alone.
+            "vm_config": kubetee_ear.vm_config(),
+        },
+    })
+    if TEE_TYPE == "snp":
+        payload["evidence"]["snp"] = {"schema": "kubetee.snp-evidence/1", **platform_evidence}
+    appraisal = kubetee_ear.appraisal(kubetee_ear.load_cached_ear())
+    if appraisal is not None:
+        payload["appraisal"] = appraisal
     return payload
 
 

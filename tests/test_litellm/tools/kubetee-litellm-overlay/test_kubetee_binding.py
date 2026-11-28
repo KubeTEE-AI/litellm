@@ -1,13 +1,12 @@
-"""Pinned conformance tests for the kubetee.attestation.v1 binding.
+"""Pinned conformance tests for the kubetee.attestation.v2 binding.
 
-Vectors come from kubetee-subnet/docs/ATTESTATION-SPEC-v1.md section 4
-(published 2026-10-23). They are the partner contract, so these assertions
-are byte-for-byte on purpose: a mismatch means the published contract
-broke, and the spec (not the test) must be revisited with the partners.
+v2-only: the legacy kubetee.attestation.v1 construction (SHA-256 JCS
+statement) and the older SHA-512(nonce) derivation were hard-retired and
+removed from the module, so there are no v1 functions left to exercise here.
 
-The v2 key-attestation vector (below) is shared with the Rust verifier
-(kubetee-attestation-verifier tests/phase6_failclosed.rs) — the SAME hex on
-both sides is the cross-language known-answer test for Phase 6.
+The v2 key-attestation vector is shared with the Rust verifier
+(kubetee-attestation-verifier tests/phase6_failclosed.rs) and gm-miner — the
+SAME hex on both sides is the cross-language known-answer test for Phase 6.
 """
 
 from __future__ import annotations
@@ -49,58 +48,20 @@ V2_REPORT_DATA: Final = bytes.fromhex(V2_PREIMAGE_TAIL_SHA384) + b"\x00" * 16
 
 VECTOR_KEYSET: Final = {
     "not_after": "2030-01-01T00:00:00Z",
-    "subject": "kubetee.attestation.v1/test-vector",
+    "subject": "kubetee.attestation.v2/test-vector",
     "tls_public_keys": ({"domain": "llm.kubetee.ai", "spki_sha256": "0" * 64},),
 }
-VECTOR_NONCE: Final = "0123456789abcdef" * 4
-VECTOR_KEYSET_DIGEST: Final = "sha256:693868b5f94f4dad208e8e37fe93ebf1be212f3451462b079dc9ba828b8d33ea"
-VECTOR_STATEMENT: Final = (
-    '{"keyset_digest":"sha256:693868b5f94f4dad208e8e37fe93ebf1be212f3451462b079dc9ba828b8d33ea",'
-    '"nonce":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",'
-    '"purpose":"kubetee.attestation.v1"}'
-)
-VECTOR_STATEMENT_SHA256: Final = "755d36ae1b2ea98e9bdb32350b7356b75515e4ecae711a198ade29ec325b14f4"
+VECTOR_KEYSET_DIGEST: Final = "sha256:7a0aaf897b9ab66db76d186bfcb7f13aaa64f6e7cc3ec6737b07fbaf79be659c"
 
 
 def test_keyset_digest_matches_published_vector() -> None:
     assert kb.keyset_digest(VECTOR_KEYSET) == VECTOR_KEYSET_DIGEST
 
 
-def test_statement_matches_published_vector() -> None:
-    statement: Final = kb.report_data_statement(VECTOR_KEYSET_DIGEST, VECTOR_NONCE)
-    assert statement == VECTOR_STATEMENT
-
-
-def test_statement_sha256_matches_published_vector() -> None:
-    digest: Final = hashlib.sha256(kb.report_data_statement(VECTOR_KEYSET_DIGEST, VECTOR_NONCE).encode("utf-8")).hexdigest()
-    assert digest == VECTOR_STATEMENT_SHA256
-
-
-def test_report_data_is_statement_sha256_zero_padded() -> None:
-    rd: Final = kb.report_data(VECTOR_STATEMENT)
-    assert rd == hashlib.sha256(VECTOR_STATEMENT.encode("utf-8")).digest() + b"\x00" * 32
-    assert len(rd) == 64
-
-
-def test_build_binding_consistent_across_served_statement() -> None:
-    binding: Final = kb.build_binding(VECTOR_KEYSET, VECTOR_NONCE.upper())
-    assert binding.version == "kubetee.attestation.v1"
-    assert binding.keyset_digest == VECTOR_KEYSET_DIGEST
-    assert binding.statement == VECTOR_STATEMENT
-    assert binding.report_data == hashlib.sha256(binding.statement.encode("utf-8")).digest() + b"\x00" * 32
-
-
-def test_statement_template_is_fixed_three_keys_in_jcs_order() -> None:
-    statement: Final = kb.report_data_statement(VECTOR_KEYSET_DIGEST, VECTOR_NONCE)
-    assert statement.startswith('{"keyset_digest":"sha256:')
-    assert statement.endswith('","purpose":"kubetee.attestation.v1"}')
-    assert statement.count('","') == 2
-
-
 def test_jcs_object_key_order_is_canonical() -> None:
     shuffled: Final = {
         "tls_public_keys": ({"spki_sha256": "0" * 64, "domain": "llm.kubetee.ai"},),
-        "subject": "kubetee.attestation.v1/test-vector",
+        "subject": "kubetee.attestation.v2/test-vector",
         "not_after": "2030-01-01T00:00:00Z",
     }
     assert kb.keyset_digest(shuffled) == VECTOR_KEYSET_DIGEST
@@ -118,13 +79,15 @@ def test_spki_tamper_changes_digest() -> None:
 
 
 def test_nonce_changes_report_data() -> None:
-    assert kb.build_binding(VECTOR_KEYSET, "ff" * 32).report_data != kb.build_binding(
-        VECTOR_KEYSET, VECTOR_NONCE
+    assert kb.build_binding_v2(
+        V2_PKIX, VECTOR_KEYSET, "ff" * 32, V2_CONTEXT
+    ).report_data != kb.build_binding_v2(
+        V2_PKIX, VECTOR_KEYSET, V2_NONCE_HEX, V2_CONTEXT
     ).report_data
 
 
 def test_normalize_nonce_lowers_and_strips() -> None:
-    assert kb.normalize_nonce(" " + VECTOR_NONCE.upper() + " ") == VECTOR_NONCE
+    assert kb.normalize_nonce(" " + V2_NONCE_HEX.upper() + " ") == V2_NONCE_HEX
 
 
 def test_normalize_nonce_rejects_malformed() -> None:
@@ -145,13 +108,13 @@ def test_jcs_rejects_numbers_bools_null() -> None:
         raise AssertionError(f"jcs accepted unsupported value: {bad!r}")
 
 
-def test_report_data_statement_rejects_malformed_keyset_digest() -> None:
+def test_report_data_statement_v2_rejects_malformed_keyset_digest() -> None:
     for bad in ("", "sha256:xyz", VECTOR_KEYSET_DIGEST.upper(), "sha512:" + "0" * 64):
         try:
-            kb.report_data_statement(bad, VECTOR_NONCE)
+            kb.report_data_statement_v2(bad, V2_NONCE_HEX, "AQIDBA", V2_CONTEXT)
         except ValueError:
             continue
-        raise AssertionError(f"report_data_statement accepted malformed keyset_digest: {bad!r}")
+        raise AssertionError(f"report_data_statement_v2 accepted malformed keyset_digest: {bad!r}")
 
 
 def _self_signed_cert_pem() -> bytes:
@@ -190,7 +153,7 @@ def test_keyset_from_cert_pem_derives_spki_and_not_after() -> None:
     ).hexdigest()
     assert keyset["tls_public_keys"] == ({"domain": "llm.kubetee.ai", "spki_sha256": spki_sha256},)
     assert keyset["not_after"] == "2030-01-01T00:00:00Z"
-    assert keyset["subject"] == "kubetee.attestation.v1/llm.kubetee.ai"
+    assert keyset["subject"] == "kubetee.attestation.v2/llm.kubetee.ai"
     assert keyset["signing_keys"] == () and keyset["e2ee_keys"] == ()
 
 
@@ -207,62 +170,8 @@ def test_keyset_from_cert_pem_digest_changes_with_domain() -> None:
     )
 
 
-# --- legacy construction (the wire default until the gm-miner switch) -----
-
-# Live production vector (2026-10-24): GET /v1/attestation?nonce=<NONCE> ->
-# quote REPORTDATA (TDREPORT offset 568) == SHA-512(ascii nonce).
-LIVE_LEGACY_NONCE: Final = "3161321c1eea48b1d53e8b89490d8a12c5abafeacc2dee2cada12e80569321e4"
-LIVE_LEGACY_REPORT_DATA: Final = (
-    "840049a67f3c900663bf274975b2419f843c4a01a4c08149f410c3d338a9c6a0"
-    "54667dd1493c4909fb1b42b90e243f68fab96ac574d588e9ea47823bcce54a5b"
-)
-
-
-def test_legacy_report_data_is_sha512_of_ascii_nonce() -> None:
-    # Byte-exact against a LIVE production quote (2026-10-24):
-    # GET /v1/attestation?nonce=<LIVE_NONCE> -> quote REPORTDATA (TDREPORT
-    # offset 568) == SHA-512(ascii nonce), 64 bytes, no padding. This is
-    # also byte-exact with the deployed gm-miner verifier
-    # (Sha512::digest(nonce.as_bytes()) over the nonce it sent).
-    live = kb.legacy_report_data(LIVE_LEGACY_NONCE)
-    assert live == hashlib.sha512(LIVE_LEGACY_NONCE.encode("ascii")).digest()
-    assert live.hex() == LIVE_LEGACY_REPORT_DATA
-    assert len(live) == 64
-
-
-def test_legacy_report_data_normalizes_nonce_case() -> None:
-    # The verifier hashes the nonce in the casing it sent (lowercase hex);
-    # normalize so an upper-cased caller value cannot shift the binding.
-    assert kb.legacy_report_data(LIVE_LEGACY_NONCE.upper()) == kb.legacy_report_data(
-        LIVE_LEGACY_NONCE
-    )
-
-
-def test_legacy_report_data_rejects_malformed_nonce() -> None:
-    with pytest.raises(ValueError, match="nonce"):
-        kb.legacy_report_data("not-a-nonce")
-
-
-def test_legacy_report_data_is_not_the_v1_binding() -> None:
-    # The two constructions must never collide: a v1 quote must not verify
-    # under the legacy check and vice versa (the verifier fails mixed shapes
-    # closed — anti-downgrade).
-    nonce: Final = LIVE_LEGACY_NONCE
-    keyset: Final = {
-        "subject": "kubetee.attestation.v1/llm.kubetee.ai",
-        "not_after": "2030-01-01T00:00:00Z",
-        "tls_public_keys": (
-            {"domain": "llm.kubetee.ai", "spki_sha256": "0" * 64},
-        ),
-        "signing_keys": (),
-        "e2ee_keys": (),
-    }
-    v1 = kb.build_binding(keyset, nonce).report_data
-    assert v1 != kb.legacy_report_data(nonce)
-
-
 # ---------------------------------------------------------------------------
-# Phase 6: kubetee.attestation.v2 key-attestation binding
+# kubetee.attestation.v2 key-attestation binding (the only construction)
 # ---------------------------------------------------------------------------
 
 
@@ -303,7 +212,7 @@ def test_v2_rejects_malformed_inputs_fails_closed() -> None:
 
 def test_v2_binding_served_inputs_reproduce_report_data() -> None:
     keyset: Final = {
-        "subject": "kubetee.attestation.v1/llm.kubetee.ai",
+        "subject": "kubetee.attestation.v2/llm.kubetee.ai",
         "not_after": "2027-01-01T00:00:00Z",
         "tls_public_keys": ({"domain": "llm.kubetee.ai", "spki_sha256": "aa" * 32},),
         "signing_keys": (),
