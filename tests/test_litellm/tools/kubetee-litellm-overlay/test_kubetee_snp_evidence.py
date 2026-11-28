@@ -53,7 +53,17 @@ def load():
     logger = SimpleNamespace(CustomLogger=type("CustomLogger", (), {}))
     sys.modules["litellm.integrations"] = logger
     sys.modules["litellm.integrations.custom_logger"] = logger
-    sys.modules["fastapi"] = SimpleNamespace(HTTPException=RuntimeError, Query=lambda default: default)
+    class _StubHTTPException(Exception):
+        # A faithful fastapi.HTTPException stand-in: it must accept the
+        # (status_code=..., detail=..., headers=...) call shape (the 429 raise
+        # uses it), so RuntimeError cannot be used as the stub here.
+        def __init__(self, status_code: int = 500, detail=None, headers=None):
+            super().__init__(status_code, detail)
+            self.status_code = status_code
+            self.detail = detail
+            self.headers = headers
+
+    sys.modules["fastapi"] = SimpleNamespace(HTTPException=_StubHTTPException, Query=lambda default: default)
     sys.modules["fastapi.responses"] = SimpleNamespace(JSONResponse=JSONResponse)
     spec = importlib.util.spec_from_file_location("kubetee_attestation", OVERLAY / "kubetee_attestation.py")
     module = importlib.util.module_from_spec(spec)
@@ -64,7 +74,6 @@ def load():
 @pytest.fixture
 def gateway(monkeypatch, tmp_path):
     monkeypatch.setenv("KUBETEE_TEE", "snp")
-    monkeypatch.setenv("KUBETEE_ATTESTATION_V1", "1")
     module = load()
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
@@ -112,11 +121,18 @@ def test_stock_coco_json_and_gm_miner_binding_are_preserved(gateway, evidence):
     for field in ("measurement", "host_data", "signature", "current_tcb", "version"):
         assert report[field] == evidence["attestation_report"][field]
     statement = response["bindings"]["report_data_statement"]
-    expected = hashlib.sha256(statement.encode()).digest()
-    assert bytes(response["evidence"]["snp"]["attestation_report"]["report_data"]) == expected + bytes(32)
+    assert response["bindings"]["version"] == "kubetee.attestation.v2"
+    # v2: the report_data is SHA-384(framed(pkix, nonce, context)) || 16 zeros,
+    # re-derived from the served statement fields (not a hash of the statement).
+    expected_rd = gateway._report_data_from_payload(response, "11" * 32)
+    assert len(expected_rd) == 64
+    assert bytes(response["evidence"]["snp"]["attestation_report"]["report_data"]) == expected_rd
     assert response["quote"] is None and response["cc_eventlog"] is None
     assert response["runtime_class"] == "kata-qemu-snp-runtime-rs"
-    assert response["tls_possession"]["tls_signature_alg"] == "ES256"
+    # v2 possession: an ECDSA P-256 signature over the quote-bound report_data.
+    assert response["key_possession"]["alg"] == "ecdsa-secp256r1-sha256"
+    assert response["key_possession"]["input"] == "quote_report_data"
+    assert "tls_possession" not in response  # legacy serving-key proof is retired
     assert response["keyset"]["tls_public_keys"]
 
 
@@ -187,9 +203,8 @@ def test_raw_report_present_and_self_consistent(gateway, evidence):
     assert len(raw) == 1184
     assert snp["raw_report_sha256"] == hashlib.sha256(raw).hexdigest()
     # The signed body's report_data equals the served binding (report rewrites it).
-    statement = response["bindings"]["report_data_statement"]
-    expected = hashlib.sha256(statement.encode()).digest() + bytes(32)
-    assert raw[0x050:0x050 + 64] == expected
+    expected_rd = gateway._report_data_from_payload(response, "33" * 32)
+    assert raw[0x050:0x050 + 64] == expected_rd
 
 
 def test_raw_report_fields_sit_at_amd_offsets(gateway, evidence):

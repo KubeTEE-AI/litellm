@@ -145,15 +145,32 @@ def _install_seams():
         }
 
     async def fake_payload(nonce):
+        # A real v2 binding (the response headers re-derive report_data from the
+        # served statement fields and fail closed on anything but v2).
+        keyset = {
+            "subject": "kubetee.attestation.v2/llm.kubetee.ai",
+            "not_after": "2030-01-01T00:00:00Z",
+            "tls_public_keys": ({"domain": "llm.kubetee.ai", "spki_sha256": "0" * 64},),
+            "signing_keys": (),
+            "e2ee_keys": (),
+        }
+        pkix = bytes.fromhex(
+            "302a300506032b6570032100"
+            + "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        )
+        binding = ka.kubetee_binding.build_binding_v2(
+            pkix, keyset, nonce, "kubetee-test-context"
+        )
         return {
             "tee": "tdx",
             "runtime_class": "rt",
-            "report_data_input": "kubetee.attestation.v1",
+            "report_data_input": "kubetee.attestation.v2",
             "quote": "AAA",
-            "keyset": {},
+            "keyset": keyset,
             "bindings": {
-                "report_data_statement": "{}",
-                "keyset_digest": _KEYSET_DIGEST,
+                "version": binding.version,
+                "report_data_statement": binding.statement,
+                "keyset_digest": binding.keyset_digest,
             },
         }
 
